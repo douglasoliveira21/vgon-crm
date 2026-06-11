@@ -67,10 +67,10 @@ func main() {
 		Format: "[${time}] ${status} - ${method} ${path} ${latency}\n",
 	}))
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     cfg.FrontendURL,
+		AllowOrigins:     "*",
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
 		AllowMethods:     "GET, POST, PUT, DELETE, PATCH, OPTIONS",
-		AllowCredentials: true,
+		AllowCredentials: false,
 	}))
 
 	// Rate limiting
