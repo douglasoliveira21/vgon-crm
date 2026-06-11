@@ -193,7 +193,8 @@ func (e *BotEngine) nodeSendMessage(node BotNode, companyID, conversationID, ins
 	e.wsHub.BroadcastToCompany(companyID, "new_message", map[string]interface{}{
 		"id": msgID, "conversation_id": conversationID,
 		"sender_type": "bot", "content": message, "message_type": "text",
-		"status": "sent", "created_at": time.Now(),
+		"sender_name": "Assistente",
+		"status":      "sent", "created_at": time.Now(),
 	})
 
 	return nil
@@ -232,7 +233,8 @@ func (e *BotEngine) nodeAskQuestion(node BotNode, companyID, conversationID, ins
 	e.wsHub.BroadcastToCompany(companyID, "new_message", map[string]interface{}{
 		"id": msgID, "conversation_id": conversationID,
 		"sender_type": "bot", "content": message, "message_type": "text",
-		"status": "sent", "created_at": time.Now(),
+		"sender_name": "Assistente",
+		"status":      "sent", "created_at": time.Now(),
 	})
 
 	return nil

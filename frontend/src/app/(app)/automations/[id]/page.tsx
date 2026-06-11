@@ -174,6 +174,7 @@ export default function FlowEditorPage() {
 
   const [name, setName] = useState('Nova automação')
   const [description, setDescription] = useState('')
+  const [botName, setBotName] = useState('Assistente')
   const [isActive, setIsActive] = useState(false)
   const [saving, setSaving] = useState(false)
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
@@ -320,9 +321,20 @@ export default function FlowEditorPage() {
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="text-base font-semibold text-gray-900 border-none outline-none bg-transparent w-64"
+            className="text-base font-semibold text-gray-900 border-none outline-none bg-transparent w-48"
             placeholder="Nome da automação..."
           />
+          <span className="text-gray-300">|</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-gray-400">🤖 Bot:</span>
+            <input
+              type="text"
+              value={botName}
+              onChange={(e) => setBotName(e.target.value)}
+              className="text-sm text-purple-600 font-medium border-none outline-none bg-transparent w-32"
+              placeholder="Nome do bot..."
+            />
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-sm cursor-pointer">

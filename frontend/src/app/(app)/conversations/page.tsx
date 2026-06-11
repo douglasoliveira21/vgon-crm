@@ -918,6 +918,18 @@ export default function ConversationsPage() {
                     msg.is_private && 'bg-yellow-50 border-yellow-200 text-yellow-900'
                   )}
                 >
+                  {/* Sender name */}
+                  {msg.sender_type === 'user' && msg.sender_name && (
+                    <p className={`text-xs font-bold mb-0.5 ${msg.sender_type === 'user' ? 'text-white/90' : 'text-gray-700'}`}>
+                      {msg.sender_name}
+                    </p>
+                  )}
+                  {msg.sender_type === 'bot' && (
+                    <p className={`text-xs font-bold mb-0.5 ${msg.sender_type === 'user' ? 'text-white/90' : 'text-purple-600'}`}>
+                      🤖 {msg.sender_name || 'Bot'}
+                    </p>
+                  )}
+
                   {msg.is_private && (
                     <p className="text-xs font-medium text-yellow-600 mb-1">🔒 Nota interna</p>
                   )}
