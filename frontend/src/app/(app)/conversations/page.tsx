@@ -113,7 +113,22 @@ export default function ConversationsPage() {
   useEffect(() => {
     const handleNewMessage = (data: Message) => {
       if (selectedConv && data.conversation_id === selectedConv.id) {
-        setMessages((prev) => [...prev, data])
+        // Avoid duplicates - don't add if it's our own message (already shown optimistically)
+        if (data.sender_type === 'user' && data.sender_id === user?.id) {
+          // Replace temp message with real one
+          setMessages((prev) => {
+            const withoutTemp = prev.filter((m) => !m.id.startsWith('temp-'))
+            const exists = withoutTemp.find((m) => m.id === data.id)
+            if (exists) return withoutTemp
+            return [...withoutTemp, data]
+          })
+        } else {
+          setMessages((prev) => {
+            const exists = prev.find((m) => m.id === data.id)
+            if (exists) return prev
+            return [...prev, data]
+          })
+        }
         scrollToBottom()
       }
       fetchConversations()
@@ -190,15 +205,30 @@ export default function ConversationsPage() {
     e.preventDefault()
     if (!newMessage.trim() || !selectedConv) return
 
+    const tempId = `temp-${Date.now()}`
+    const optimisticMsg: Message = {
+      id: tempId,
+      conversation_id: selectedConv.id,
+      sender_type: 'user',
+      sender_id: user?.id,
+      content: newMessage,
+      message_type: 'text',
+      status: 'sent',
+      is_private: false,
+      created_at: new Date().toISOString(),
+    }
+
+    setMessages((prev) => [...prev, optimisticMsg])
+    setNewMessage('')
+    scrollToBottom()
+
     try {
-      const res = await api.post(`/conversations/${selectedConv.id}/messages/text`, {
-        content: newMessage,
+      await api.post(`/conversations/${selectedConv.id}/messages/text`, {
+        content: optimisticMsg.content,
       })
-      setMessages((prev) => [...prev, res.data])
-      setNewMessage('')
-      scrollToBottom()
     } catch (error) {
       toast.error('Erro ao enviar mensagem')
+      setMessages((prev) => prev.filter((m) => m.id !== tempId))
     }
   }
 

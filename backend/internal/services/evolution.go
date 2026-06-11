@@ -662,7 +662,7 @@ func (s *EvolutionService) getOrCreateConversation(companyID, contactID string, 
 	var conversationID string
 	err := s.db.QueryRow(`
 		SELECT id FROM conversations 
-		WHERE company_id = $1 AND contact_id = $2 AND status IN ('open', 'pending')
+		WHERE company_id = $1 AND contact_id = $2 AND status NOT IN ('resolved')
 		ORDER BY created_at DESC LIMIT 1
 	`, companyID, contactID).Scan(&conversationID)
 	if err == nil {
