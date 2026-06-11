@@ -767,10 +767,18 @@ export default function ConversationsPage() {
           {/* Chat Header */}
           <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
-                <span className="text-primary-700 font-medium">
-                  {selectedConv.contact_name?.charAt(0)?.toUpperCase() || '?'}
-                </span>
+              <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center overflow-hidden">
+                {selectedConv.contact_avatar_url ? (
+                  <img
+                    src={selectedConv.contact_avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${selectedConv.contact_avatar_url}` : selectedConv.contact_avatar_url}
+                    alt="" className="w-full h-full object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                  />
+                ) : (
+                  <span className="text-primary-700 font-medium">
+                    {selectedConv.contact_name?.charAt(0)?.toUpperCase() || '?'}
+                  </span>
+                )}
               </div>
               <div>
                 <h3 className="font-medium text-gray-900">
@@ -1121,10 +1129,18 @@ export default function ConversationsPage() {
       {selectedConv && (
         <div className="w-72 border-l border-gray-200 bg-white p-4 overflow-y-auto hidden xl:block">
           <div className="text-center mb-6">
-            <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-3">
-              <span className="text-primary-700 font-bold text-xl">
-                {selectedConv.contact_name?.charAt(0)?.toUpperCase() || '?'}
-              </span>
+            <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-3 overflow-hidden">
+              {selectedConv.contact_avatar_url ? (
+                <img
+                  src={selectedConv.contact_avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${selectedConv.contact_avatar_url}` : selectedConv.contact_avatar_url}
+                  alt="" className="w-full h-full object-cover"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                />
+              ) : (
+                <span className="text-primary-700 font-bold text-xl">
+                  {selectedConv.contact_name?.charAt(0)?.toUpperCase() || '?'}
+                </span>
+              )}
             </div>
             <h3 className="font-semibold text-gray-900">{selectedConv.contact_name}</h3>
             <p className="text-sm text-gray-500">{selectedConv.contact_phone}</p>
