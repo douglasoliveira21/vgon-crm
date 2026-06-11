@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"time"
+
 	"github.com/evocrm/backend/internal/services"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 func GetConversations(svc *services.Container) fiber.Handler {
@@ -255,24 +258,14 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 		conversationID := c.Params("id")
 
 		var body struct {
-			AudioURL string `json:"audio_url"`
+			AudioURL    string `json:"audio_url"`
+			AudioBase64 string `json:"audio_base64"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
 		}
 
-		req := &services.SendTextMessageRequest{
-			ConversationID: conversationID,
-			Content:        "🎵 Áudio",
-			IsPrivate:      false,
-		}
-
-		msg, err := svc.Message.SaveAndSendMessage(companyID, userID, req)
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-		}
-
-		// Send via WhatsApp
+		// Get contact phone and instance
 		var phone, instanceName string
 		svc.DB.QueryRow(`
 			SELECT co.phone, wi.instance_name
@@ -283,11 +276,34 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 			WHERE c.id = $1
 		`, conversationID).Scan(&phone, &instanceName)
 
+		// Send audio via Evolution API
+		var externalID string
 		if phone != "" && instanceName != "" {
-			svc.Evolution.SendAudioMessage(instanceName, phone, body.AudioURL)
+			if body.AudioBase64 != "" {
+				externalID, _ = svc.Evolution.SendAudioBase64(instanceName, phone, body.AudioBase64)
+			} else if body.AudioURL != "" {
+				externalID, _ = svc.Evolution.SendAudioMessage(instanceName, phone, body.AudioURL)
+			}
 		}
 
-		_ = userID
-		return c.Status(fiber.StatusCreated).JSON(msg)
+		// Save message to DB
+		msgID := uuid.New().String()
+		svc.DB.Exec(`
+			INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, external_id, status)
+			VALUES ($1, $2, $3, 'user', $4, '🎵 Áudio', 'audio', $5, 'sent')
+		`, msgID, conversationID, companyID, userID, externalID)
+
+		// Update conversation
+		svc.DB.Exec(`UPDATE conversations SET last_message_at = NOW(), last_message_preview = '🎵 Áudio', updated_at = NOW() WHERE id = $1`, conversationID)
+
+		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+			"id":              msgID,
+			"conversation_id": conversationID,
+			"sender_type":     "user",
+			"content":         "🎵 Áudio",
+			"message_type":    "audio",
+			"status":          "sent",
+			"created_at":      time.Now(),
+		})
 	}
 }

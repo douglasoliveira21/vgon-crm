@@ -487,6 +487,53 @@ func (s *EvolutionService) SendAudioMessage(instanceName, phone, audioURL string
 	return "", nil
 }
 
+// SendAudioBase64 sends a base64 encoded audio via WhatsApp
+func (s *EvolutionService) SendAudioBase64(instanceName, phone, audioBase64 string) (string, error) {
+	// Remove data URI prefix if present (data:audio/ogg;base64,...)
+	base64Data := audioBase64
+	if len(base64Data) > 30 {
+		parts := splitOnce(base64Data, ",")
+		if len(parts) == 2 {
+			base64Data = parts[1]
+		}
+	}
+
+	payload := map[string]interface{}{
+		"number": phone,
+		"audio":  "data:audio/ogg;base64," + base64Data,
+	}
+
+	body, _ := json.Marshal(payload)
+
+	httpReq, err := http.NewRequest("POST", fmt.Sprintf("%s/message/sendWhatsAppAudio/%s", s.cfg.EvolutionAPIURL, instanceName), bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("apikey", s.cfg.EvolutionAPIKey)
+
+	resp, err := s.client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("failed to send audio: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	var result map[string]interface{}
+	json.Unmarshal(respBody, &result)
+
+	if key, ok := result["key"].(map[string]interface{}); ok {
+		if id, ok := key["id"].(string); ok {
+			return id, nil
+		}
+	}
+
+	log.Printf("[AUDIO] Send audio response: %s", string(respBody))
+	return "", nil
+}
+
 // HandleWebhook processes incoming webhook events from Evolution API
 func (s *EvolutionService) HandleWebhook(instanceName string, event map[string]interface{}) {
 	eventType, _ := event["event"].(string)

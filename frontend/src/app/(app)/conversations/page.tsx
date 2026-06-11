@@ -347,10 +347,33 @@ export default function ConversationsPage() {
     if (!selectedConv || audioBlob.size === 0) return
 
     try {
-      await api.post(`/conversations/${selectedConv.id}/messages/text`, {
-        content: '🎵 Áudio enviado',
-      })
-      toast.success('Áudio enviado')
+      // Convert blob to base64
+      const reader = new FileReader()
+      reader.readAsDataURL(audioBlob)
+      reader.onloadend = async () => {
+        const base64Audio = reader.result as string
+
+        const res = await api.post(`/conversations/${selectedConv!.id}/messages/audio`, {
+          audio_base64: base64Audio,
+        })
+
+        // Show optimistic message
+        const optimisticMsg: Message = {
+          id: `temp-audio-${Date.now()}`,
+          conversation_id: selectedConv!.id,
+          sender_type: 'user',
+          sender_id: user?.id,
+          content: '🎵 Áudio',
+          message_type: 'audio',
+          media_url: base64Audio,
+          status: 'sent',
+          is_private: false,
+          created_at: new Date().toISOString(),
+        }
+        setMessages((prev) => [...prev, optimisticMsg])
+        scrollToBottom()
+        toast.success('Áudio enviado')
+      }
     } catch {
       toast.error('Erro ao enviar áudio')
     }
