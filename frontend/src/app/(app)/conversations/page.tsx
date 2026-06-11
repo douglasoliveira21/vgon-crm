@@ -87,6 +87,7 @@ export default function ConversationsPage() {
   const [newMessage, setNewMessage] = useState('')
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -123,7 +124,7 @@ export default function ConversationsPage() {
     fetchConversations()
     fetchUsers()
     fetchTeams()
-  }, [filter])
+  }, [filter, statusFilter])
 
   useEffect(() => {
     const handleNewMessage = (data: Message) => {
@@ -230,9 +231,30 @@ export default function ConversationsPage() {
   const fetchConversations = async () => {
     try {
       const params: any = {}
+
+      // Tab filter
       if (filter === 'mine') params.assigned_to = user?.id
       if (filter === 'unassigned') params.status = 'open'
       if (filter === 'resolved') params.status = 'resolved'
+
+      // Status dropdown filter overrides
+      if (statusFilter && statusFilter !== 'all_status') {
+        params.status = statusFilter
+      }
+
+      // Default: "Todas" and "Minhas" show only non-resolved
+      if (filter === 'all' && !statusFilter) {
+        params.status = 'open,in_progress,pending'
+      }
+      if (filter === 'mine' && !statusFilter) {
+        params.status = 'open,in_progress,pending'
+      }
+
+      // all_status means no status filter
+      if (statusFilter === 'all_status') {
+        delete params.status
+      }
+
       const response = await api.get('/conversations', { params })
       setConversations(response.data.conversations || [])
     } catch (error) {
@@ -674,7 +696,7 @@ export default function ConversationsPage() {
               className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:border-primary-500 outline-none"
             />
           </div>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             {[
               { id: 'all', label: 'Todas' },
               { id: 'mine', label: 'Minhas' },
@@ -693,6 +715,19 @@ export default function ConversationsPage() {
               </button>
             ))}
           </div>
+          {/* Status filter */}
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="mt-2 w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 bg-gray-50 focus:border-primary-500 outline-none"
+          >
+            <option value="">Filtrar por status...</option>
+            <option value="open">🟢 Abertos</option>
+            <option value="in_progress">🔵 Em atendimento</option>
+            <option value="pending">🟡 Pendentes</option>
+            <option value="resolved">✅ Resolvidos</option>
+            <option value="all_status">📋 Todos os status</option>
+          </select>
         </div>
 
         <div className="flex-1 overflow-y-auto">

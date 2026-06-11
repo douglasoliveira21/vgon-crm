@@ -3,6 +3,7 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/evocrm/backend/internal/models"
@@ -135,9 +136,21 @@ func (s *MessageService) GetConversations(companyID string, status string, assig
 	argIdx := 2
 
 	if status != "" {
-		query += fmt.Sprintf(" AND c.status = $%d", argIdx)
-		args = append(args, status)
-		argIdx++
+		// Support comma-separated status values
+		if strings.Contains(status, ",") {
+			statuses := strings.Split(status, ",")
+			placeholders := []string{}
+			for _, s := range statuses {
+				placeholders = append(placeholders, fmt.Sprintf("$%d", argIdx))
+				args = append(args, strings.TrimSpace(s))
+				argIdx++
+			}
+			query += " AND c.status IN (" + strings.Join(placeholders, ",") + ")"
+		} else {
+			query += fmt.Sprintf(" AND c.status = $%d", argIdx)
+			args = append(args, status)
+			argIdx++
+		}
 	}
 
 	if assignedTo != "" {
