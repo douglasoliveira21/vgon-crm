@@ -51,6 +51,7 @@ const NODE_CATEGORIES = [
     color: 'blue',
     nodes: [
       { type: 'trigger_new_conversation', label: 'Nova conversa', icon: '💬' },
+      { type: 'trigger_inbox_message', label: 'Mensagem na caixa de entrada', icon: '📥' },
       { type: 'trigger_keyword', label: 'Palavra-chave', icon: '🔑' },
       { type: 'trigger_off_hours', label: 'Fora do horário', icon: '🌙' },
       { type: 'trigger_tag_added', label: 'Tag adicionada', icon: '🏷️' },
@@ -447,6 +448,40 @@ function NodeConfigPanel({ node, onUpdate }: { node: Node; onUpdate: (config: Re
   const config = node.data?.config || {}
 
   // --- TRIGGER NODES ---
+  if (nodeType === 'trigger_inbox_message') {
+    return (
+      <div className="space-y-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Caixa de entrada (canal)</label>
+          <select
+            value={config.channel_type || 'any'}
+            onChange={(e) => onUpdate({ channel_type: e.target.value })}
+            className="input text-sm"
+          >
+            <option value="any">Qualquer caixa de entrada</option>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="email">E-mail</option>
+            <option value="webchat">Chat do site</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Instância específica (opcional)</label>
+          <input
+            type="text"
+            value={config.instance_name || ''}
+            onChange={(e) => onUpdate({ instance_name: e.target.value })}
+            className="input text-sm"
+            placeholder="Nome da instância (ex: vgonsuporte)"
+          />
+          <p className="text-xs text-gray-400 mt-1">Deixe vazio para todas as instâncias do canal</p>
+        </div>
+        <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
+          📥 Este fluxo será ativado quando uma mensagem chegar na caixa de entrada selecionada.
+        </div>
+      </div>
+    )
+  }
+
   if (nodeType === 'trigger_keyword') {
     return (
       <div className="space-y-3">
