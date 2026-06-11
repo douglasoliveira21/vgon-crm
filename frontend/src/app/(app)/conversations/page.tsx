@@ -35,6 +35,7 @@ import toast from 'react-hot-toast'
 
 interface Conversation {
   id: string
+  contact_id?: string
   contact_name: string
   contact_phone: string
   contact_avatar_url?: string
@@ -1248,55 +1249,7 @@ export default function ConversationsPage() {
 
       {/* Right Panel - Contact */}
       {selectedConv && (
-        <div className="w-72 border-l border-gray-200 bg-white p-4 overflow-y-auto hidden xl:block">
-          <div className="text-center mb-6">
-            <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-3 overflow-hidden">
-              {selectedConv.contact_avatar_url ? (
-                <img
-                  src={selectedConv.contact_avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${selectedConv.contact_avatar_url}` : selectedConv.contact_avatar_url}
-                  alt="" className="w-full h-full object-cover"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                />
-              ) : (
-                <span className="text-primary-700 font-bold text-xl">
-                  {selectedConv.contact_name?.charAt(0)?.toUpperCase() || '?'}
-                </span>
-              )}
-            </div>
-            <h3 className="font-semibold text-gray-900">{selectedConv.contact_name}</h3>
-            <p className="text-sm text-gray-500">{selectedConv.contact_phone}</p>
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs font-medium text-gray-400 uppercase">Status</label>
-              <p className="text-sm mt-1">
-                <span className={clsx(
-                  'badge',
-                  selectedConv.status === 'open' && 'badge-green',
-                  selectedConv.status === 'pending' && 'badge-yellow',
-                  selectedConv.status === 'resolved' && 'badge-gray',
-                  selectedConv.status === 'in_progress' && 'badge-blue',
-                )}>
-                  {selectedConv.status === 'open' && 'Aberta'}
-                  {selectedConv.status === 'pending' && 'Pendente'}
-                  {selectedConv.status === 'resolved' && 'Resolvida'}
-                  {selectedConv.status === 'in_progress' && 'Em atendimento'}
-                </span>
-              </p>
-            </div>
-            {selectedConv.assigned_to_name && (
-              <div>
-                <label className="text-xs font-medium text-gray-400 uppercase">Atendente</label>
-                <p className="text-sm text-gray-700 mt-1">{selectedConv.assigned_to_name}</p>
-              </div>
-            )}
-            <div>
-              <label className="text-xs font-medium text-gray-400 uppercase">Canal</label>
-              <p className="text-sm text-gray-700 mt-1">{selectedConv.channel_name || 'WhatsApp'}</p>
-            </div>
-          </div>
-        </div>
+        <ContactPanel conversation={selectedConv} />
       )}
 
       {/* Transfer Modal */}
@@ -1493,6 +1446,203 @@ export default function ConversationsPage() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+
+// Contact Panel with Tags and Funnel
+function ContactPanel({ conversation }: { conversation: Conversation }) {
+  const [tags, setTags] = useState<Array<{id: string; name: string; color: string}>>([])
+  const [contactTags, setContactTags] = useState<Array<{id: string; name: string; color: string}>>([])
+  const [funnels, setFunnels] = useState<Array<{id: string; name: string; stages: Array<{id: string; name: string}>}>>([])
+  const [showTagSelect, setShowTagSelect] = useState(false)
+  const [showFunnelSelect, setShowFunnelSelect] = useState(false)
+
+  useEffect(() => {
+    api.get('/tags').then(res => setTags(res.data.tags || [])).catch(() => {})
+    api.get('/funnels').then(res => setFunnels(res.data.funnels || [])).catch(() => {})
+    // Fetch contact tags
+    if (conversation.contact_id) {
+      api.get(`/contacts/${conversation.contact_id}`).then(res => {
+        setContactTags(res.data.tags || [])
+      }).catch(() => {})
+    }
+  }, [conversation.id])
+
+  const addTag = async (tagId: string) => {
+    try {
+      await api.post(`/contacts/${conversation.contact_id}/tags`, { tag_id: tagId })
+      const tag = tags.find(t => t.id === tagId)
+      if (tag) setContactTags(prev => [...prev, tag])
+      toast.success('Tag adicionada')
+      setShowTagSelect(false)
+    } catch {
+      toast.error('Erro ao adicionar tag')
+    }
+  }
+
+  const removeTag = async (tagId: string) => {
+    try {
+      await api.delete(`/contacts/${conversation.contact_id}/tags/${tagId}`)
+      setContactTags(prev => prev.filter(t => t.id !== tagId))
+      toast.success('Tag removida')
+    } catch {}
+  }
+
+  const addToFunnel = async (funnelId: string, stageId: string) => {
+    try {
+      await api.post('/deals', {
+        funnel_id: funnelId,
+        stage_id: stageId,
+        title: `${conversation.contact_name || 'Contato'} - WhatsApp`,
+        value: 0,
+        contact_id: conversation.contact_id || '',
+      })
+      toast.success('Adicionado ao funil!')
+      setShowFunnelSelect(false)
+    } catch {
+      toast.error('Erro ao adicionar ao funil')
+    }
+  }
+
+  return (
+    <div className="w-72 border-l border-gray-200 bg-white p-4 overflow-y-auto hidden xl:block">
+      {/* Avatar and name */}
+      <div className="text-center mb-4">
+        <div className="w-14 h-14 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-2 overflow-hidden">
+          {conversation.contact_avatar_url ? (
+            <img
+              src={conversation.contact_avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${conversation.contact_avatar_url}` : conversation.contact_avatar_url}
+              alt="" className="w-full h-full object-cover"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+            />
+          ) : (
+            <span className="text-primary-700 font-bold text-lg">
+              {conversation.contact_name?.charAt(0)?.toUpperCase() || '?'}
+            </span>
+          )}
+        </div>
+        <h3 className="font-semibold text-gray-900 text-sm">{conversation.contact_name}</h3>
+        <p className="text-xs text-gray-500">{conversation.contact_phone}</p>
+      </div>
+
+      <div className="space-y-4">
+        {/* Status */}
+        <div>
+          <label className="text-xs font-medium text-gray-400 uppercase">Status</label>
+          <p className="text-sm mt-1">
+            <span className={`badge ${
+              conversation.status === 'open' ? 'badge-green' :
+              conversation.status === 'in_progress' ? 'badge-blue' :
+              conversation.status === 'pending' ? 'badge-yellow' : 'badge-gray'
+            }`}>
+              {conversation.status === 'open' && 'Aberta'}
+              {conversation.status === 'pending' && 'Pendente'}
+              {conversation.status === 'resolved' && 'Resolvida'}
+              {conversation.status === 'in_progress' && 'Em atendimento'}
+            </span>
+          </p>
+        </div>
+
+        {conversation.assigned_to_name && (
+          <div>
+            <label className="text-xs font-medium text-gray-400 uppercase">Atendente</label>
+            <p className="text-sm text-gray-700 mt-1">{conversation.assigned_to_name}</p>
+          </div>
+        )}
+
+        <div>
+          <label className="text-xs font-medium text-gray-400 uppercase">Canal</label>
+          <p className="text-sm text-gray-700 mt-1">{conversation.channel_name || 'WhatsApp'}</p>
+        </div>
+
+        {/* Tags */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-medium text-gray-400 uppercase">Tags</label>
+            <button
+              onClick={() => setShowTagSelect(!showTagSelect)}
+              className="text-xs text-primary-600 hover:text-primary-700"
+            >
+              + Adicionar
+            </button>
+          </div>
+
+          {/* Tag selector */}
+          {showTagSelect && (
+            <div className="mb-2 p-2 bg-gray-50 rounded-lg space-y-1 max-h-32 overflow-y-auto">
+              {tags.filter(t => !contactTags.find(ct => ct.id === t.id)).map(tag => (
+                <button
+                  key={tag.id}
+                  onClick={() => addTag(tag.id)}
+                  className="w-full text-left px-2 py-1 text-xs rounded hover:bg-white flex items-center gap-2"
+                >
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: tag.color }} />
+                  {tag.name}
+                </button>
+              ))}
+              {tags.filter(t => !contactTags.find(ct => ct.id === t.id)).length === 0 && (
+                <p className="text-xs text-gray-400 px-2">Todas as tags já adicionadas</p>
+              )}
+            </div>
+          )}
+
+          {/* Contact tags */}
+          <div className="flex flex-wrap gap-1">
+            {contactTags.map(tag => (
+              <span
+                key={tag.id}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                style={{ backgroundColor: tag.color + '20', color: tag.color }}
+              >
+                {tag.name}
+                <button onClick={() => removeTag(tag.id)} className="opacity-50 hover:opacity-100">×</button>
+              </span>
+            ))}
+            {contactTags.length === 0 && !showTagSelect && (
+              <p className="text-xs text-gray-400">Sem tags</p>
+            )}
+          </div>
+        </div>
+
+        {/* Funnel */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-medium text-gray-400 uppercase">Funil de Vendas</label>
+            <button
+              onClick={() => setShowFunnelSelect(!showFunnelSelect)}
+              className="text-xs text-primary-600 hover:text-primary-700"
+            >
+              + Adicionar
+            </button>
+          </div>
+
+          {showFunnelSelect && (
+            <div className="p-2 bg-gray-50 rounded-lg space-y-2 max-h-48 overflow-y-auto">
+              {funnels.map(funnel => (
+                <div key={funnel.id}>
+                  <p className="text-xs font-medium text-gray-700 mb-1">{funnel.name}</p>
+                  <div className="space-y-0.5 pl-2">
+                    {(funnel.stages || []).map(stage => (
+                      <button
+                        key={stage.id}
+                        onClick={() => addToFunnel(funnel.id, stage.id)}
+                        className="w-full text-left px-2 py-1 text-xs rounded hover:bg-white text-gray-600"
+                      >
+                        → {stage.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {funnels.length === 0 && (
+                <p className="text-xs text-gray-400">Nenhum funil criado</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
