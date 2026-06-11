@@ -311,41 +311,10 @@ export default function ConversationsPage() {
     const file = e.target.files?.[0]
     if (!file || !selectedConv) return
 
-    try {
-      // Convert file to base64
-      const reader = new FileReader()
-      reader.readAsDataURL(file)
-      reader.onloadend = async () => {
-        const base64File = reader.result as string
-
-        await api.post(`/conversations/${selectedConv!.id}/messages/media`, {
-          media_base64: base64File,
-          media_type: type,
-          file_name: file.name,
-          caption: '',
-        })
-
-        // Optimistic message
-        const optimisticMsg: Message = {
-          id: `temp-file-${Date.now()}`,
-          conversation_id: selectedConv!.id,
-          sender_type: 'user',
-          sender_id: user?.id,
-          content: file.name,
-          message_type: type,
-          media_url: base64File,
-          media_filename: file.name,
-          status: 'sent',
-          is_private: false,
-          created_at: new Date().toISOString(),
-        }
-        setMessages((prev) => [...prev, optimisticMsg])
-        scrollToBottom()
-        toast.success('Arquivo enviado')
-      }
-    } catch {
-      toast.error('Erro ao enviar arquivo')
-    }
+    // Show preview modal (same as drag/drop)
+    const preview = file.type.startsWith('image/') ? URL.createObjectURL(file) : ''
+    setPendingFile({ file, preview, type })
+    setPendingCaption('')
 
     setShowAttachMenu(false)
     if (fileInputRef.current) fileInputRef.current.value = ''
