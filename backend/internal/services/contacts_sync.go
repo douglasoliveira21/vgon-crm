@@ -120,12 +120,15 @@ func (s *EvolutionService) SyncContacts(instanceName, companyID string) (int, er
 
 		// Create contact
 		contactID := uuid.New().String()
-		s.db.Exec(`
+		_, insertErr := s.db.Exec(`
 			INSERT INTO contacts (id, company_id, name, phone, origin)
 			VALUES ($1, $2, $3, $4, 'whatsapp')
-			ON CONFLICT DO NOTHING
 		`, contactID, companyID, name, phone)
-		synced++
+		if insertErr != nil {
+			log.Printf("[SYNC] Failed to insert contact %s (%s): %v", name, phone, insertErr)
+		} else {
+			synced++
+		}
 	}
 
 	log.Printf("[SYNC] Synced %d contacts for instance %s (skipped %d, total from API: %d)", synced, instanceName, skipped, len(contacts))
