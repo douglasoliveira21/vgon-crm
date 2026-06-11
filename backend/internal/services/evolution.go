@@ -599,23 +599,100 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 
 func (s *EvolutionService) handleMessageUpdate(instanceName string, event map[string]interface{}) {
 	data, _ := event["data"].(map[string]interface{})
-	key, _ := data["key"].(map[string]interface{})
-	messageID, _ := key["id"].(string)
 
-	update, _ := data["update"].(map[string]interface{})
-	status := "sent"
-	if s, ok := update["status"].(string); ok {
-		switch s {
-		case "DELIVERY_ACK":
-			status = "delivered"
-		case "READ":
-			status = "read"
-		case "PLAYED":
-			status = "read"
+	// v2.4.0 format: data may contain key directly or nested
+	var messageID string
+	var status string
+
+	// Try nested format
+	if key, ok := data["key"].(map[string]interface{}); ok {
+		messageID, _ = key["id"].(string)
+	}
+
+	// Try direct format (v2.4.0)
+	if messageID == "" {
+		if id, ok := data["id"].(string); ok {
+			messageID = id
+		}
+		if keyData, ok := data["keyId"].(string); ok {
+			messageID = keyData
 		}
 	}
 
+	if messageID == "" {
+		log.Printf("[WEBHOOK] Message update: no message ID found")
+		return
+	}
+
+	// Determine status
+	if update, ok := data["update"].(map[string]interface{}); ok {
+		if s, ok := update["status"].(string); ok {
+			switch s {
+			case "DELIVERY_ACK", "delivery_ack", "DELIVERED":
+				status = "delivered"
+			case "READ", "read":
+				status = "read"
+			case "PLAYED", "played":
+				status = "read"
+			}
+		}
+		// Also check numeric status (Evolution v2.4.0)
+		if statusNum, ok := update["status"].(float64); ok {
+			switch int(statusNum) {
+			case 2:
+				status = "delivered"
+			case 3:
+				status = "read"
+			case 4:
+				status = "read" // played
+			}
+		}
+	}
+
+	// Also check top level status field
+	if status == "" {
+		if s, ok := data["status"].(string); ok {
+			switch s {
+			case "DELIVERY_ACK", "delivery_ack", "DELIVERED":
+				status = "delivered"
+			case "READ", "read":
+				status = "read"
+			case "PLAYED", "played":
+				status = "read"
+			}
+		}
+		if statusNum, ok := data["status"].(float64); ok {
+			switch int(statusNum) {
+			case 2:
+				status = "delivered"
+			case 3:
+				status = "read"
+			case 4:
+				status = "read"
+			}
+		}
+	}
+
+	if status == "" {
+		return
+	}
+
+	log.Printf("[WEBHOOK] Message status update: %s -> %s", messageID, status)
+
+	// Update in database
 	s.db.Exec("UPDATE messages SET status = $1 WHERE external_id = $2", status, messageID)
+
+	// Broadcast status update via WebSocket
+	var companyID, conversationID string
+	s.db.QueryRow("SELECT company_id, conversation_id FROM messages WHERE external_id = $1", messageID).Scan(&companyID, &conversationID)
+
+	if companyID != "" {
+		s.wsHub.BroadcastToCompany(companyID, websocket.EventMessageStatus, map[string]interface{}{
+			"external_id":     messageID,
+			"conversation_id": conversationID,
+			"status":          status,
+		})
+	}
 }
 
 func (s *EvolutionService) handleQRCodeUpdate(instanceName string, event map[string]interface{}) {

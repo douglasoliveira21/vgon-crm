@@ -141,8 +141,24 @@ export default function ConversationsPage() {
       }
     }
 
+    const handleMessageStatus = (data: { external_id: string; conversation_id: string; status: string }) => {
+      if (selectedConv && data.conversation_id === selectedConv.id) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === data.external_id || (m as any).external_id === data.external_id
+              ? { ...m, status: data.status }
+              : m
+          )
+        )
+      }
+    }
+
     wsService.on('new_message', handleNewMessage)
-    return () => wsService.off('new_message', handleNewMessage)
+    wsService.on('message_status', handleMessageStatus)
+    return () => {
+      wsService.off('new_message', handleNewMessage)
+      wsService.off('message_status', handleMessageStatus)
+    }
   }, [selectedConv])
 
   // Request notification permission
