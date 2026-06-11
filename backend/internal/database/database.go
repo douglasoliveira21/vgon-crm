@@ -42,6 +42,14 @@ func RunMigrations(db *sql.DB) error {
 		return fmt.Errorf("failed to create migrations table: %w", err)
 	}
 
+	// Check if tables already exist (e.g., created via Supabase MCP)
+	var tableCount int
+	db.QueryRow("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'companies'").Scan(&tableCount)
+	if tableCount > 0 {
+		log.Println("✅ Database tables already exist, skipping migrations")
+		return nil
+	}
+
 	// Read migration files
 	migrationsDir := "migrations"
 	entries, err := os.ReadDir(migrationsDir)
