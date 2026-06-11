@@ -257,13 +257,23 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 			`, conversationID).Scan(&phone, &instanceName)
 
 			if err == nil && phone != "" && instanceName != "" {
+				// Get agent name to prefix message
+				var agentName string
+				svc.DB.QueryRow("SELECT name FROM users WHERE id = $1", userID).Scan(&agentName)
+
+				// Build message with agent name prefix
+				messageToSend := body.Content
+				if agentName != "" {
+					messageToSend = "*" + agentName + ":*\n" + body.Content
+				}
+
 				// Get quoted message external_id if replying
 				var quotedExternalID string
 				if body.ReplyToID != nil && *body.ReplyToID != "" {
 					svc.DB.QueryRow("SELECT COALESCE(external_id, '') FROM messages WHERE id = $1", *body.ReplyToID).Scan(&quotedExternalID)
 				}
 
-				externalID, _ := svc.Evolution.SendTextMessageWithQuote(instanceName, phone, body.Content, quotedExternalID)
+				externalID, _ := svc.Evolution.SendTextMessageWithQuote(instanceName, phone, messageToSend, quotedExternalID)
 				if externalID != "" {
 					svc.DB.Exec("UPDATE messages SET external_id = $1 WHERE id = $2", externalID, msg.ID)
 				}
