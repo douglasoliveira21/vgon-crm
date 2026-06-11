@@ -425,3 +425,17 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 		})
 	}
 }
+
+func DeleteMessage(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		msgID := c.Params("msgId")
+
+		_, err := svc.DB.Exec("DELETE FROM messages WHERE id = $1 AND company_id = $2", msgID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete message"})
+		}
+
+		return c.JSON(fiber.Map{"message": "Message deleted"})
+	}
+}

@@ -77,6 +77,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	conversations.Post("/:id/messages/text", SendTextMessage(svc))
 	conversations.Post("/:id/messages/media", SendMediaMessage(svc))
 	conversations.Post("/:id/messages/audio", SendAudioMessage(svc))
+	conversations.Delete("/:id/messages/:msgId", DeleteMessage(svc))
 
 	// Contacts
 	contacts := protected.Group("/contacts")

@@ -105,6 +105,14 @@ export default function ConversationsPage() {
   const [contactTyping, setContactTyping] = useState(false)
   const [contactRecording, setContactRecording] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
+
+  // Attachment preview
+  const [pendingFile, setPendingFile] = useState<{ file: File; preview: string; type: string } | null>(null)
+  const [pendingCaption, setPendingCaption] = useState('')
+
+  // Context menu & reply
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; message: Message } | null>(null)
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null)
@@ -584,7 +592,7 @@ export default function ConversationsPage() {
     }
   }
 
-  // Send file from paste/drop
+  // Send file from paste/drop - show preview first
   const sendFileToChat = (file: File) => {
     if (!selectedConv) return
 
@@ -593,17 +601,26 @@ export default function ConversationsPage() {
     else if (file.type.startsWith('video/')) mediaType = 'video'
     else if (file.type.startsWith('audio/')) mediaType = 'audio'
 
+    const preview = file.type.startsWith('image/') ? URL.createObjectURL(file) : ''
+    setPendingFile({ file, preview, type: mediaType })
+    setPendingCaption('')
+  }
+
+  // Confirm and send the pending file
+  const confirmSendFile = async () => {
+    if (!pendingFile || !selectedConv) return
+
     const reader = new FileReader()
-    reader.readAsDataURL(file)
+    reader.readAsDataURL(pendingFile.file)
     reader.onloadend = async () => {
       const base64File = reader.result as string
 
       try {
         await api.post(`/conversations/${selectedConv!.id}/messages/media`, {
           media_base64: base64File,
-          media_type: mediaType,
-          file_name: file.name,
-          caption: '',
+          media_type: pendingFile.type,
+          file_name: pendingFile.file.name,
+          caption: pendingCaption,
         })
 
         const optimisticMsg: Message = {
@@ -611,20 +628,57 @@ export default function ConversationsPage() {
           conversation_id: selectedConv!.id,
           sender_type: 'user',
           sender_id: user?.id,
-          content: file.name,
-          message_type: mediaType,
+          content: pendingCaption || pendingFile.file.name,
+          message_type: pendingFile.type,
           media_url: base64File,
-          media_filename: file.name,
+          media_filename: pendingFile.file.name,
           status: 'sent',
           is_private: false,
           created_at: new Date().toISOString(),
         }
         setMessages((prev) => [...prev, optimisticMsg])
         scrollToBottom()
-        toast.success(`${mediaType === 'image' ? 'Imagem' : mediaType === 'video' ? 'Vídeo' : 'Arquivo'} enviado`)
+        toast.success('Arquivo enviado')
       } catch {
         toast.error('Erro ao enviar arquivo')
       }
+
+      setPendingFile(null)
+      setPendingCaption('')
+    }
+  }
+
+  const cancelPendingFile = () => {
+    if (pendingFile?.preview) URL.revokeObjectURL(pendingFile.preview)
+    setPendingFile(null)
+    setPendingCaption('')
+  }
+
+  // Context menu (right click on message)
+  const handleMessageContextMenu = (e: React.MouseEvent, msg: Message) => {
+    e.preventDefault()
+    setContextMenu({ x: e.clientX, y: e.clientY, message: msg })
+  }
+
+  const closeContextMenu = () => setContextMenu(null)
+
+  // Reply to message
+  const replyToMessage = (msg: Message) => {
+    setReplyingTo(msg)
+    setContextMenu(null)
+  }
+
+  // Delete message
+  const deleteMessage = async (msg: Message) => {
+    setContextMenu(null)
+    if (!confirm('Apagar esta mensagem?')) return
+
+    try {
+      await api.delete(`/conversations/${msg.conversation_id}/messages/${msg.id}`)
+      setMessages((prev) => prev.filter((m) => m.id !== msg.id))
+      toast.success('Mensagem apagada')
+    } catch {
+      toast.error('Erro ao apagar mensagem')
     }
   }
 
@@ -834,6 +888,7 @@ export default function ConversationsPage() {
                   'message-enter flex',
                   msg.sender_type === 'user' ? 'justify-end' : 'justify-start'
                 )}
+                onContextMenu={(e) => handleMessageContextMenu(e, msg)}
               >
                 <div
                   className={clsx(
@@ -958,7 +1013,22 @@ export default function ConversationsPage() {
           </div>
 
           {/* Message Input */}
-          <div className="bg-white border-t border-gray-200 p-4">
+          <div className="bg-white border-t border-gray-200">
+            {/* Reply bar */}
+            {replyingTo && (
+              <div className="px-4 pt-3 flex items-center gap-3 border-b border-gray-100 pb-2">
+                <div className="flex-1 bg-gray-50 rounded-lg p-2 border-l-4 border-primary-500">
+                  <p className="text-xs font-medium text-primary-600">
+                    {replyingTo.sender_type === 'user' ? 'Você' : replyingTo.sender_name || 'Contato'}
+                  </p>
+                  <p className="text-xs text-gray-500 truncate">{replyingTo.content || '📎 Mídia'}</p>
+                </div>
+                <button onClick={() => setReplyingTo(null)} className="text-gray-400 hover:text-gray-600">
+                  <X size={16} />
+                </button>
+              </div>
+            )}
+            <div className="p-4">
             {isRecording ? (
               <div className="flex items-center gap-4">
                 <button onClick={cancelRecording} className="p-2 text-red-500 hover:bg-red-50 rounded-lg">
@@ -1040,6 +1110,7 @@ export default function ConversationsPage() {
                 </button>
               </form>
             )}
+            </div>
           </div>
         </div>
       ) : (
@@ -1207,6 +1278,87 @@ export default function ConversationsPage() {
                 className="btn-primary flex-1"
               >
                 <Phone size={16} /> Abrir WhatsApp
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Context Menu (right click) */}
+      {contextMenu && (
+        <div
+          className="fixed z-50"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+        >
+          <div className="bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[160px]" onClick={closeContextMenu}>
+            <button
+              onClick={() => replyToMessage(contextMenu.message)}
+              className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+            >
+              ↩️ Responder
+            </button>
+            {contextMenu.message.sender_type === 'user' && (
+              <button
+                onClick={() => deleteMessage(contextMenu.message)}
+                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+              >
+                🗑️ Apagar mensagem
+              </button>
+            )}
+          </div>
+          <div className="fixed inset-0 -z-10" onClick={closeContextMenu} />
+        </div>
+      )}
+
+      {/* File Preview Modal */}
+      {pendingFile && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Enviar arquivo</h3>
+              <button onClick={cancelPendingFile} className="text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Preview */}
+            <div className="mb-4 flex justify-center bg-gray-50 rounded-lg p-4 min-h-[200px] items-center">
+              {pendingFile.type === 'image' && pendingFile.preview ? (
+                <img src={pendingFile.preview} alt="Preview" className="max-h-60 rounded-lg object-contain" />
+              ) : pendingFile.type === 'video' ? (
+                <div className="text-center">
+                  <Video size={48} className="text-purple-400 mx-auto mb-2" />
+                  <p className="text-sm text-gray-600">{pendingFile.file.name}</p>
+                  <p className="text-xs text-gray-400">{(pendingFile.file.size / 1024 / 1024).toFixed(2)} MB</p>
+                </div>
+              ) : (
+                <div className="text-center">
+                  <FileText size={48} className="text-orange-400 mx-auto mb-2" />
+                  <p className="text-sm text-gray-600">{pendingFile.file.name}</p>
+                  <p className="text-xs text-gray-400">{(pendingFile.file.size / 1024 / 1024).toFixed(2)} MB</p>
+                </div>
+              )}
+            </div>
+
+            {/* Caption */}
+            <div className="mb-4">
+              <input
+                type="text"
+                value={pendingCaption}
+                onChange={(e) => setPendingCaption(e.target.value)}
+                placeholder="Adicionar legenda (opcional)..."
+                className="input"
+                onKeyDown={(e) => { if (e.key === 'Enter') confirmSendFile() }}
+                autoFocus
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={cancelPendingFile} className="btn-secondary flex-1">
+                Cancelar
+              </button>
+              <button onClick={confirmSendFile} className="btn-primary flex-1">
+                <Send size={16} /> Enviar
               </button>
             </div>
           </div>
