@@ -38,10 +38,10 @@ func (s *MessageService) GetConversationMessages(conversationID, companyID strin
 		SELECT m.id, m.conversation_id, m.company_id, m.sender_type, m.sender_id,
 			   m.content, m.message_type, m.media_url, m.media_mime_type, m.media_filename,
 			   m.external_id, m.status, m.is_private, m.metadata, m.created_at,
-			   COALESCE(u.name, c.name) as sender_name
+			   COALESCE(u.name, c.name, 'Unknown') as sender_name
 		FROM messages m
-		LEFT JOIN users u ON m.sender_type = 'user' AND m.sender_id = u.id::text
-		LEFT JOIN contacts c ON m.sender_type = 'contact' AND m.sender_id = c.id::text
+		LEFT JOIN users u ON m.sender_type = 'user' AND m.sender_id = u.id
+		LEFT JOIN contacts c ON m.sender_type = 'contact' AND m.sender_id = c.id
 		WHERE m.conversation_id = $1 AND m.company_id = $2
 		ORDER BY m.created_at ASC
 		LIMIT $3 OFFSET $4
