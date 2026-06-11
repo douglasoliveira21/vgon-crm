@@ -210,28 +210,17 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 		conversationID := c.Params("id")
 
 		var body struct {
-			MediaURL  string `json:"media_url"`
-			MediaType string `json:"media_type"`
-			Caption   string `json:"caption"`
-			FileName  string `json:"file_name"`
+			MediaURL    string `json:"media_url"`
+			MediaBase64 string `json:"media_base64"`
+			MediaType   string `json:"media_type"`
+			Caption     string `json:"caption"`
+			FileName    string `json:"file_name"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
 		}
 
-		// Save message to DB
-		req := &services.SendTextMessageRequest{
-			ConversationID: conversationID,
-			Content:        body.Caption,
-			IsPrivate:      false,
-		}
-
-		msg, err := svc.Message.SaveAndSendMessage(companyID, userID, req)
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-		}
-
-		// Send via WhatsApp
+		// Get contact phone and instance
 		var phone, instanceName string
 		svc.DB.QueryRow(`
 			SELECT co.phone, wi.instance_name
@@ -242,12 +231,44 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 			WHERE c.id = $1
 		`, conversationID).Scan(&phone, &instanceName)
 
-		if phone != "" && instanceName != "" {
-			svc.Evolution.SendMediaMessage(instanceName, phone, body.MediaType, body.MediaURL, body.Caption, body.FileName)
+		// Send via WhatsApp
+		var externalID string
+		mediaToSend := body.MediaURL
+		if body.MediaBase64 != "" {
+			mediaToSend = body.MediaBase64
 		}
 
-		_ = userID
-		return c.Status(fiber.StatusCreated).JSON(msg)
+		if phone != "" && instanceName != "" && mediaToSend != "" {
+			externalID, _ = svc.Evolution.SendMediaMessage(instanceName, phone, body.MediaType, mediaToSend, body.Caption, body.FileName)
+		}
+
+		// Save message to DB
+		msgID := uuid.New().String()
+		content := body.Caption
+		if content == "" {
+			content = body.FileName
+		}
+
+		svc.DB.Exec(`
+			INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, media_filename, external_id, status)
+			VALUES ($1, $2, $3, 'user', $4, $5, $6, $7, $8, 'sent')
+		`, msgID, conversationID, companyID, userID, content, body.MediaType, body.FileName, externalID)
+
+		svc.DB.Exec(`UPDATE conversations SET last_message_at = NOW(), last_message_preview = $1, updated_at = NOW() WHERE id = $2`,
+			"📎 "+body.FileName, conversationID)
+
+		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+			"id":              msgID,
+			"conversation_id": conversationID,
+			"sender_type":     "user",
+			"content":         content,
+			"message_type":    body.MediaType,
+			"media_filename":  body.FileName,
+			"status":          "sent",
+			"created_at":      time.Now(),
+		})
+	}
+}
 	}
 }
 
