@@ -232,15 +232,9 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 			WHERE c.id = $1
 		`, conversationID).Scan(&phone, &instanceName)
 
-		// Send via WhatsApp
-		var externalID string
-		mediaToSend := body.MediaURL
-		if body.MediaBase64 != "" {
-			mediaToSend = body.MediaBase64
-		}
-
-		// Save file to disk
+		// Save file to disk and send via WhatsApp
 		var savedFileName string
+		var externalID string
 		if body.MediaBase64 != "" {
 			ext := services.GetExtensionFromBase64(body.MediaBase64)
 			if ext == "" {
@@ -259,8 +253,12 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 			}
 		}
 
-		if phone != "" && instanceName != "" && mediaToSend != "" {
-			externalID, _ = svc.Evolution.SendMediaMessage(instanceName, phone, body.MediaType, mediaToSend, body.Caption, body.FileName)
+		if phone != "" && instanceName != "" && savedFileName != "" {
+			// Send using public URL of the saved file
+			publicURL := svc.Config.EvolutionWebhookURL
+			baseURL := strings.TrimSuffix(publicURL, "/api/webhooks/evolution")
+			mediaPublicURL := baseURL + "/uploads/" + savedFileName
+			externalID, _ = svc.Evolution.SendMediaMessage(instanceName, phone, body.MediaType, mediaPublicURL, body.Caption, body.FileName)
 		}
 
 		// Save message to DB with local file URL
@@ -331,14 +329,15 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 			WHERE c.id = $1
 		`, conversationID).Scan(&phone, &instanceName)
 
-		// Send audio via Evolution API
+		// Send audio via Evolution API using the public URL of the saved file
 		var externalID string
-		if phone != "" && instanceName != "" {
-			if body.AudioBase64 != "" {
-				externalID, _ = svc.Evolution.SendAudioBase64(instanceName, phone, body.AudioBase64)
-			} else if body.AudioURL != "" {
-				externalID, _ = svc.Evolution.SendAudioMessage(instanceName, phone, body.AudioURL)
-			}
+		if phone != "" && instanceName != "" && savedFileName != "" {
+			publicURL := svc.Config.EvolutionWebhookURL
+			// Build public URL from the backend domain
+			// Extract base URL (remove /api/webhooks/evolution)
+			baseURL := strings.TrimSuffix(publicURL, "/api/webhooks/evolution")
+			audioPublicURL := baseURL + "/uploads/" + savedFileName
+			externalID, _ = svc.Evolution.SendAudioMessage(instanceName, phone, audioPublicURL)
 		}
 
 		// Save message to DB with local file URL
