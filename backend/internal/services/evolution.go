@@ -53,6 +53,7 @@ type EvolutionCreateResponse struct {
 		Code   string `json:"code"`
 		Base64 string `json:"base64"`
 	} `json:"qrcode"`
+	Settings map[string]interface{} `json:"settings"`
 }
 
 // CreateInstance creates a new WhatsApp instance via Evolution API
@@ -102,9 +103,45 @@ func (s *EvolutionService) CreateInstance(req *CreateInstanceRequest) (*models.W
 		return nil, fmt.Errorf("Evolution API error (status %d): %s", resp.StatusCode, string(respBody))
 	}
 
-	var evoResp EvolutionCreateResponse
-	if err := json.Unmarshal(respBody, &evoResp); err != nil {
+	// Parse response flexibly (Evolution API v2.x format varies)
+	var rawResp map[string]interface{}
+	if err := json.Unmarshal(respBody, &rawResp); err != nil {
 		return nil, fmt.Errorf("failed to parse Evolution API response: %w", err)
+	}
+
+	// Extract instance info
+	var instanceIDValue string
+	var qrcodeBase64 string
+	var token string
+
+	if inst, ok := rawResp["instance"].(map[string]interface{}); ok {
+		if id, ok := inst["instanceId"].(string); ok {
+			instanceIDValue = id
+		}
+	}
+
+	if qr, ok := rawResp["qrcode"].(map[string]interface{}); ok {
+		if b64, ok := qr["base64"].(string); ok {
+			qrcodeBase64 = b64
+		}
+	}
+
+	if hash, ok := rawResp["hash"].(map[string]interface{}); ok {
+		if apiKey, ok := hash["apikey"].(string); ok {
+			token = apiKey
+		}
+	}
+
+	// Also check top-level fields (v2.4.0 format)
+	if qrcodeBase64 == "" {
+		if b64, ok := rawResp["base64"].(string); ok {
+			qrcodeBase64 = b64
+		}
+	}
+	if token == "" {
+		if t, ok := rawResp["token"].(string); ok {
+			token = t
+		}
 	}
 
 	// Create channel
@@ -120,16 +157,11 @@ func (s *EvolutionService) CreateInstance(req *CreateInstanceRequest) (*models.W
 	// Save instance to database
 	instanceID := uuid.New().String()
 	webhookURL := fmt.Sprintf("%s/%s", s.cfg.EvolutionWebhookURL, req.InstanceName)
-	
-	var token string
-	if apiKey, ok := evoResp.Hash["apikey"]; ok {
-		token = apiKey
-	}
 
 	_, err = s.db.Exec(`
 		INSERT INTO whatsapp_instances (id, company_id, channel_id, instance_name, instance_id, token, status, qrcode, webhook_url)
 		VALUES ($1, $2, $3, $4, $5, $6, 'qr_code', $7, $8)
-	`, instanceID, req.CompanyID, channelID, req.InstanceName, evoResp.Instance.InstanceID, token, evoResp.QRCode.Base64, webhookURL)
+	`, instanceID, req.CompanyID, channelID, req.InstanceName, instanceIDValue, token, qrcodeBase64, webhookURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save instance: %w", err)
 	}
@@ -139,10 +171,10 @@ func (s *EvolutionService) CreateInstance(req *CreateInstanceRequest) (*models.W
 		CompanyID:    req.CompanyID,
 		ChannelID:    &channelID,
 		InstanceName: req.InstanceName,
-		InstanceID:   &evoResp.Instance.InstanceID,
+		InstanceID:   &instanceIDValue,
 		Token:        &token,
 		Status:       "qr_code",
-		QRCode:       &evoResp.QRCode.Base64,
+		QRCode:       &qrcodeBase64,
 		WebhookURL:   &webhookURL,
 	}
 
