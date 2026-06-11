@@ -409,6 +409,21 @@ func (s *EvolutionService) SendAudioMessage(instanceName, phone, audioURL string
 func (s *EvolutionService) HandleWebhook(instanceName string, event map[string]interface{}) {
 	eventType, _ := event["event"].(string)
 
+	// Evolution API v2.4.0 format detection
+	if eventType == "" {
+		// Try to detect event type from payload structure
+		if _, ok := event["data"].(map[string]interface{}); ok {
+			if _, hasKey := event["event"]; !hasKey {
+				// Check for message structure
+				if _, ok := event["key"]; ok {
+					eventType = "messages.upsert"
+				}
+			}
+		}
+	}
+
+	log.Printf("[WEBHOOK] Processing event '%s' for instance '%s'", eventType, instanceName)
+
 	switch eventType {
 	case "connection.update":
 		s.handleConnectionUpdate(instanceName, event)
@@ -419,7 +434,7 @@ func (s *EvolutionService) HandleWebhook(instanceName string, event map[string]i
 	case "qrcode.updated":
 		s.handleQRCodeUpdate(instanceName, event)
 	default:
-		log.Printf("Unhandled webhook event: %s for instance: %s", eventType, instanceName)
+		log.Printf("[WEBHOOK] Unhandled event: %s for instance: %s", eventType, instanceName)
 	}
 }
 

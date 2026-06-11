@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 
 	"github.com/evocrm/backend/internal/services"
 	"github.com/gofiber/fiber/v2"
@@ -140,12 +141,26 @@ func HandleEvolutionWebhook(svc *services.Container) fiber.Handler {
 
 		var event map[string]interface{}
 		if err := json.Unmarshal(c.Body(), &event); err != nil {
+			log.Printf("[WEBHOOK] Failed to parse payload from %s: %v", instanceName, err)
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid payload"})
 		}
+
+		log.Printf("[WEBHOOK] Received event from instance '%s': %v", instanceName, getEventType(event))
 
 		// Process webhook asynchronously
 		go svc.Evolution.HandleWebhook(instanceName, event)
 
 		return c.JSON(fiber.Map{"status": "ok"})
 	}
+}
+
+func getEventType(event map[string]interface{}) string {
+	if e, ok := event["event"].(string); ok {
+		return e
+	}
+	// v2.4.0 may use different field names
+	for key := range event {
+		return "keys:" + key
+	}
+	return "unknown"
 }
