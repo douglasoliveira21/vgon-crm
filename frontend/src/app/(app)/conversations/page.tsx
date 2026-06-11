@@ -60,6 +60,8 @@ interface Message {
   status: string
   is_private: boolean
   sender_name?: string
+  reply_to_content?: string
+  reply_to_sender?: string
   created_at: string
 }
 
@@ -282,16 +284,21 @@ export default function ConversationsPage() {
       message_type: 'text',
       status: 'sent',
       is_private: false,
+      reply_to_content: replyingTo?.content || undefined,
+      reply_to_sender: replyingTo ? (replyingTo.sender_type === 'user' ? 'Você' : replyingTo.sender_name || 'Contato') : undefined,
       created_at: new Date().toISOString(),
     }
 
     setMessages((prev) => [...prev, optimisticMsg])
+    const msgContent = newMessage
     setNewMessage('')
+    setReplyingTo(null)
     scrollToBottom()
 
     try {
       await api.post(`/conversations/${selectedConv.id}/messages/text`, {
-        content: optimisticMsg.content,
+        content: msgContent,
+        reply_to_id: replyingTo?.id || null,
       })
     } catch (error) {
       toast.error('Erro ao enviar mensagem')
@@ -901,6 +908,22 @@ export default function ConversationsPage() {
                 >
                   {msg.is_private && (
                     <p className="text-xs font-medium text-yellow-600 mb-1">🔒 Nota interna</p>
+                  )}
+
+                  {/* Reply quote */}
+                  {msg.reply_to_content && (
+                    <div className={`mb-2 p-2 rounded-lg border-l-3 ${
+                      msg.sender_type === 'user'
+                        ? 'bg-white/10 border-l-white/50'
+                        : 'bg-gray-100 border-l-primary-400'
+                    }`}>
+                      <p className={`text-xs font-medium ${msg.sender_type === 'user' ? 'text-white/80' : 'text-primary-600'}`}>
+                        {msg.reply_to_sender || 'Contato'}
+                      </p>
+                      <p className={`text-xs truncate ${msg.sender_type === 'user' ? 'text-white/60' : 'text-gray-500'}`}>
+                        {msg.reply_to_content}
+                      </p>
+                    </div>
                   )}
 
                   {msg.message_type === 'image' && msg.media_url && (

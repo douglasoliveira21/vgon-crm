@@ -220,8 +220,9 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 		conversationID := c.Params("id")
 
 		var body struct {
-			Content   string `json:"content"`
-			IsPrivate bool   `json:"is_private"`
+			Content   string  `json:"content"`
+			IsPrivate bool    `json:"is_private"`
+			ReplyToID *string `json:"reply_to_id"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
@@ -261,6 +262,22 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 					svc.DB.Exec("UPDATE messages SET external_id = $1 WHERE id = $2", externalID, msg.ID)
 				}
 			}
+		}
+
+		// Save reply-to info if replying
+		if body.ReplyToID != nil && *body.ReplyToID != "" {
+			var replyContent, replySender string
+			svc.DB.QueryRow(`
+				SELECT COALESCE(m.content, '📎 Mídia'),
+					   CASE WHEN m.sender_type = 'user' THEN COALESCE(u.name, 'Atendente') ELSE COALESCE(c.name, 'Contato') END
+				FROM messages m
+				LEFT JOIN users u ON m.sender_type = 'user' AND m.sender_id = u.id
+				LEFT JOIN contacts c ON m.sender_type = 'contact' AND m.sender_id = c.id
+				WHERE m.id = $1
+			`, *body.ReplyToID).Scan(&replyContent, &replySender)
+
+			svc.DB.Exec("UPDATE messages SET reply_to_id = $1, reply_to_content = $2, reply_to_sender = $3 WHERE id = $4",
+				*body.ReplyToID, replyContent, replySender, msg.ID)
 		}
 
 		return c.Status(fiber.StatusCreated).JSON(msg)

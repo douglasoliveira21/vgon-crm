@@ -103,23 +103,23 @@ type WhatsAppInstance struct {
 
 // Contact represents a customer contact
 type Contact struct {
-	ID           string     `json:"id"`
-	CompanyID    string     `json:"company_id"`
-	Name         *string    `json:"name,omitempty"`
-	Phone        *string    `json:"phone,omitempty"`
-	Email        *string    `json:"email,omitempty"`
-	CompanyName  *string    `json:"company_name,omitempty"`
-	Position     *string    `json:"position,omitempty"`
-	City         *string    `json:"city,omitempty"`
-	State        *string    `json:"state,omitempty"`
-	Origin       *string    `json:"origin,omitempty"`
-	AvatarURL    *string    `json:"avatar_url,omitempty"`
-	Notes        *string    `json:"notes,omitempty"`
-	AssignedTo   *string    `json:"assigned_to,omitempty"`
-	IsOptedOut   bool       `json:"is_opted_out"`
-	Tags         []Tag      `json:"tags,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID          string    `json:"id"`
+	CompanyID   string    `json:"company_id"`
+	Name        *string   `json:"name,omitempty"`
+	Phone       *string   `json:"phone,omitempty"`
+	Email       *string   `json:"email,omitempty"`
+	CompanyName *string   `json:"company_name,omitempty"`
+	Position    *string   `json:"position,omitempty"`
+	City        *string   `json:"city,omitempty"`
+	State       *string   `json:"state,omitempty"`
+	Origin      *string   `json:"origin,omitempty"`
+	AvatarURL   *string   `json:"avatar_url,omitempty"`
+	Notes       *string   `json:"notes,omitempty"`
+	AssignedTo  *string   `json:"assigned_to,omitempty"`
+	IsOptedOut  bool      `json:"is_opted_out"`
+	Tags        []Tag     `json:"tags,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // Tag represents a label/tag
@@ -170,6 +170,8 @@ type Message struct {
 	IsPrivate      bool            `json:"is_private"`
 	Metadata       json.RawMessage `json:"metadata,omitempty"`
 	SenderName     *string         `json:"sender_name,omitempty"`
+	ReplyToContent *string         `json:"reply_to_content,omitempty"`
+	ReplyToSender  *string         `json:"reply_to_sender,omitempty"`
 	CreatedAt      time.Time       `json:"created_at"`
 }
 
@@ -188,38 +190,38 @@ type Funnel struct {
 
 // FunnelStage represents a stage in a funnel
 type FunnelStage struct {
-	ID        string `json:"id"`
-	FunnelID  string `json:"funnel_id"`
-	Name      string `json:"name"`
-	Color     string `json:"color"`
-	Position  int    `json:"position"`
-	IsWon     bool   `json:"is_won"`
-	IsLost    bool   `json:"is_lost"`
-	DealCount int    `json:"deal_count,omitempty"`
+	ID        string  `json:"id"`
+	FunnelID  string  `json:"funnel_id"`
+	Name      string  `json:"name"`
+	Color     string  `json:"color"`
+	Position  int     `json:"position"`
+	IsWon     bool    `json:"is_won"`
+	IsLost    bool    `json:"is_lost"`
+	DealCount int     `json:"deal_count,omitempty"`
 	DealValue float64 `json:"deal_value,omitempty"`
 }
 
 // Deal represents a sales opportunity
 type Deal struct {
-	ID                string          `json:"id"`
-	CompanyID         string          `json:"company_id"`
-	FunnelID          string          `json:"funnel_id"`
-	StageID           string          `json:"stage_id"`
-	ContactID         *string         `json:"contact_id,omitempty"`
-	ConversationID    *string         `json:"conversation_id,omitempty"`
-	AssignedTo        *string         `json:"assigned_to,omitempty"`
-	Title             string          `json:"title"`
-	Value             float64         `json:"value"`
-	ExpectedCloseDate *sql.NullTime   `json:"expected_close_date,omitempty"`
-	Origin            *string         `json:"origin,omitempty"`
-	LossReason        *string         `json:"loss_reason,omitempty"`
-	Notes             *string         `json:"notes,omitempty"`
-	Status            string          `json:"status"`
-	ContactName       *string         `json:"contact_name,omitempty"`
-	AssignedToName    *string         `json:"assigned_to_name,omitempty"`
-	StageName         *string         `json:"stage_name,omitempty"`
-	CreatedAt         time.Time       `json:"created_at"`
-	UpdatedAt         time.Time       `json:"updated_at"`
+	ID                string        `json:"id"`
+	CompanyID         string        `json:"company_id"`
+	FunnelID          string        `json:"funnel_id"`
+	StageID           string        `json:"stage_id"`
+	ContactID         *string       `json:"contact_id,omitempty"`
+	ConversationID    *string       `json:"conversation_id,omitempty"`
+	AssignedTo        *string       `json:"assigned_to,omitempty"`
+	Title             string        `json:"title"`
+	Value             float64       `json:"value"`
+	ExpectedCloseDate *sql.NullTime `json:"expected_close_date,omitempty"`
+	Origin            *string       `json:"origin,omitempty"`
+	LossReason        *string       `json:"loss_reason,omitempty"`
+	Notes             *string       `json:"notes,omitempty"`
+	Status            string        `json:"status"`
+	ContactName       *string       `json:"contact_name,omitempty"`
+	AssignedToName    *string       `json:"assigned_to_name,omitempty"`
+	StageName         *string       `json:"stage_name,omitempty"`
+	CreatedAt         time.Time     `json:"created_at"`
+	UpdatedAt         time.Time     `json:"updated_at"`
 }
 
 // BotFlow represents an automation flow
