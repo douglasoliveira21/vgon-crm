@@ -45,6 +45,7 @@ interface Message {
   content?: string
   message_type: string
   media_url?: string
+  media_filename?: string
   status: string
   is_private: boolean
   sender_name?: string
