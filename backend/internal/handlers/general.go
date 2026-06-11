@@ -248,10 +248,10 @@ func CreateFunnel(svc *services.Container) fiber.Handler {
 			Name        string `json:"name"`
 			Description string `json:"description"`
 			Stages      []struct {
-				Name  string `json:"name"`
-				Color string `json:"color"`
-				IsWon bool   `json:"is_won"`
-				IsLost bool  `json:"is_lost"`
+				Name   string `json:"name"`
+				Color  string `json:"color"`
+				IsWon  bool   `json:"is_won"`
+				IsLost bool   `json:"is_lost"`
 			} `json:"stages"`
 		}
 		if err := c.BodyParser(&body); err != nil {
@@ -383,10 +383,20 @@ func CreateDeal(svc *services.Container) fiber.Handler {
 		}
 
 		id := uuid.New().String()
+
+		// Use NULL for empty optional UUIDs
+		var contactID, assignedTo interface{}
+		if body.ContactID != "" {
+			contactID = body.ContactID
+		}
+		if body.AssignedTo != "" {
+			assignedTo = body.AssignedTo
+		}
+
 		_, err := svc.DB.Exec(`
 			INSERT INTO deals (id, company_id, funnel_id, stage_id, contact_id, title, value, assigned_to)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		`, id, companyID, body.FunnelID, body.StageID, body.ContactID, body.Title, body.Value, body.AssignedTo)
+		`, id, companyID, body.FunnelID, body.StageID, contactID, body.Title, body.Value, assignedTo)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
