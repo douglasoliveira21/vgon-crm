@@ -50,7 +50,12 @@ export default function CallsPage() {
   const [activeTab, setActiveTab] = useState('dialer')
   const [callHistory, setCallHistory] = useState<CallRecord[]>([])
   const [extensions, setExtensions] = useState<Extension[]>([])
+  const [queues, setQueues] = useState<Array<{id: string; name: string; strategy: string}>>([])
   const [loading, setLoading] = useState(true)
+  const [showExtensionForm, setShowExtensionForm] = useState(false)
+  const [showQueueForm, setShowQueueForm] = useState(false)
+  const [extForm, setExtForm] = useState({ display_name: '', extension_number: '', extension_password: '', can_call_external: true, can_receive_calls: true, can_transfer: true, can_access_recordings: false })
+  const [queueForm, setQueueForm] = useState({ name: '', strategy: 'ringall', max_wait_time: 120 })
 
   // Dialer state
   const [phoneNumber, setPhoneNumber] = useState('')
@@ -79,6 +84,7 @@ export default function CallsPage() {
   useEffect(() => {
     fetchCallHistory()
     fetchExtensions()
+    fetchQueues()
   }, [])
 
   useEffect(() => {
@@ -100,8 +106,56 @@ export default function CallsPage() {
 
   const fetchExtensions = async () => {
     try {
-      // Extensions will be loaded when configured
+      const res = await api.get('/telephony/extensions')
+      setExtensions(res.data.extensions || [])
     } catch {}
+  }
+
+  const fetchQueues = async () => {
+    try {
+      const res = await api.get('/telephony/queues')
+      setQueues(res.data.queues || [])
+    } catch {}
+  }
+
+  const createExtension = async () => {
+    if (!extForm.display_name || !extForm.extension_number) { toast.error('Preencha nome e número'); return }
+    try {
+      await api.post('/telephony/extensions', extForm)
+      toast.success('Ramal criado!')
+      setShowExtensionForm(false)
+      setExtForm({ display_name: '', extension_number: '', extension_password: '', can_call_external: true, can_receive_calls: true, can_transfer: true, can_access_recordings: false })
+      fetchExtensions()
+    } catch { toast.error('Erro ao criar ramal') }
+  }
+
+  const deleteExtension = async (id: string) => {
+    if (!confirm('Remover este ramal?')) return
+    try {
+      await api.delete(`/telephony/extensions/${id}`)
+      setExtensions(prev => prev.filter(e => e.id !== id))
+      toast.success('Ramal removido')
+    } catch { toast.error('Erro ao remover') }
+  }
+
+  const createQueue = async () => {
+    if (!queueForm.name) { toast.error('Nome é obrigatório'); return }
+    try {
+      await api.post('/telephony/queues', queueForm)
+      toast.success('Fila criada!')
+      setShowQueueForm(false)
+      setQueueForm({ name: '', strategy: 'ringall', max_wait_time: 120 })
+      fetchQueues()
+    } catch { toast.error('Erro ao criar fila') }
+  }
+
+  const deleteQueue = async (id: string) => {
+    if (!confirm('Remover esta fila?')) return
+    try {
+      await api.delete(`/telephony/queues/${id}`)
+      setQueues(prev => prev.filter(q => q.id !== id))
+      toast.success('Fila removida')
+    } catch { toast.error('Erro ao remover') }
   }
 
   const startCall = async () => {
@@ -326,16 +380,49 @@ export default function CallsPage() {
         <div className="card p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Ramais</h3>
-            <button className="btn-primary text-sm">
+            <button onClick={() => setShowExtensionForm(true)} className="btn-primary text-sm">
               <Plus size={16} /> Novo ramal
             </button>
           </div>
 
-          {extensions.length === 0 && (
+          {extensions.length > 0 ? (
+            <div className="space-y-3">
+              {extensions.map(ext => (
+                <div key={ext.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                      ext.status === 'online' ? 'bg-green-100' : ext.status === 'busy' ? 'bg-yellow-100' : 'bg-gray-100'
+                    }`}>
+                      <Phone size={18} className={
+                        ext.status === 'online' ? 'text-green-600' : ext.status === 'busy' ? 'text-yellow-600' : 'text-gray-400'
+                      } />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{ext.display_name}</p>
+                      <p className="text-xs text-gray-500">Ramal: {ext.extension_number}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`badge ${
+                      ext.status === 'online' ? 'badge-green' : ext.status === 'busy' ? 'badge-yellow' : 'badge-gray'
+                    }`}>
+                      {ext.status === 'online' ? 'Online' : ext.status === 'busy' ? 'Em chamada' : 'Offline'}
+                    </span>
+                    <button onClick={() => deleteExtension(ext.id)} className="p-1.5 text-gray-400 hover:text-red-500">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
             <div className="text-center py-12">
               <Phone size={40} className="text-gray-300 mx-auto mb-4" />
               <p className="text-gray-500 mb-2">Nenhum ramal configurado</p>
-              <p className="text-sm text-gray-400">Configure primeiro o provedor SIP e depois crie ramais para seus atendentes.</p>
+              <p className="text-sm text-gray-400">Crie ramais para seus atendentes realizarem e receberem chamadas.</p>
+              <button onClick={() => setShowExtensionForm(true)} className="btn-primary inline-flex mt-4 text-sm">
+                <Plus size={16} /> Criar primeiro ramal
+              </button>
             </div>
           )}
         </div>
@@ -346,15 +433,120 @@ export default function CallsPage() {
         <div className="card p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Filas de Atendimento</h3>
-            <button className="btn-primary text-sm">
+            <button onClick={() => setShowQueueForm(true)} className="btn-primary text-sm">
               <Plus size={16} /> Nova fila
             </button>
           </div>
 
-          <div className="text-center py-12">
-            <Users size={40} className="text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-500 mb-2">Nenhuma fila configurada</p>
-            <p className="text-sm text-gray-400">Crie filas para distribuir chamadas entre seus atendentes.</p>
+          {queues.length > 0 ? (
+            <div className="space-y-3">
+              {queues.map(queue => (
+                <div key={queue.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+                      <Users size={18} className="text-purple-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{queue.name}</p>
+                      <p className="text-xs text-gray-500">Estratégia: {
+                        queue.strategy === 'ringall' ? 'Tocar todos' :
+                        queue.strategy === 'roundrobin' ? 'Round Robin' :
+                        queue.strategy === 'leastrecent' ? 'Menos recente' : queue.strategy
+                      }</p>
+                    </div>
+                  </div>
+                  <button onClick={() => deleteQueue(queue.id)} className="p-1.5 text-gray-400 hover:text-red-500">
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <Users size={40} className="text-gray-300 mx-auto mb-4" />
+              <p className="text-gray-500 mb-2">Nenhuma fila configurada</p>
+              <p className="text-sm text-gray-400">Crie filas para distribuir chamadas entre seus atendentes.</p>
+              <button onClick={() => setShowQueueForm(true)} className="btn-primary inline-flex mt-4 text-sm">
+                <Plus size={16} /> Criar primeira fila
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Extension Form Modal */}
+      {showExtensionForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Novo Ramal</h3>
+              <button onClick={() => setShowExtensionForm(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nome do atendente</label>
+                <input type="text" value={extForm.display_name} onChange={(e) => setExtForm({...extForm, display_name: e.target.value})} className="input" placeholder="João Silva" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Número do ramal</label>
+                  <input type="text" value={extForm.extension_number} onChange={(e) => setExtForm({...extForm, extension_number: e.target.value})} className="input" placeholder="1001" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Senha do ramal</label>
+                  <input type="password" value={extForm.extension_password} onChange={(e) => setExtForm({...extForm, extension_password: e.target.value})} className="input" placeholder="••••••" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Permissões</label>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={extForm.can_call_external} onChange={(e) => setExtForm({...extForm, can_call_external: e.target.checked})} className="rounded border-gray-300" /><span className="text-sm text-gray-700">Realizar chamadas externas</span></label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={extForm.can_receive_calls} onChange={(e) => setExtForm({...extForm, can_receive_calls: e.target.checked})} className="rounded border-gray-300" /><span className="text-sm text-gray-700">Receber chamadas</span></label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={extForm.can_transfer} onChange={(e) => setExtForm({...extForm, can_transfer: e.target.checked})} className="rounded border-gray-300" /><span className="text-sm text-gray-700">Transferir chamadas</span></label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={extForm.can_access_recordings} onChange={(e) => setExtForm({...extForm, can_access_recordings: e.target.checked})} className="rounded border-gray-300" /><span className="text-sm text-gray-700">Ouvir gravações</span></label>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowExtensionForm(false)} className="btn-secondary flex-1">Cancelar</button>
+              <button onClick={createExtension} className="btn-primary flex-1">Criar ramal</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Queue Form Modal */}
+      {showQueueForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Nova Fila</h3>
+              <button onClick={() => setShowQueueForm(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nome da fila</label>
+                <input type="text" value={queueForm.name} onChange={(e) => setQueueForm({...queueForm, name: e.target.value})} className="input" placeholder="Suporte, Comercial, Financeiro..." />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Estratégia de toque</label>
+                <select value={queueForm.strategy} onChange={(e) => setQueueForm({...queueForm, strategy: e.target.value})} className="input">
+                  <option value="ringall">Tocar todos ao mesmo tempo</option>
+                  <option value="roundrobin">Round Robin (revezamento)</option>
+                  <option value="leastrecent">Menos recente (quem não atende há mais tempo)</option>
+                  <option value="random">Aleatório</option>
+                  <option value="fewestcalls">Menos chamadas</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Tempo máximo de espera (segundos)</label>
+                <input type="number" value={queueForm.max_wait_time} onChange={(e) => setQueueForm({...queueForm, max_wait_time: parseInt(e.target.value) || 120})} className="input" />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowQueueForm(false)} className="btn-secondary flex-1">Cancelar</button>
+              <button onClick={createQueue} className="btn-primary flex-1">Criar fila</button>
+            </div>
           </div>
         </div>
       )}
