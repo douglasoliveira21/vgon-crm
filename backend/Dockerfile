@@ -4,11 +4,15 @@ WORKDIR /app
 
 RUN apk add --no-cache gcc musl-dev git
 
-COPY go.mod ./
-RUN go mod download || true
-
+# Copy all source code first
 COPY . .
-RUN rm -f go.sum && go mod tidy
+
+# Generate go.sum and download dependencies
+ENV GONOSUMCHECK=*
+ENV GOFLAGS=-mod=mod
+RUN go mod tidy && go mod download
+
+# Build the binary
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server ./cmd/server
 
 FROM alpine:3.19
