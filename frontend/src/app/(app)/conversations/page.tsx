@@ -18,6 +18,7 @@ import {
   ArrowRightLeft,
   CheckCheck,
   Check,
+  CheckCircle,
   Image,
   FileText,
   X,
@@ -27,6 +28,7 @@ import {
   File,
   Video,
   Camera,
+  RotateCcw,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import toast from 'react-hot-toast'
@@ -164,6 +166,7 @@ export default function ConversationsPage() {
       const params: any = {}
       if (filter === 'mine') params.assigned_to = user?.id
       if (filter === 'unassigned') params.status = 'open'
+      if (filter === 'resolved') params.status = 'resolved'
       const response = await api.get('/conversations', { params })
       setConversations(response.data.conversations || [])
     } catch (error) {
@@ -350,9 +353,36 @@ export default function ConversationsPage() {
     try {
       await api.post(`/conversations/${selectedConv.id}/assign`, { user_id: user?.id })
       toast.success('Conversa atribuída a você')
+      setSelectedConv({ ...selectedConv, assigned_to: user?.id, assigned_to_name: user?.name, status: 'in_progress' })
       fetchConversations()
     } catch {
       toast.error('Erro ao atribuir')
+    }
+  }
+
+  // Resolve conversation
+  const resolveConversation = async () => {
+    if (!selectedConv) return
+    try {
+      await api.post(`/conversations/${selectedConv.id}/close`)
+      toast.success('Conversa resolvida')
+      setSelectedConv({ ...selectedConv, status: 'resolved' })
+      fetchConversations()
+    } catch {
+      toast.error('Erro ao resolver')
+    }
+  }
+
+  // Reopen conversation
+  const reopenConversation = async () => {
+    if (!selectedConv) return
+    try {
+      await api.post(`/conversations/${selectedConv.id}/reopen`)
+      toast.success('Conversa reaberta')
+      setSelectedConv({ ...selectedConv, status: 'open' })
+      fetchConversations()
+    } catch {
+      toast.error('Erro ao reabrir')
     }
   }
 
@@ -434,6 +464,7 @@ export default function ConversationsPage() {
               { id: 'all', label: 'Todas' },
               { id: 'mine', label: 'Minhas' },
               { id: 'unassigned', label: 'Sem dono' },
+              { id: 'resolved', label: 'Resolvidas' },
             ].map((f) => (
               <button
                 key={f.id}
@@ -511,6 +542,17 @@ export default function ConversationsPage() {
             </div>
 
             <div className="flex items-center gap-1">
+              {/* Open Chat / Assign to me */}
+              {!selectedConv.assigned_to && (
+                <button
+                  onClick={assignToMe}
+                  className="px-3 py-1.5 bg-primary-600 text-white text-xs font-medium rounded-lg hover:bg-primary-700 flex items-center gap-1"
+                  title="Abrir chat e atribuir a mim"
+                >
+                  <MessageSquare size={14} />
+                  Abrir Chat
+                </button>
+              )}
               {/* Call */}
               <button
                 onClick={() => setShowCallModal(true)}
@@ -519,14 +561,16 @@ export default function ConversationsPage() {
               >
                 <Phone size={18} />
               </button>
-              {/* Assign to me */}
-              <button
-                onClick={assignToMe}
-                className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg"
-                title="Atribuir a mim"
-              >
-                <UserPlus size={18} />
-              </button>
+              {/* Assign to me (if already assigned to someone else) */}
+              {selectedConv.assigned_to && selectedConv.assigned_to !== user?.id && (
+                <button
+                  onClick={assignToMe}
+                  className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg"
+                  title="Atribuir a mim"
+                >
+                  <UserPlus size={18} />
+                </button>
+              )}
               {/* Transfer */}
               <button
                 onClick={() => setShowTransferModal(true)}
@@ -543,6 +587,28 @@ export default function ConversationsPage() {
               >
                 <AtSign size={18} />
               </button>
+              {/* Resolve */}
+              {selectedConv.status !== 'resolved' && (
+                <button
+                  onClick={resolveConversation}
+                  className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 flex items-center gap-1"
+                  title="Resolver conversa"
+                >
+                  <CheckCircle size={14} />
+                  Resolver
+                </button>
+              )}
+              {/* Reopen */}
+              {selectedConv.status === 'resolved' && (
+                <button
+                  onClick={reopenConversation}
+                  className="px-3 py-1.5 bg-yellow-600 text-white text-xs font-medium rounded-lg hover:bg-yellow-700 flex items-center gap-1"
+                  title="Reabrir conversa"
+                >
+                  <RotateCcw size={14} />
+                  Reabrir
+                </button>
+              )}
               {/* More */}
               <button className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
                 <MoreVertical size={18} />
