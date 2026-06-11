@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { Search, Plus, Edit2, Trash2, Phone, Mail, MapPin, Building, Tag } from 'lucide-react'
+import { Search, Plus, Edit2, Trash2, Phone, Mail, MapPin, Building, Tag, MessageSquare } from 'lucide-react'
 
 interface Contact {
   id: string
@@ -14,11 +15,13 @@ interface Contact {
   position?: string
   city?: string
   origin?: string
+  avatar_url?: string
   tags?: Array<{ id: string; name: string; color: string }>
   created_at: string
 }
 
 export default function ContactsPage() {
+  const router = useRouter()
   const [contacts, setContacts] = useState<Contact[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -50,6 +53,22 @@ export default function ContactsPage() {
       toast.success('Contato removido')
     } catch {
       toast.error('Erro ao remover')
+    }
+  }
+
+  const startConversation = async (contact: Contact) => {
+    if (!contact.phone) {
+      toast.error('Contato não tem telefone')
+      return
+    }
+    try {
+      // Send initial message to create/reopen conversation
+      await api.post('/conversations/start', { phone: contact.phone })
+      toast.success('Conversa iniciada')
+      router.push('/conversations')
+    } catch {
+      // If endpoint doesn't exist, just go to conversations
+      router.push('/conversations')
     }
   }
 
@@ -96,10 +115,14 @@ export default function ContactsPage() {
               <tr key={contact.id} className="hover:bg-gray-50 transition-colors">
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 bg-primary-100 rounded-full flex items-center justify-center">
-                      <span className="text-primary-700 text-sm font-medium">
-                        {contact.name?.charAt(0)?.toUpperCase() || '?'}
-                      </span>
+                    <div className="w-9 h-9 bg-primary-100 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0">
+                      {contact.avatar_url ? (
+                        <img src={`${process.env.NEXT_PUBLIC_API_URL}${contact.avatar_url}`} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-primary-700 text-sm font-medium">
+                          {contact.name?.charAt(0)?.toUpperCase() || '?'}
+                        </span>
+                      )}
                     </div>
                     <div>
                       <p className="text-sm font-medium text-gray-900">{contact.name || '-'}</p>
@@ -121,6 +144,13 @@ export default function ContactsPage() {
                 </td>
                 <td className="px-6 py-4 text-right">
                   <div className="flex items-center justify-end gap-1">
+                    <button
+                      onClick={() => startConversation(contact)}
+                      className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded"
+                      title="Enviar mensagem"
+                    >
+                      <MessageSquare size={14} />
+                    </button>
                     <button
                       onClick={() => { setEditingContact(contact); setShowForm(true) }}
                       className="p-1.5 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded"

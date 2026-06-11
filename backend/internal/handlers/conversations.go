@@ -9,6 +9,69 @@ import (
 	"github.com/google/uuid"
 )
 
+func StartConversation(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
+
+		var body struct {
+			Phone   string `json:"phone"`
+			Message string `json:"message"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		if body.Phone == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Phone is required"})
+		}
+
+		// Find or create contact
+		var contactID string
+		err := svc.DB.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, body.Phone).Scan(&contactID)
+		if err != nil {
+			contactID = uuid.New().String()
+			svc.DB.Exec("INSERT INTO contacts (id, company_id, name, phone, origin) VALUES ($1, $2, $3, $4, 'manual')", contactID, companyID, body.Phone, body.Phone)
+		}
+
+		// Find or create conversation
+		var conversationID string
+		err = svc.DB.QueryRow("SELECT id FROM conversations WHERE company_id = $1 AND contact_id = $2 AND status != 'resolved' ORDER BY created_at DESC LIMIT 1", companyID, contactID).Scan(&conversationID)
+		if err != nil {
+			// Get first active channel
+			var channelID string
+			svc.DB.QueryRow("SELECT id FROM channels WHERE company_id = $1 AND status = 'connected' LIMIT 1", companyID).Scan(&channelID)
+
+			conversationID = uuid.New().String()
+			svc.DB.Exec("INSERT INTO conversations (id, company_id, contact_id, channel_id, assigned_to, status, last_message_at) VALUES ($1, $2, $3, $4, $5, 'in_progress', NOW())",
+				conversationID, companyID, contactID, channelID, userID)
+		}
+
+		// If message provided, send it
+		if body.Message != "" {
+			// Get instance for sending
+			var phone, instanceName string
+			svc.DB.QueryRow(`
+				SELECT co.phone, wi.instance_name
+				FROM conversations conv
+				JOIN contacts co ON conv.contact_id = co.id
+				JOIN channels ch ON conv.channel_id = ch.id
+				JOIN whatsapp_instances wi ON wi.channel_id = ch.id
+				WHERE conv.id = $1
+			`, conversationID).Scan(&phone, &instanceName)
+
+			if phone != "" && instanceName != "" {
+				externalID, _ := svc.Evolution.SendTextMessage(instanceName, phone, body.Message)
+				msgID := uuid.New().String()
+				svc.DB.Exec(`INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, external_id, status) VALUES ($1, $2, $3, 'user', $4, $5, 'text', $6, 'sent')`,
+					msgID, conversationID, companyID, userID, body.Message, externalID)
+			}
+		}
+
+		return c.JSON(fiber.Map{"conversation_id": conversationID, "contact_id": contactID})
+	}
+}
+
 func GetConversations(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
