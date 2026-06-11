@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { Plus, Bot, Play, Pause, Edit2, Trash2, Zap } from 'lucide-react'
@@ -18,6 +19,7 @@ interface BotFlow {
 }
 
 export default function AutomationsPage() {
+  const router = useRouter()
   const [flows, setFlows] = useState<BotFlow[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -79,7 +81,7 @@ export default function AutomationsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Bots e Automações</h1>
           <p className="text-gray-500 mt-1">Crie fluxos automáticos para atendimento</p>
         </div>
-        <button className="btn-primary">
+        <button onClick={() => router.push('/automations/new')} className="btn-primary">
           <Plus size={18} />
           Novo fluxo
         </button>
@@ -129,7 +131,10 @@ export default function AutomationsPage() {
               >
                 {flow.is_active ? <Pause size={18} /> : <Play size={18} />}
               </button>
-              <button className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg">
+              <button
+                onClick={() => router.push(`/automations/${flow.id}`)}
+                className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg"
+              >
                 <Edit2 size={18} />
               </button>
               <button
@@ -149,7 +154,7 @@ export default function AutomationsPage() {
             <p className="text-sm text-gray-400 mb-6 max-w-sm mx-auto">
               Crie fluxos de bots para automatizar o atendimento, respostas e ações
             </p>
-            <button className="btn-primary inline-flex">
+            <button onClick={() => router.push('/automations/new')} className="btn-primary inline-flex">
               <Plus size={18} /> Criar primeiro fluxo
             </button>
           </div>

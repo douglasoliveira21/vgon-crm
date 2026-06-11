@@ -17,10 +17,11 @@ import (
 )
 
 type EvolutionService struct {
-	cfg    *config.Config
-	db     *sql.DB
-	wsHub  *websocket.Hub
-	client *http.Client
+	cfg       *config.Config
+	db        *sql.DB
+	wsHub     *websocket.Hub
+	client    *http.Client
+	botEngine *BotEngine
 }
 
 func NewEvolutionService(cfg *config.Config, db *sql.DB, wsHub *websocket.Hub) *EvolutionService {
@@ -684,6 +685,11 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 		"last_message_preview": preview,
 		"last_message_at":      time.Now(),
 	})
+
+	// Trigger bot if applicable (only for contact messages)
+	if s.botEngine != nil {
+		go s.botEngine.TriggerBot(instance.CompanyID, conversationID, contactID, "", content, instanceName, phone)
+	}
 }
 
 func (s *EvolutionService) handleMessageUpdate(instanceName string, event map[string]interface{}) {
