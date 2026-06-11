@@ -285,18 +285,26 @@ export default function ConversationsPage() {
     const interval = setInterval(async () => {
       try {
         const response = await api.get(`/conversations/${selectedConv.id}/messages`)
-        const newMessages = response.data.messages || []
+        const newMessages: Message[] = response.data.messages || []
         setMessages((prev) => {
-          // Only update if there are new messages (compare length)
-          if (newMessages.length > prev.filter((m: Message) => !m.id.startsWith('temp-')).length) {
-            // Keep temp messages and merge with new
-            const tempMsgs = prev.filter((m: Message) => m.id.startsWith('temp-'))
-            return [...newMessages, ...tempMsgs]
+          // Count real messages (not temp)
+          const realPrev = prev.filter((m) => !m.id.startsWith('temp-'))
+          // Only update if server has more messages
+          if (newMessages.length > realPrev.length) {
+            return newMessages
+          }
+          // Also update if statuses changed
+          const hasStatusChange = newMessages.some((nm, i) => {
+            const existing = realPrev.find(m => m.id === nm.id)
+            return existing && existing.status !== nm.status
+          })
+          if (hasStatusChange) {
+            return newMessages
           }
           return prev
         })
       } catch {}
-    }, 5000) // Every 5 seconds
+    }, 5000)
 
     return () => clearInterval(interval)
   }, [selectedConv?.id])
