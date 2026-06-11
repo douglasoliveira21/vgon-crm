@@ -1,0 +1,293 @@
+package handlers
+
+import (
+	"github.com/evocrm/backend/internal/services"
+	"github.com/gofiber/fiber/v2"
+)
+
+func GetConversations(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		status := c.Query("status")
+		teamID := c.Query("team_id")
+		assignedTo := c.Query("assigned_to")
+		limit := c.QueryInt("limit", 50)
+		offset := c.QueryInt("offset", 0)
+
+		conversations, err := svc.Message.GetConversations(companyID, status, assignedTo, teamID, limit, offset)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"conversations": conversations})
+	}
+}
+
+func GetMyConversations(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
+		limit := c.QueryInt("limit", 50)
+		offset := c.QueryInt("offset", 0)
+
+		conversations, err := svc.Message.GetConversations(companyID, "", userID, "", limit, offset)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"conversations": conversations})
+	}
+}
+
+func GetConversation(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		conversationID := c.Params("id")
+
+		conversations, err := svc.Message.GetConversations(companyID, "", "", "", 1, 0)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		for _, conv := range conversations {
+			if conv.ID == conversationID {
+				return c.JSON(conv)
+			}
+		}
+
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Conversation not found"})
+	}
+}
+
+func AssignConversation(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		conversationID := c.Params("id")
+
+		var body struct {
+			UserID string `json:"user_id"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		if body.UserID == "" {
+			body.UserID = c.Locals("user_id").(string)
+		}
+
+		if err := svc.Message.AssignConversation(conversationID, body.UserID, companyID); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"message": "Conversation assigned"})
+	}
+}
+
+func TransferConversation(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		conversationID := c.Params("id")
+
+		var body struct {
+			UserID *string `json:"user_id"`
+			TeamID *string `json:"team_id"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		if err := svc.Message.TransferConversation(conversationID, companyID, body.UserID, body.TeamID); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"message": "Conversation transferred"})
+	}
+}
+
+func CloseConversation(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		conversationID := c.Params("id")
+
+		if err := svc.Message.CloseConversation(conversationID, companyID); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"message": "Conversation closed"})
+	}
+}
+
+func ReopenConversation(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		conversationID := c.Params("id")
+
+		if err := svc.Message.ReopenConversation(conversationID, companyID); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"message": "Conversation reopened"})
+	}
+}
+
+func GetConversationMessages(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		conversationID := c.Params("id")
+		limit := c.QueryInt("limit", 50)
+		offset := c.QueryInt("offset", 0)
+
+		messages, err := svc.Message.GetConversationMessages(conversationID, companyID, limit, offset)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"messages": messages})
+	}
+}
+
+func SendTextMessage(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
+		conversationID := c.Params("id")
+
+		var body struct {
+			Content   string `json:"content"`
+			IsPrivate bool   `json:"is_private"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		if body.Content == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Content is required"})
+		}
+
+		req := &services.SendTextMessageRequest{
+			ConversationID: conversationID,
+			Content:        body.Content,
+			IsPrivate:      body.IsPrivate,
+		}
+
+		msg, err := svc.Message.SaveAndSendMessage(companyID, userID, req)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		// If not private, send via WhatsApp
+		if !body.IsPrivate {
+			// Get contact phone and instance
+			var phone, instanceName string
+			err := svc.DB.QueryRow(`
+				SELECT co.phone, wi.instance_name
+				FROM conversations c
+				JOIN contacts co ON c.contact_id = co.id
+				JOIN channels ch ON c.channel_id = ch.id
+				JOIN whatsapp_instances wi ON wi.channel_id = ch.id
+				WHERE c.id = $1
+			`, conversationID).Scan(&phone, &instanceName)
+
+			if err == nil && phone != "" && instanceName != "" {
+				externalID, _ := svc.Evolution.SendTextMessage(instanceName, phone, body.Content)
+				if externalID != "" {
+					svc.DB.Exec("UPDATE messages SET external_id = $1 WHERE id = $2", externalID, msg.ID)
+				}
+			}
+		}
+
+		return c.Status(fiber.StatusCreated).JSON(msg)
+	}
+}
+
+func SendMediaMessage(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
+		conversationID := c.Params("id")
+
+		var body struct {
+			MediaURL  string `json:"media_url"`
+			MediaType string `json:"media_type"`
+			Caption   string `json:"caption"`
+			FileName  string `json:"file_name"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		// Save message to DB
+		req := &services.SendTextMessageRequest{
+			ConversationID: conversationID,
+			Content:        body.Caption,
+			IsPrivate:      false,
+		}
+
+		msg, err := svc.Message.SaveAndSendMessage(companyID, userID, req)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		// Send via WhatsApp
+		var phone, instanceName string
+		svc.DB.QueryRow(`
+			SELECT co.phone, wi.instance_name
+			FROM conversations c
+			JOIN contacts co ON c.contact_id = co.id
+			JOIN channels ch ON c.channel_id = ch.id
+			JOIN whatsapp_instances wi ON wi.channel_id = ch.id
+			WHERE c.id = $1
+		`, conversationID).Scan(&phone, &instanceName)
+
+		if phone != "" && instanceName != "" {
+			svc.Evolution.SendMediaMessage(instanceName, phone, body.MediaType, body.MediaURL, body.Caption, body.FileName)
+		}
+
+		_ = userID
+		return c.Status(fiber.StatusCreated).JSON(msg)
+	}
+}
+
+func SendAudioMessage(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
+		conversationID := c.Params("id")
+
+		var body struct {
+			AudioURL string `json:"audio_url"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		req := &services.SendTextMessageRequest{
+			ConversationID: conversationID,
+			Content:        "🎵 Áudio",
+			IsPrivate:      false,
+		}
+
+		msg, err := svc.Message.SaveAndSendMessage(companyID, userID, req)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		// Send via WhatsApp
+		var phone, instanceName string
+		svc.DB.QueryRow(`
+			SELECT co.phone, wi.instance_name
+			FROM conversations c
+			JOIN contacts co ON c.contact_id = co.id
+			JOIN channels ch ON c.channel_id = ch.id
+			JOIN whatsapp_instances wi ON wi.channel_id = ch.id
+			WHERE c.id = $1
+		`, conversationID).Scan(&phone, &instanceName)
+
+		if phone != "" && instanceName != "" {
+			svc.Evolution.SendAudioMessage(instanceName, phone, body.AudioURL)
+		}
+
+		_ = userID
+		return c.Status(fiber.StatusCreated).JSON(msg)
+	}
+}
