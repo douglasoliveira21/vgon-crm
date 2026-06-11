@@ -24,6 +24,16 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	auth.Post("/refresh", AuthRefresh(svc))
 
 	// ============================================
+	// Webhook Routes (public - from Evolution API) - MUST be before protected routes
+	// ============================================
+	api.Post("/webhooks/evolution/:instanceName", HandleEvolutionWebhook(svc))
+
+	// ============================================
+	// Widget Public Routes
+	// ============================================
+	api.Get("/widget/:id/config", GetWidgetPublicConfig(svc))
+
+	// ============================================
 	// Protected Routes
 	// ============================================
 	protected := api.Group("", middleware.AuthMiddleware(svc.Config))
@@ -141,17 +151,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	users.Post("/", CreateUser(svc))
 
 	// ============================================
-	// Webhook Routes (public - from Evolution API)
-	// ============================================
-	api.Post("/webhooks/evolution/:instanceName", HandleEvolutionWebhook(svc))
-
-	// ============================================
 	// WebSocket
 	// ============================================
 	app.Get("/ws", WebSocketHandler(wsHub, svc.Config))
-
-	// ============================================
-	// Widget Public Routes
-	// ============================================
-	api.Get("/widget/:id/config", GetWidgetPublicConfig(svc))
 }
