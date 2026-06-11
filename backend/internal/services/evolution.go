@@ -717,6 +717,7 @@ func (s *EvolutionService) getOrCreateContact(companyID, phone string, data map[
 	var contactID string
 	err := s.db.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, phone).Scan(&contactID)
 	if err == nil {
+		log.Printf("[CONTACT] Found existing contact %s for phone %s", contactID, phone)
 		return contactID
 	}
 
@@ -732,26 +733,40 @@ func (s *EvolutionService) getOrCreateContact(companyID, phone string, data map[
 		VALUES ($1, $2, $3, $4, 'whatsapp')
 	`, contactID, companyID, pushName, phone)
 
+	log.Printf("[CONTACT] Created new contact %s for phone %s", contactID, phone)
 	return contactID
 }
 
 func (s *EvolutionService) getOrCreateConversation(companyID, contactID string, channelID *string) string {
 	var conversationID string
+
+	// First, try to find any non-resolved conversation for this contact in this company
 	err := s.db.QueryRow(`
 		SELECT id FROM conversations 
-		WHERE company_id = $1 AND contact_id = $2 AND status NOT IN ('resolved')
-		ORDER BY created_at DESC LIMIT 1
+		WHERE company_id = $1 AND contact_id = $2 AND status != 'resolved'
+		ORDER BY last_message_at DESC NULLS LAST, created_at DESC
+		LIMIT 1
 	`, companyID, contactID).Scan(&conversationID)
 	if err == nil {
+		log.Printf("[CONVERSATION] Found existing conversation %s for contact %s", conversationID, contactID)
 		return conversationID
 	}
 
+	// No active conversation found, create a new one
 	conversationID = uuid.New().String()
-	s.db.Exec(`
-		INSERT INTO conversations (id, company_id, contact_id, channel_id, status, last_message_at)
-		VALUES ($1, $2, $3, $4, 'open', NOW())
-	`, conversationID, companyID, contactID, channelID)
+	if channelID != nil {
+		s.db.Exec(`
+			INSERT INTO conversations (id, company_id, contact_id, channel_id, status, last_message_at)
+			VALUES ($1, $2, $3, $4, 'open', NOW())
+		`, conversationID, companyID, contactID, *channelID)
+	} else {
+		s.db.Exec(`
+			INSERT INTO conversations (id, company_id, contact_id, status, last_message_at)
+			VALUES ($1, $2, $3, 'open', NOW())
+		`, conversationID, companyID, contactID)
+	}
 
+	log.Printf("[CONVERSATION] Created new conversation %s for contact %s", conversationID, contactID)
 	return conversationID
 }
 
