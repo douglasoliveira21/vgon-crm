@@ -266,11 +266,15 @@ export default function FlowEditorPage() {
   const updateNodeConfig = (nodeId: string, config: Record<string, any>) => {
     setNodes((nds) => nds.map(n => {
       if (n.id === nodeId) {
-        return { ...n, data: { ...n.data, config: { ...n.data.config, ...config } } }
+        const updated = { ...n, data: { ...n.data, config: { ...n.data.config, ...config } } }
+        return updated
       }
       return n
     }))
   }
+
+  // Derive the current selected node from the nodes array (always up to date)
+  const currentSelectedNode = selectedNode ? nodes.find(n => n.id === selectedNode.id) || selectedNode : null
 
   const deleteSelectedNode = () => {
     if (!selectedNode) return
@@ -413,12 +417,12 @@ export default function FlowEditorPage() {
         </div>
 
         {/* Right panel - Node config */}
-        {selectedNode && (
+        {currentSelectedNode && (
           <div className="w-80 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0">
             <div className="p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-semibold text-gray-900">
-                  {getNodeIcon(selectedNode.data?.nodeType)} {getNodeLabel(selectedNode.data?.nodeType)}
+                  {getNodeIcon(currentSelectedNode.data?.nodeType)} {getNodeLabel(currentSelectedNode.data?.nodeType)}
                 </h3>
                 <div className="flex gap-1">
                   <button onClick={deleteSelectedNode} className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded">
@@ -431,8 +435,8 @@ export default function FlowEditorPage() {
               </div>
 
               <NodeConfigPanel
-                node={selectedNode}
-                onUpdate={(config) => updateNodeConfig(selectedNode.id, config)}
+                node={currentSelectedNode}
+                onUpdate={(config) => updateNodeConfig(currentSelectedNode.id, config)}
               />
             </div>
           </div>
