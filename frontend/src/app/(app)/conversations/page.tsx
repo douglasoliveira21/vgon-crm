@@ -322,10 +322,35 @@ export default function ConversationsPage() {
 
                   {msg.message_type === 'audio' && msg.media_url && (
                     <div className="mb-1">
-                      <audio controls className="max-w-full h-10" preload="metadata">
-                        <source src={`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`} />
-                        Seu navegador não suporta áudio.
-                      </audio>
+                      <div className="flex items-center gap-2">
+                        <audio
+                          id={`audio-${msg.id}`}
+                          controls
+                          className="max-w-full h-10 flex-1"
+                          preload="metadata"
+                        >
+                          <source src={`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`} />
+                        </audio>
+                        <div className="flex gap-1">
+                          {[1, 1.5, 2].map((speed) => (
+                            <button
+                              key={speed}
+                              type="button"
+                              onClick={() => {
+                                const audio = document.getElementById(`audio-${msg.id}`) as HTMLAudioElement
+                                if (audio) audio.playbackRate = speed
+                              }}
+                              className={`text-[10px] px-1.5 py-0.5 rounded font-medium transition-colors ${
+                                msg.sender_type === 'user'
+                                  ? 'bg-white/20 text-white hover:bg-white/30'
+                                  : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                              }`}
+                            >
+                              {speed}x
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   )}
 
