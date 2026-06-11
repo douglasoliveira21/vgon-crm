@@ -925,7 +925,7 @@ export default function ConversationsPage() {
                     </p>
                   )}
                   {msg.sender_type === 'bot' && (
-                    <p className={`text-xs font-bold mb-0.5 ${msg.sender_type === 'user' ? 'text-white/90' : 'text-purple-600'}`}>
+                    <p className="text-xs font-bold mb-0.5 text-purple-600">
                       🤖 {msg.sender_name || 'Bot'}
                     </p>
                   )}
