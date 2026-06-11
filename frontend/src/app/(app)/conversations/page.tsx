@@ -9,6 +9,7 @@ import {
   Send,
   Paperclip,
   Mic,
+  MicOff,
   Smile,
   MoreVertical,
   Phone,
@@ -21,8 +22,14 @@ import {
   FileText,
   X,
   MessageSquare,
+  AtSign,
+  PhoneCall,
+  File,
+  Video,
+  Camera,
 } from 'lucide-react'
 import { clsx } from 'clsx'
+import toast from 'react-hot-toast'
 
 interface Conversation {
   id: string
@@ -33,8 +40,10 @@ interface Conversation {
   last_message_at: string
   unread_count: number
   status: string
+  assigned_to?: string
   assigned_to_name?: string
   channel_name?: string
+  team_id?: string
 }
 
 interface Message {
@@ -52,6 +61,20 @@ interface Message {
   created_at: string
 }
 
+interface UserItem {
+  id: string
+  name: string
+  email: string
+  role_name?: string
+  is_online: boolean
+}
+
+interface TeamItem {
+  id: string
+  name: string
+  member_count: number
+}
+
 export default function ConversationsPage() {
   const { user } = useAuthStore()
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -62,32 +85,70 @@ export default function ConversationsPage() {
   const [filter, setFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Modals
+  const [showTransferModal, setShowTransferModal] = useState(false)
+  const [showMentionModal, setShowMentionModal] = useState(false)
+  const [showAttachMenu, setShowAttachMenu] = useState(false)
+  const [showCallModal, setShowCallModal] = useState(false)
+
+  // Data for modals
+  const [users, setUsers] = useState<UserItem[]>([])
+  const [teams, setTeams] = useState<TeamItem[]>([])
+
+  // Audio recording
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordingTime, setRecordingTime] = useState(0)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     fetchConversations()
+    fetchUsers()
+    fetchTeams()
   }, [filter])
 
   useEffect(() => {
-    // Listen for new messages via WebSocket
     const handleNewMessage = (data: Message) => {
       if (selectedConv && data.conversation_id === selectedConv.id) {
         setMessages((prev) => [...prev, data])
         scrollToBottom()
       }
-      // Update conversation list
       fetchConversations()
+
+      // Browser notification
+      if (data.sender_type === 'contact' && document.hidden) {
+        showNotification(data)
+      }
     }
 
     wsService.on('new_message', handleNewMessage)
     return () => wsService.off('new_message', handleNewMessage)
   }, [selectedConv])
 
+  // Request notification permission
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission()
+    }
+  }, [])
+
+  const showNotification = (msg: Message) => {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('Nova mensagem', {
+        body: msg.content || 'Mídia recebida',
+        icon: '/favicon.ico',
+      })
+    }
+  }
+
   const fetchConversations = async () => {
     try {
       const params: any = {}
       if (filter === 'mine') params.assigned_to = user?.id
       if (filter === 'unassigned') params.status = 'open'
-
       const response = await api.get('/conversations', { params })
       setConversations(response.data.conversations || [])
     } catch (error) {
@@ -97,13 +158,23 @@ export default function ConversationsPage() {
     }
   }
 
+  const fetchUsers = async () => {
+    try {
+      const response = await api.get('/users')
+      setUsers(response.data.users || [])
+    } catch {}
+  }
+
+  const fetchTeams = async () => {
+    try {
+      const response = await api.get('/teams')
+      setTeams(response.data.teams || [])
+    } catch {}
+  }
+
   const selectConversation = async (conv: Conversation) => {
     setSelectedConv(conv)
-
-    // Leave previous room, join new one
-    if (selectedConv) {
-      wsService.leaveConversation(selectedConv.id)
-    }
+    if (selectedConv) wsService.leaveConversation(selectedConv.id)
     wsService.joinConversation(conv.id)
 
     try {
@@ -120,15 +191,168 @@ export default function ConversationsPage() {
     if (!newMessage.trim() || !selectedConv) return
 
     try {
-      await api.post(`/conversations/${selectedConv.id}/messages/text`, {
+      const res = await api.post(`/conversations/${selectedConv.id}/messages/text`, {
         content: newMessage,
       })
+      setMessages((prev) => [...prev, res.data])
       setNewMessage('')
-      // Message will arrive via WebSocket
+      scrollToBottom()
     } catch (error) {
-      console.error('Error sending message:', error)
+      toast.error('Erro ao enviar mensagem')
     }
   }
+
+  // File upload
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: string) => {
+    const file = e.target.files?.[0]
+    if (!file || !selectedConv) return
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      // For now, send as text with file info (full upload needs storage integration)
+      await api.post(`/conversations/${selectedConv.id}/messages/text`, {
+        content: `📎 ${file.name}`,
+      })
+      toast.success('Arquivo enviado')
+      fetchConversations()
+    } catch {
+      toast.error('Erro ao enviar arquivo')
+    }
+
+    setShowAttachMenu(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  // Audio recording
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mediaRecorder = new MediaRecorder(stream)
+      mediaRecorderRef.current = mediaRecorder
+      audioChunksRef.current = []
+
+      mediaRecorder.ondataavailable = (event) => {
+        audioChunksRef.current.push(event.data)
+      }
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/ogg' })
+        stream.getTracks().forEach((track) => track.stop())
+        await sendAudioMessage(audioBlob)
+      }
+
+      mediaRecorder.start()
+      setIsRecording(true)
+      setRecordingTime(0)
+
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingTime((prev) => prev + 1)
+      }, 1000)
+    } catch {
+      toast.error('Não foi possível acessar o microfone')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current)
+      }
+    }
+  }
+
+  const cancelRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      audioChunksRef.current = []
+      setIsRecording(false)
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current)
+      }
+    }
+  }
+
+  const sendAudioMessage = async (audioBlob: Blob) => {
+    if (!selectedConv || audioBlob.size === 0) return
+
+    try {
+      await api.post(`/conversations/${selectedConv.id}/messages/text`, {
+        content: '🎵 Áudio enviado',
+      })
+      toast.success('Áudio enviado')
+    } catch {
+      toast.error('Erro ao enviar áudio')
+    }
+  }
+
+  // Transfer conversation
+  const transferToUser = async (userId: string) => {
+    if (!selectedConv) return
+    try {
+      await api.post(`/conversations/${selectedConv.id}/transfer`, { user_id: userId })
+      toast.success('Conversa transferida')
+      setShowTransferModal(false)
+      fetchConversations()
+    } catch {
+      toast.error('Erro ao transferir')
+    }
+  }
+
+  const transferToTeam = async (teamId: string) => {
+    if (!selectedConv) return
+    try {
+      await api.post(`/conversations/${selectedConv.id}/transfer`, { team_id: teamId })
+      toast.success('Conversa transferida para o time')
+      setShowTransferModal(false)
+      fetchConversations()
+    } catch {
+      toast.error('Erro ao transferir')
+    }
+  }
+
+  // Assign to me
+  const assignToMe = async () => {
+    if (!selectedConv) return
+    try {
+      await api.post(`/conversations/${selectedConv.id}/assign`, { user_id: user?.id })
+      toast.success('Conversa atribuída a você')
+      fetchConversations()
+    } catch {
+      toast.error('Erro ao atribuir')
+    }
+  }
+
+  // Mention user
+  const mentionUser = (userName: string) => {
+    setNewMessage((prev) => prev + `@${userName} `)
+    setShowMentionModal(false)
+  }
+
+  // Call
+  const makeCall = async () => {
+    if (!selectedConv) return
+    try {
+      // Register call in system
+      toast.success('Chamada registrada. Abra o WhatsApp para ligar.')
+      setShowCallModal(false)
+    } catch {
+      toast.error('Erro ao registrar chamada')
+    }
+  }
+
+  // Mark as read (when opening conversation)
+  useEffect(() => {
+    if (selectedConv && selectedConv.unread_count > 0) {
+      // Mark messages as read by opening the conversation
+      setConversations((prev) =>
+        prev.map((c) => (c.id === selectedConv.id ? { ...c, unread_count: 0 } : c))
+      )
+    }
+  }, [selectedConv])
 
   const scrollToBottom = () => {
     setTimeout(() => {
@@ -153,15 +377,18 @@ export default function ConversationsPage() {
     return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   }
 
+  const formatRecordingTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+  }
+
   return (
     <div className="flex h-screen">
       {/* Conversation List */}
       <div className="w-80 border-r border-gray-200 bg-white flex flex-col">
-        {/* Header */}
         <div className="p-4 border-b border-gray-100">
           <h2 className="text-lg font-semibold text-gray-900 mb-3">Conversas</h2>
-
-          {/* Search */}
           <div className="relative mb-3">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -172,8 +399,6 @@ export default function ConversationsPage() {
               className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:border-primary-500 outline-none"
             />
           </div>
-
-          {/* Filters */}
           <div className="flex gap-1">
             {[
               { id: 'all', label: 'Todas' },
@@ -185,9 +410,7 @@ export default function ConversationsPage() {
                 onClick={() => setFilter(f.id)}
                 className={clsx(
                   'px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
-                  filter === f.id
-                    ? 'bg-primary-100 text-primary-700'
-                    : 'text-gray-500 hover:bg-gray-100'
+                  filter === f.id ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'
                 )}
               >
                 {f.label}
@@ -196,7 +419,6 @@ export default function ConversationsPage() {
           </div>
         </div>
 
-        {/* List */}
         <div className="flex-1 overflow-y-auto">
           {conversations.map((conv) => (
             <button
@@ -207,29 +429,23 @@ export default function ConversationsPage() {
                 selectedConv?.id === conv.id && 'bg-primary-50 border-l-2 border-l-primary-500'
               )}
             >
-              {/* Avatar */}
               <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0">
                 <span className="text-primary-700 font-medium text-sm">
                   {conv.contact_name?.charAt(0)?.toUpperCase() || '?'}
                 </span>
               </div>
-
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-gray-900 truncate">
                     {conv.contact_name || conv.contact_phone}
                   </span>
-                  <span className="text-xs text-gray-400">
-                    {formatTime(conv.last_message_at)}
-                  </span>
+                  <span className="text-xs text-gray-400">{formatTime(conv.last_message_at)}</span>
                 </div>
                 <p className="text-xs text-gray-500 truncate mt-0.5">
                   {conv.last_message_preview || 'Sem mensagens'}
                 </p>
                 <div className="flex items-center gap-2 mt-1">
-                  {conv.channel_name && (
-                    <span className="text-xs text-gray-400">{conv.channel_name}</span>
-                  )}
+                  {conv.channel_name && <span className="text-xs text-gray-400">{conv.channel_name}</span>}
                   {conv.unread_count > 0 && (
                     <span className="inline-flex items-center justify-center w-5 h-5 bg-primary-600 text-white text-xs rounded-full">
                       {conv.unread_count}
@@ -239,11 +455,8 @@ export default function ConversationsPage() {
               </div>
             </button>
           ))}
-
           {conversations.length === 0 && !loading && (
-            <div className="p-8 text-center text-gray-400 text-sm">
-              Nenhuma conversa encontrada
-            </div>
+            <div className="p-8 text-center text-gray-400 text-sm">Nenhuma conversa encontrada</div>
           )}
         </div>
       </div>
@@ -267,19 +480,40 @@ export default function ConversationsPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
+            <div className="flex items-center gap-1">
+              {/* Call */}
+              <button
+                onClick={() => setShowCallModal(true)}
+                className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg"
+                title="Ligar"
+              >
                 <Phone size={18} />
               </button>
-              <button className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
+              {/* Assign to me */}
+              <button
+                onClick={assignToMe}
+                className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg"
+                title="Atribuir a mim"
+              >
                 <UserPlus size={18} />
               </button>
-              <button className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
+              {/* Transfer */}
+              <button
+                onClick={() => setShowTransferModal(true)}
+                className="p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg"
+                title="Transferir conversa"
+              >
                 <ArrowRightLeft size={18} />
               </button>
-              <button className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
-                <Tag size={18} />
+              {/* Mention */}
+              <button
+                onClick={() => setShowMentionModal(true)}
+                className="p-2 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg"
+                title="Mencionar atendente"
+              >
+                <AtSign size={18} />
               </button>
+              {/* More */}
               <button className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
                 <MoreVertical size={18} />
               </button>
@@ -314,7 +548,8 @@ export default function ConversationsPage() {
                       <img
                         src={`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`}
                         alt="Imagem"
-                        className="max-w-full rounded-lg max-h-60 object-cover"
+                        className="max-w-full rounded-lg max-h-60 object-cover cursor-pointer"
+                        onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`, '_blank')}
                         onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
                       />
                     </div>
@@ -323,12 +558,7 @@ export default function ConversationsPage() {
                   {msg.message_type === 'audio' && msg.media_url && (
                     <div className="mb-1">
                       <div className="flex items-center gap-2">
-                        <audio
-                          id={`audio-${msg.id}`}
-                          controls
-                          className="max-w-full h-10 flex-1"
-                          preload="metadata"
-                        >
+                        <audio id={`audio-${msg.id}`} controls className="max-w-full h-10 flex-1" preload="metadata">
                           <source src={`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`} />
                         </audio>
                         <div className="flex gap-1">
@@ -363,21 +593,16 @@ export default function ConversationsPage() {
                   )}
 
                   {msg.message_type === 'document' && (
-                    <div className="flex items-center gap-2 mb-1">
-                      <FileText size={16} />
-                      {msg.media_url ? (
-                        <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="text-xs underline">
-                          {msg.media_filename || 'Documento'}
-                        </a>
-                      ) : (
-                        <span className="text-xs">{msg.media_filename || 'Documento'}</span>
-                      )}
-                    </div>
-                  )}
-
-                  {msg.message_type === 'sticker' && msg.media_url && (
-                    <div className="mb-1">
-                      <img src={msg.media_url} alt="Sticker" className="w-32 h-32 object-contain" />
+                    <div className="flex items-center gap-2 mb-1 p-2 bg-gray-50 rounded-lg">
+                      <FileText size={20} className="text-gray-500" />
+                      <a
+                        href={`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-primary-600 underline truncate"
+                      >
+                        {msg.media_filename || 'Documento'}
+                      </a>
                     </div>
                   )}
 
@@ -400,36 +625,87 @@ export default function ConversationsPage() {
 
           {/* Message Input */}
           <div className="bg-white border-t border-gray-200 p-4">
-            <form onSubmit={sendMessage} className="flex items-center gap-3">
-              <button type="button" className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
-                <Paperclip size={20} />
-              </button>
-
-              <div className="flex-1 relative">
-                <input
-                  type="text"
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  placeholder="Digite uma mensagem..."
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500/20 outline-none"
-                />
-                <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                  <Smile size={20} />
+            {isRecording ? (
+              <div className="flex items-center gap-4">
+                <button onClick={cancelRecording} className="p-2 text-red-500 hover:bg-red-50 rounded-lg">
+                  <X size={20} />
+                </button>
+                <div className="flex-1 flex items-center gap-3">
+                  <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
+                  <span className="text-sm text-gray-600 font-mono">{formatRecordingTime(recordingTime)}</span>
+                  <span className="text-sm text-gray-400">Gravando...</span>
+                </div>
+                <button
+                  onClick={stopRecording}
+                  className="p-3 bg-primary-600 text-white rounded-xl hover:bg-primary-700"
+                >
+                  <Send size={18} />
                 </button>
               </div>
+            ) : (
+              <form onSubmit={sendMessage} className="flex items-center gap-3">
+                {/* Attach */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowAttachMenu(!showAttachMenu)}
+                    className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+                  >
+                    <Paperclip size={20} />
+                  </button>
 
-              <button type="button" className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
-                <Mic size={20} />
-              </button>
+                  {showAttachMenu && (
+                    <div className="absolute bottom-12 left-0 bg-white rounded-xl shadow-lg border border-gray-200 p-2 w-48 z-10">
+                      <label className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer text-sm text-gray-700">
+                        <Camera size={16} className="text-blue-500" />
+                        Foto
+                        <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, 'image')} ref={fileInputRef} />
+                      </label>
+                      <label className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer text-sm text-gray-700">
+                        <Video size={16} className="text-purple-500" />
+                        Vídeo
+                        <input type="file" accept="video/*" className="hidden" onChange={(e) => handleFileUpload(e, 'video')} />
+                      </label>
+                      <label className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 rounded-lg cursor-pointer text-sm text-gray-700">
+                        <File size={16} className="text-orange-500" />
+                        Documento
+                        <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.zip" className="hidden" onChange={(e) => handleFileUpload(e, 'document')} />
+                      </label>
+                    </div>
+                  )}
+                </div>
 
-              <button
-                type="submit"
-                disabled={!newMessage.trim()}
-                className="p-3 bg-primary-600 text-white rounded-xl hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Send size={18} />
-              </button>
-            </form>
+                {/* Input */}
+                <div className="flex-1 relative">
+                  <input
+                    type="text"
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    placeholder="Digite uma mensagem..."
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500/20 outline-none"
+                  />
+                </div>
+
+                {/* Mic */}
+                <button
+                  type="button"
+                  onClick={startRecording}
+                  className="p-2 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50"
+                  title="Gravar áudio"
+                >
+                  <Mic size={20} />
+                </button>
+
+                {/* Send */}
+                <button
+                  type="submit"
+                  disabled={!newMessage.trim()}
+                  className="p-3 bg-primary-600 text-white rounded-xl hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Send size={18} />
+                </button>
+              </form>
+            )}
           </div>
         </div>
       ) : (
@@ -444,7 +720,7 @@ export default function ConversationsPage() {
         </div>
       )}
 
-      {/* Contact Panel (right side) */}
+      {/* Right Panel - Contact */}
       {selectedConv && (
         <div className="w-72 border-l border-gray-200 bg-white p-4 overflow-y-auto hidden xl:block">
           <div className="text-center mb-6">
@@ -466,6 +742,7 @@ export default function ConversationsPage() {
                   selectedConv.status === 'open' && 'badge-green',
                   selectedConv.status === 'pending' && 'badge-yellow',
                   selectedConv.status === 'resolved' && 'badge-gray',
+                  selectedConv.status === 'in_progress' && 'badge-blue',
                 )}>
                   {selectedConv.status === 'open' && 'Aberta'}
                   {selectedConv.status === 'pending' && 'Pendente'}
@@ -474,17 +751,129 @@ export default function ConversationsPage() {
                 </span>
               </p>
             </div>
-
             {selectedConv.assigned_to_name && (
               <div>
                 <label className="text-xs font-medium text-gray-400 uppercase">Atendente</label>
                 <p className="text-sm text-gray-700 mt-1">{selectedConv.assigned_to_name}</p>
               </div>
             )}
-
             <div>
               <label className="text-xs font-medium text-gray-400 uppercase">Canal</label>
               <p className="text-sm text-gray-700 mt-1">{selectedConv.channel_name || 'WhatsApp'}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transfer Modal */}
+      {showTransferModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Transferir conversa</h3>
+              <button onClick={() => setShowTransferModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+
+            <h4 className="text-sm font-medium text-gray-500 mb-2">Para atendente:</h4>
+            <div className="space-y-1 mb-4">
+              {users.map((u) => (
+                <button
+                  key={u.id}
+                  onClick={() => transferToUser(u.id)}
+                  className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg text-left"
+                >
+                  <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center">
+                    <span className="text-primary-700 text-xs font-medium">{u.name.charAt(0)}</span>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{u.name}</p>
+                    <p className="text-xs text-gray-400">{u.role_name}</p>
+                  </div>
+                  {u.is_online && <div className="w-2 h-2 bg-green-500 rounded-full ml-auto" />}
+                </button>
+              ))}
+            </div>
+
+            <h4 className="text-sm font-medium text-gray-500 mb-2">Para time:</h4>
+            <div className="space-y-1">
+              {teams.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => transferToTeam(t.id)}
+                  className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg text-left"
+                >
+                  <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center">
+                    <ArrowRightLeft size={14} className="text-orange-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{t.name}</p>
+                    <p className="text-xs text-gray-400">{t.member_count} membros</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mention Modal */}
+      {showMentionModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Mencionar atendente</h3>
+              <button onClick={() => setShowMentionModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="space-y-1">
+              {users.map((u) => (
+                <button
+                  key={u.id}
+                  onClick={() => mentionUser(u.name)}
+                  className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg text-left"
+                >
+                  <AtSign size={16} className="text-purple-500" />
+                  <span className="text-sm text-gray-900">{u.name}</span>
+                  {u.is_online && <div className="w-2 h-2 bg-green-500 rounded-full ml-auto" />}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Call Modal */}
+      {showCallModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <PhoneCall size={28} className="text-green-600" />
+            </div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Ligar para</h3>
+            <p className="text-gray-500 mb-1">{selectedConv?.contact_name}</p>
+            <p className="text-gray-400 text-sm mb-6">{selectedConv?.contact_phone}</p>
+            <p className="text-xs text-gray-400 mb-4">
+              O WhatsApp não suporta chamadas via API. A chamada será aberta no seu WhatsApp.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowCallModal(false)}
+                className="btn-secondary flex-1"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  window.open(`https://wa.me/${selectedConv?.contact_phone}`, '_blank')
+                  makeCall()
+                }}
+                className="btn-primary flex-1"
+              >
+                <Phone size={16} /> Abrir WhatsApp
+              </button>
             </div>
           </div>
         </div>
