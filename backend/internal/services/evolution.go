@@ -250,17 +250,29 @@ func (s *EvolutionService) GetConnectionStatus(instanceName string) (string, err
 
 // GetMediaBase64 fetches media content as base64 from Evolution API
 func (s *EvolutionService) GetMediaBase64(instanceName, messageID string) (string, string, error) {
-	// Get the external message ID from our database
+	// Get the external message ID and contact phone from our database
 	var externalID string
-	err := s.db.QueryRow("SELECT external_id FROM messages WHERE id = $1", messageID).Scan(&externalID)
+	var contactPhone string
+	err := s.db.QueryRow(`
+		SELECT m.external_id, co.phone
+		FROM messages m
+		JOIN conversations c ON m.conversation_id = c.id
+		JOIN contacts co ON c.contact_id = co.id
+		WHERE m.id = $1
+	`, messageID).Scan(&externalID, &contactPhone)
 	if err != nil || externalID == "" {
 		return "", "", fmt.Errorf("external message ID not found")
 	}
 
+	// Build remoteJid from phone
+	remoteJid := contactPhone + "@s.whatsapp.net"
+
 	payload := map[string]interface{}{
 		"message": map[string]interface{}{
 			"key": map[string]interface{}{
-				"id": externalID,
+				"id":        externalID,
+				"remoteJid": remoteJid,
+				"fromMe":    false,
 			},
 		},
 		"convertToMp4": false,
@@ -285,6 +297,7 @@ func (s *EvolutionService) GetMediaBase64(instanceName, messageID string) (strin
 	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		log.Printf("[MEDIA] Evolution API returned %d: %s", resp.StatusCode, string(respBody))
 		return "", "", fmt.Errorf("Evolution API error (status %d)", resp.StatusCode)
 	}
 
@@ -296,8 +309,21 @@ func (s *EvolutionService) GetMediaBase64(instanceName, messageID string) (strin
 	base64Data, _ := result["base64"].(string)
 	mimeType, _ := result["mimetype"].(string)
 
+	// Also try "mediaUrl" field (some versions return direct URL)
 	if base64Data == "" {
+		if mediaURL, ok := result["mediaUrl"].(string); ok && mediaURL != "" {
+			return "", "", fmt.Errorf("got mediaUrl instead of base64, fallback needed")
+		}
 		return "", "", fmt.Errorf("no base64 data in response")
+	}
+
+	// Remove data URI prefix if present
+	if len(base64Data) > 100 && base64Data[:5] == "data:" {
+		// Format: data:audio/ogg;base64,XXXX
+		parts := splitOnce(base64Data, ",")
+		if len(parts) == 2 {
+			base64Data = parts[1]
+		}
 	}
 
 	return base64Data, mimeType, nil
@@ -929,4 +955,13 @@ func extractMessageContent(message map[string]interface{}) (msgType, content, me
 	}
 
 	return "text", "", ""
+}
+
+func splitOnce(s, sep string) []string {
+	for i := range s {
+		if i+len(sep) <= len(s) && s[i:i+len(sep)] == sep {
+			return []string{s[:i], s[i+len(sep):]}
+		}
+	}
+	return []string{s}
 }
