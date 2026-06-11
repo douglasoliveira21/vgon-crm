@@ -69,31 +69,53 @@ func (s *EvolutionService) SyncContacts(instanceName, companyID string) (int, er
 	synced := 0
 	skipped := 0
 	for _, contact := range contacts {
-		jid, _ := contact["id"].(string)
-		if jid == "" {
-			jid, _ = contact["remoteJid"].(string)
+		// Try to get the phone number from different fields
+		var phone string
+
+		// Try remoteJid first (format: 5531999999999@s.whatsapp.net)
+		if jid, ok := contact["remoteJid"].(string); ok && jid != "" {
+			phone = extractPhoneFromJid(jid)
 		}
-		if jid == "" {
-			jid, _ = contact["jid"].(string)
+		if phone == "" {
+			if jid, ok := contact["jid"].(string); ok && jid != "" {
+				phone = extractPhoneFromJid(jid)
+			}
 		}
-		if jid == "" {
+		// Try id field - could be JID or internal ID
+		if phone == "" {
+			if id, ok := contact["id"].(string); ok && id != "" {
+				// Only use if it looks like a JID (contains @)
+				if strings.Contains(id, "@") {
+					phone = extractPhoneFromJid(id)
+				}
+			}
+		}
+		// Try owner field
+		if phone == "" {
+			if owner, ok := contact["owner"].(string); ok && strings.Contains(owner, "@") {
+				// Skip - this is our own number
+			}
+		}
+
+		// Validate: phone must be numeric and reasonable length
+		if phone == "" || len(phone) < 8 || len(phone) > 15 {
+			skipped++
+			continue
+		}
+		// Check if phone is actually numeric
+		isNumeric := true
+		for _, c := range phone {
+			if c < '0' || c > '9' {
+				isNumeric = false
+				break
+			}
+		}
+		if !isNumeric {
 			skipped++
 			continue
 		}
 
-		// Skip groups, status broadcast, and server messages
-		if jid == "status@broadcast" || jid == "0@s.whatsapp.net" {
-			continue
-		}
-		if strings.Contains(jid, "@g.us") || strings.Contains(jid, "@broadcast") || strings.Contains(jid, "@newsletter") {
-			continue
-		}
-
-		phone := extractPhoneFromJid(jid)
-		if phone == "" || len(phone) < 8 {
-			continue
-		}
-
+		// Skip groups and broadcasts
 		name, _ := contact["pushName"].(string)
 		if name == "" {
 			name, _ = contact["name"].(string)
