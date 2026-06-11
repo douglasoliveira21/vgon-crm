@@ -669,26 +669,43 @@ func GetMetrics(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
 
-		metrics := make(map[string]interface{})
+		var totalConversations, openConversations, resolvedConversations int
+		var totalMessages int
+		var dealsWonValue, dealsOpenValue float64
+		var dealsWonCount int
+		var totalCalls int
+		var totalContacts int
 
 		// Conversations metrics
-		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1", companyID).Scan(&metrics["total_conversations"])
-		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1 AND status = 'open'", companyID).Scan(&metrics["open_conversations"])
-		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1 AND status = 'resolved'", companyID).Scan(&metrics["resolved_conversations"])
+		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1", companyID).Scan(&totalConversations)
+		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1 AND status = 'open'", companyID).Scan(&openConversations)
+		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1 AND status = 'resolved'", companyID).Scan(&resolvedConversations)
 
 		// Messages
-		svc.DB.QueryRow("SELECT COUNT(*) FROM messages WHERE company_id = $1", companyID).Scan(&metrics["total_messages"])
+		svc.DB.QueryRow("SELECT COUNT(*) FROM messages WHERE company_id = $1", companyID).Scan(&totalMessages)
 
 		// Deals
-		svc.DB.QueryRow("SELECT COALESCE(SUM(value), 0) FROM deals WHERE company_id = $1 AND status = 'won'", companyID).Scan(&metrics["deals_won_value"])
-		svc.DB.QueryRow("SELECT COALESCE(SUM(value), 0) FROM deals WHERE company_id = $1 AND status = 'open'", companyID).Scan(&metrics["deals_open_value"])
-		svc.DB.QueryRow("SELECT COUNT(*) FROM deals WHERE company_id = $1 AND status = 'won'", companyID).Scan(&metrics["deals_won_count"])
+		svc.DB.QueryRow("SELECT COALESCE(SUM(value), 0) FROM deals WHERE company_id = $1 AND status = 'won'", companyID).Scan(&dealsWonValue)
+		svc.DB.QueryRow("SELECT COALESCE(SUM(value), 0) FROM deals WHERE company_id = $1 AND status = 'open'", companyID).Scan(&dealsOpenValue)
+		svc.DB.QueryRow("SELECT COUNT(*) FROM deals WHERE company_id = $1 AND status = 'won'", companyID).Scan(&dealsWonCount)
 
 		// Calls
-		svc.DB.QueryRow("SELECT COUNT(*) FROM calls WHERE company_id = $1", companyID).Scan(&metrics["total_calls"])
+		svc.DB.QueryRow("SELECT COUNT(*) FROM calls WHERE company_id = $1", companyID).Scan(&totalCalls)
 
 		// Contacts
-		svc.DB.QueryRow("SELECT COUNT(*) FROM contacts WHERE company_id = $1", companyID).Scan(&metrics["total_contacts"])
+		svc.DB.QueryRow("SELECT COUNT(*) FROM contacts WHERE company_id = $1", companyID).Scan(&totalContacts)
+
+		metrics := fiber.Map{
+			"total_conversations":    totalConversations,
+			"open_conversations":     openConversations,
+			"resolved_conversations": resolvedConversations,
+			"total_messages":         totalMessages,
+			"deals_won_value":        dealsWonValue,
+			"deals_open_value":       dealsOpenValue,
+			"deals_won_count":        dealsWonCount,
+			"total_calls":            totalCalls,
+			"total_contacts":         totalContacts,
+		}
 
 		return c.JSON(fiber.Map{"metrics": metrics})
 	}
