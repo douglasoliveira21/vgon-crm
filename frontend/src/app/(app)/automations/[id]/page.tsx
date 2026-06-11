@@ -449,32 +449,57 @@ function NodeConfigPanel({ node, onUpdate }: { node: Node; onUpdate: (config: Re
 
   // --- TRIGGER NODES ---
   if (nodeType === 'trigger_inbox_message') {
+    const [channels, setChannels] = useState<Array<{id: string; name: string; type: string; status: string}>>([])
+
+    useEffect(() => {
+      api.get('/channels').then(res => setChannels(res.data.channels || [])).catch(() => {})
+    }, [])
+
+    const filteredChannels = config.channel_type && config.channel_type !== 'any'
+      ? channels.filter(c => c.type === config.channel_type)
+      : channels
+
     return (
       <div className="space-y-3">
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Caixa de entrada (canal)</label>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Tipo de canal</label>
           <select
             value={config.channel_type || 'any'}
-            onChange={(e) => onUpdate({ channel_type: e.target.value })}
+            onChange={(e) => onUpdate({ channel_type: e.target.value, channel_id: '', channel_name: '' })}
             className="input text-sm"
           >
-            <option value="any">Qualquer caixa de entrada</option>
+            <option value="any">Qualquer canal</option>
             <option value="whatsapp">WhatsApp</option>
             <option value="email">E-mail</option>
             <option value="webchat">Chat do site</option>
           </select>
         </div>
+
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Instância específica (opcional)</label>
-          <input
-            type="text"
-            value={config.instance_name || ''}
-            onChange={(e) => onUpdate({ instance_name: e.target.value })}
+          <label className="block text-xs font-medium text-gray-600 mb-1">Caixa de entrada</label>
+          <select
+            value={config.channel_id || ''}
+            onChange={(e) => {
+              const ch = channels.find(c => c.id === e.target.value)
+              onUpdate({ channel_id: e.target.value, channel_name: ch?.name || '' })
+            }}
             className="input text-sm"
-            placeholder="Nome da instância (ex: vgonsuporte)"
-          />
-          <p className="text-xs text-gray-400 mt-1">Deixe vazio para todas as instâncias do canal</p>
+          >
+            <option value="">Todas as caixas de entrada</option>
+            {filteredChannels.map(ch => (
+              <option key={ch.id} value={ch.id}>
+                {ch.name} {ch.status === 'connected' ? '🟢' : '⚪'}
+              </option>
+            ))}
+          </select>
         </div>
+
+        {config.channel_name && (
+          <div className="p-2 bg-green-50 rounded-lg text-xs text-green-700">
+            ✅ Selecionado: <strong>{config.channel_name}</strong>
+          </div>
+        )}
+
         <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
           📥 Este fluxo será ativado quando uma mensagem chegar na caixa de entrada selecionada.
         </div>
