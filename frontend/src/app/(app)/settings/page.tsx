@@ -1,9 +1,10 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import { useAuthStore } from '@/store/auth'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { User, Building, Shield, Bell, Palette, MessageSquare } from 'lucide-react'
+import { User, Building, Shield, Bell, Palette, MessageSquare, Tag } from 'lucide-react'
 
 export default function SettingsPage() {
   const { user } = useAuthStore()
@@ -148,6 +149,102 @@ export default function SettingsPage() {
             </label>
           </div>
         </div>
+
+        {/* Tags */}
+        <TagsManager />
+      </div>
+    </div>
+  )
+}
+
+function TagsManager() {
+  const [tags, setTags] = useState<Array<{id: string; name: string; color: string}>>([])
+  const [newTag, setNewTag] = useState('')
+  const [newColor, setNewColor] = useState('#3B82F6')
+
+  useEffect(() => {
+    fetchTags()
+  }, [])
+
+  const fetchTags = async () => {
+    try {
+      const res = await api.get('/tags')
+      setTags(res.data.tags || [])
+    } catch {}
+  }
+
+  const createTag = async () => {
+    if (!newTag.trim()) return
+    try {
+      await api.post('/tags', { name: newTag, color: newColor })
+      toast.success('Tag criada')
+      setNewTag('')
+      fetchTags()
+    } catch {
+      toast.error('Erro ao criar tag')
+    }
+  }
+
+  const deleteTag = async (id: string) => {
+    if (!confirm('Remover esta tag?')) return
+    try {
+      await api.delete(`/tags/${id}`)
+      setTags(tags.filter(t => t.id !== id))
+      toast.success('Tag removida')
+    } catch {
+      toast.error('Erro ao remover')
+    }
+  }
+
+  return (
+    <div className="card p-6">
+      <div className="flex items-center gap-3 mb-4">
+        <Tag size={20} className="text-gray-400" />
+        <h2 className="text-lg font-semibold text-gray-900">Tags / Etiquetas</h2>
+      </div>
+
+      {/* Create tag */}
+      <div className="flex items-center gap-2 mb-4">
+        <input
+          type="color"
+          value={newColor}
+          onChange={(e) => setNewColor(e.target.value)}
+          className="w-9 h-9 rounded-lg border border-gray-200 cursor-pointer"
+        />
+        <input
+          type="text"
+          value={newTag}
+          onChange={(e) => setNewTag(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') createTag() }}
+          className="input flex-1"
+          placeholder="Nome da nova tag..."
+        />
+        <button onClick={createTag} disabled={!newTag.trim()} className="btn-primary text-sm py-2.5">
+          Criar
+        </button>
+      </div>
+
+      {/* Tags list */}
+      <div className="flex flex-wrap gap-2">
+        {tags.map((tag) => (
+          <div
+            key={tag.id}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium border"
+            style={{ backgroundColor: tag.color + '20', borderColor: tag.color, color: tag.color }}
+          >
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: tag.color }} />
+            {tag.name}
+            <button
+              onClick={() => deleteTag(tag.id)}
+              className="ml-1 opacity-50 hover:opacity-100"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+        {tags.length === 0 && (
+          <p className="text-sm text-gray-400">Nenhuma tag criada. Crie tags para organizar seus contatos.</p>
+        )}
       </div>
     </div>
   )
