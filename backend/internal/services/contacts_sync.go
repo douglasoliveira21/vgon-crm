@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -68,20 +69,25 @@ func (s *EvolutionService) SyncContacts(instanceName, companyID string) (int, er
 	}
 
 	synced := 0
+	skipped := 0
 	for _, contact := range contacts {
 		jid, _ := contact["id"].(string)
 		if jid == "" {
 			jid, _ = contact["remoteJid"].(string)
 		}
 		if jid == "" {
+			jid, _ = contact["jid"].(string)
+		}
+		if jid == "" {
+			skipped++
 			continue
 		}
 
-		// Skip groups and status
-		if len(jid) < 5 || jid == "status@broadcast" {
+		// Skip groups, status broadcast, and server messages
+		if jid == "status@broadcast" || jid == "0@s.whatsapp.net" {
 			continue
 		}
-		if len(jid) > 20 && jid[len(jid)-15:] == "@g.us" {
+		if strings.Contains(jid, "@g.us") || strings.Contains(jid, "@broadcast") || strings.Contains(jid, "@newsletter") {
 			continue
 		}
 
@@ -96,6 +102,9 @@ func (s *EvolutionService) SyncContacts(instanceName, companyID string) (int, er
 		}
 		if name == "" {
 			name, _ = contact["notify"].(string)
+		}
+		if name == "" {
+			name, _ = contact["verifiedName"].(string)
 		}
 		if name == "" {
 			name = phone
@@ -121,7 +130,7 @@ func (s *EvolutionService) SyncContacts(instanceName, companyID string) (int, er
 		synced++
 	}
 
-	log.Printf("[SYNC] Synced %d contacts for instance %s", synced, instanceName)
+	log.Printf("[SYNC] Synced %d contacts for instance %s (skipped %d, total from API: %d)", synced, instanceName, skipped, len(contacts))
 	return synced, nil
 }
 
