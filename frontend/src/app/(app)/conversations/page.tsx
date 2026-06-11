@@ -112,6 +112,7 @@ export default function ConversationsPage() {
   // Attachment preview
   const [pendingFile, setPendingFile] = useState<{ file: File; preview: string; type: string } | null>(null)
   const [pendingCaption, setPendingCaption] = useState('')
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
 
   // Context menu & reply
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; message: Message } | null>(null)
@@ -1176,8 +1177,38 @@ export default function ConversationsPage() {
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
                     placeholder="Digite uma mensagem..."
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500/20 outline-none"
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500/20 outline-none pr-10"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-yellow-500"
+                  >
+                    <Smile size={20} />
+                  </button>
+
+                  {/* Emoji Picker */}
+                  {showEmojiPicker && (
+                    <div className="absolute bottom-14 right-0 z-50">
+                      <div className="bg-white rounded-xl shadow-xl border border-gray-200 p-3 w-80 max-h-72 overflow-y-auto">
+                        <div className="grid grid-cols-8 gap-1">
+                          {['😀','😂','🥹','😍','🥰','😘','😜','🤪','😎','🤩','🥳','😇','🙃','🤔','🫡','🤫','🫣','😬','😅','😢','😭','😤','🤬','🥺','😱','🫠','🤗','🤭','👍','👎','👋','🤝','🙏','💪','❤️','🔥','✨','💯','🎉','🎊','👏','🙌','💐','🌹','🌟','⭐','🌈','☀️','🌙','💬','📩','📎','📋','✅','❌','⚠️','💡','🔔','🕐','📅','💰','🏆','🎯','🚀','💻','📱','🎵','📸','🎬','📊','📈','🏢','👤','👥','🤖','💼','📞','✉️','🔗','🔒','🛒'].map((emoji) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              onClick={() => {
+                                setNewMessage((prev) => prev + emoji)
+                                setShowEmojiPicker(false)
+                              }}
+                              className="p-1.5 text-xl hover:bg-gray-100 rounded-lg transition-colors"
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Mic */}
