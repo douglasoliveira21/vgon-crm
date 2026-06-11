@@ -190,36 +190,60 @@ export default function FlowEditorPage() {
 
   const fetchFlow = async () => {
     try {
-      const response = await api.get(`/automation-flows/${flowId}`)
-      const flow = response.data
+      const response = await api.get('/bot-flows')
+      const flows = response.data.flows || []
+      const flow = flows.find((f: any) => f.id === flowId)
       if (flow) {
-        setName(flow.name)
+        setName(flow.name || '')
         setDescription(flow.description || '')
-        setIsActive(flow.is_active)
+        setIsActive(flow.is_active || false)
+
+        // Parse nodes - handle double-encoded strings
+        let parsedNodes: any[] = []
         if (flow.nodes) {
-          const parsedNodes = typeof flow.nodes === 'string' ? JSON.parse(flow.nodes) : flow.nodes
-          setNodes(parsedNodes.map((n: any) => ({
-            ...n,
-            style: { borderColor: getNodeColor(n.data?.nodeType || n.type || '') },
-          })))
+          let nodesData = flow.nodes
+          // If it's a string, parse it
+          if (typeof nodesData === 'string') {
+            try { nodesData = JSON.parse(nodesData) } catch {}
+          }
+          // If still a string (double encoded), parse again
+          if (typeof nodesData === 'string') {
+            try { nodesData = JSON.parse(nodesData) } catch {}
+          }
+          if (Array.isArray(nodesData)) {
+            parsedNodes = nodesData.map((n: any) => ({
+              ...n,
+              style: {
+                borderColor: getNodeColor(n.data?.nodeType || ''),
+                borderWidth: 2,
+                borderRadius: 12,
+                padding: 12,
+                fontSize: 13,
+                minWidth: 180,
+              },
+            }))
+          }
         }
+        setNodes(parsedNodes)
+
+        // Parse edges
+        let parsedEdges: any[] = []
         if (flow.edges) {
-          const parsedEdges = typeof flow.edges === 'string' ? JSON.parse(flow.edges) : flow.edges
-          setEdges(parsedEdges)
+          let edgesData = flow.edges
+          if (typeof edgesData === 'string') {
+            try { edgesData = JSON.parse(edgesData) } catch {}
+          }
+          if (typeof edgesData === 'string') {
+            try { edgesData = JSON.parse(edgesData) } catch {}
+          }
+          if (Array.isArray(edgesData)) {
+            parsedEdges = edgesData
+          }
         }
+        setEdges(parsedEdges)
       }
-    } catch {
-      // Try old format
-      try {
-        const response = await api.get('/bot-flows')
-        const flows = response.data.flows || []
-        const flow = flows.find((f: any) => f.id === flowId)
-        if (flow) {
-          setName(flow.name)
-          setDescription(flow.description || '')
-          setIsActive(flow.is_active)
-        }
-      } catch {}
+    } catch (err) {
+      console.error('Error loading flow:', err)
     }
   }
 
@@ -296,8 +320,8 @@ export default function FlowEditorPage() {
         trigger_type: nodes.find(n => n.data?.nodeType?.startsWith('trigger'))?.data?.nodeType || 'trigger_new_conversation',
         trigger_value: '',
         is_active: isActive,
-        nodes: JSON.stringify(nodes),
-        edges: JSON.stringify(edges),
+        nodes: nodes,
+        edges: edges,
       }
 
       if (isNew) {

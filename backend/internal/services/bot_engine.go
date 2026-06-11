@@ -53,13 +53,13 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 		shouldTrigger := false
 
 		switch triggerType {
-		case "new_conversation":
+		case "new_conversation", "trigger_new_conversation":
 			// Check if this is the first message in conversation
 			var msgCount int
 			e.db.QueryRow("SELECT COUNT(*) FROM messages WHERE conversation_id = $1", conversationID).Scan(&msgCount)
 			shouldTrigger = msgCount <= 1
 
-		case "keyword":
+		case "keyword", "trigger_keyword":
 			if triggerValue != nil && *triggerValue != "" {
 				keywords := strings.Split(*triggerValue, ",")
 				msgLower := strings.ToLower(message)
@@ -71,12 +71,15 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 				}
 			}
 
-		case "off_hours":
+		case "off_hours", "trigger_off_hours":
 			hour := time.Now().Hour()
 			shouldTrigger = hour < 8 || hour >= 18
 
-		case "tag_added":
-			// Triggered externally when tag is added
+		case "trigger_inbox_message":
+			// Always trigger for inbox message (channel filtering done later)
+			shouldTrigger = true
+
+		case "tag_added", "trigger_tag_added":
 			shouldTrigger = false
 		}
 
@@ -97,9 +100,20 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 // executeFlow runs a bot flow
 func (e *BotEngine) executeFlow(flowID, companyID, conversationID, contactID, instanceName, phone string, nodesJSON json.RawMessage) {
 	var nodes []BotNode
+
+	// Try direct unmarshal
 	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
-		log.Printf("[BOT] Failed to parse nodes for flow %s: %v", flowID, err)
-		return
+		// Might be a double-encoded string - try unwrapping
+		var nodesStr string
+		if err2 := json.Unmarshal(nodesJSON, &nodesStr); err2 == nil {
+			if err3 := json.Unmarshal([]byte(nodesStr), &nodes); err3 != nil {
+				log.Printf("[BOT] Failed to parse nodes for flow %s: %v", flowID, err3)
+				return
+			}
+		} else {
+			log.Printf("[BOT] Failed to parse nodes for flow %s: %v", flowID, err)
+			return
+		}
 	}
 
 	if len(nodes) == 0 {
@@ -147,22 +161,68 @@ func (e *BotEngine) executeFlow(flowID, companyID, conversationID, contactID, in
 
 // executeNode processes a single node
 func (e *BotEngine) executeNode(node BotNode, companyID, conversationID, contactID, instanceName, phone string) error {
-	switch node.Type {
-	case "send_message":
+	// Get the actual node type from data.nodeType (React Flow format)
+	nodeType := node.Type
+	if nt, ok := node.Data["nodeType"].(string); ok && nt != "" {
+		nodeType = nt
+	}
+
+	// Get config from data.config
+	config, _ := node.Data["config"].(map[string]interface{})
+	if config == nil {
+		config = node.Data
+	}
+
+	switch nodeType {
+	case "send_message", "send_text":
+		msg, _ := config["message"].(string)
+		if msg == "" {
+			msg, _ = node.Data["message"].(string)
+		}
+		if msg != "" {
+			node.Data["message"] = msg
+		}
 		return e.nodeSendMessage(node, companyID, conversationID, instanceName, phone)
-	case "ask_question":
+	case "ask_question", "ask_text", "ask_options":
+		q, _ := config["question"].(string)
+		if q == "" {
+			q, _ = node.Data["question"].(string)
+		}
+		if q != "" {
+			node.Data["question"] = q
+		}
 		return e.nodeAskQuestion(node, companyID, conversationID, instanceName, phone)
-	case "delay":
+	case "delay", "wait_seconds", "wait_minutes", "wait_hours":
+		if secs, ok := config["seconds"].(float64); ok {
+			node.Data["seconds"] = secs
+		}
+		if mins, ok := config["minutes"].(float64); ok {
+			node.Data["seconds"] = mins * 60
+		}
+		if hrs, ok := config["hours"].(float64); ok {
+			node.Data["seconds"] = hrs * 3600
+		}
 		return e.nodeDelay(node)
-	case "add_tag":
+	case "add_tag", "action_add_tag":
+		tn, _ := config["tag_name"].(string)
+		if tn != "" {
+			node.Data["tag_name"] = tn
+		}
 		return e.nodeAddTag(node, companyID, contactID)
-	case "transfer_team":
+	case "transfer_team", "action_transfer_team":
+		tm, _ := config["team_name"].(string)
+		if tm != "" {
+			node.Data["team_name"] = tm
+		}
 		return e.nodeTransferTeam(node, companyID, conversationID)
-	case "call_webhook":
+	case "call_webhook", "action_webhook":
 		return e.nodeCallWebhook(node)
-	case "end":
+	case "end", "action_close_conversation":
+		cc, _ := config["close_conversation"].(bool)
+		node.Data["close_conversation"] = cc
 		return e.nodeEnd(node, companyID, conversationID)
 	default:
+		log.Printf("[BOT] Unknown node type: %s", nodeType)
 		return nil
 	}
 }
