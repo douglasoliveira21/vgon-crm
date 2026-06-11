@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Power,
   MessageCircle,
+  X,
 } from 'lucide-react'
 
 interface WhatsAppInstance {
