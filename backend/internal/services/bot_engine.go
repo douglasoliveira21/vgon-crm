@@ -230,13 +230,24 @@ func (e *BotEngine) executeNode(node BotNode, companyID, conversationID, contact
 func (e *BotEngine) nodeSendMessage(node BotNode, companyID, conversationID, instanceName, phone string) error {
 	message, _ := node.Data["message"].(string)
 	if message == "" {
+		if cfg, ok := node.Data["config"].(map[string]interface{}); ok {
+			message, _ = cfg["message"].(string)
+		}
+	}
+	if message == "" {
 		return nil
 	}
+
+	// Replace variables
+	message = e.replaceVariables(message, companyID, conversationID, phone)
 
 	// Send via WhatsApp
 	var externalID string
 	if instanceName != "" && phone != "" {
 		externalID, _ = e.evo.SendTextMessage(instanceName, phone, message)
+		log.Printf("[BOT] Sent message to %s via %s", phone, instanceName)
+	} else {
+		log.Printf("[BOT] Cannot send - instanceName='%s' phone='%s'", instanceName, phone)
 	}
 
 	// Save message
@@ -246,18 +257,35 @@ func (e *BotEngine) nodeSendMessage(node BotNode, companyID, conversationID, ins
 		VALUES ($1, $2, $3, 'bot', $4, 'text', $5, 'sent')
 	`, msgID, conversationID, companyID, message, externalID)
 
-	// Update conversation
 	e.db.Exec("UPDATE conversations SET last_message_at = NOW(), last_message_preview = $1 WHERE id = $2", message, conversationID)
 
-	// Notify via WebSocket
 	e.wsHub.BroadcastToCompany(companyID, "new_message", map[string]interface{}{
 		"id": msgID, "conversation_id": conversationID,
 		"sender_type": "bot", "content": message, "message_type": "text",
-		"sender_name": "Assistente",
+		"sender_name": "Bot",
 		"status":      "sent", "created_at": time.Now(),
 	})
 
 	return nil
+}
+
+func (e *BotEngine) replaceVariables(text, companyID, conversationID, phone string) string {
+	var contactName, contactPhone, contactEmail, contactCompany string
+	e.db.QueryRow(`
+		SELECT COALESCE(co.name, ''), COALESCE(co.phone, ''), COALESCE(co.email, ''), COALESCE(co.company_name, '')
+		FROM conversations c JOIN contacts co ON c.contact_id = co.id WHERE c.id = $1
+	`, conversationID).Scan(&contactName, &contactPhone, &contactEmail, &contactCompany)
+
+	if contactName == "" {
+		contactName = phone
+	}
+
+	text = strings.ReplaceAll(text, "{{nome}}", contactName)
+	text = strings.ReplaceAll(text, "{{telefone}}", contactPhone)
+	text = strings.ReplaceAll(text, "{{email}}", contactEmail)
+	text = strings.ReplaceAll(text, "{{empresa}}", contactCompany)
+	text = strings.ReplaceAll(text, "{{data_atual}}", time.Now().Format("02/01/2006"))
+	return text
 }
 
 func (e *BotEngine) nodeAskQuestion(node BotNode, companyID, conversationID, instanceName, phone string) error {
