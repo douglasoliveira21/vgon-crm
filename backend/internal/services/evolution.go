@@ -247,6 +247,61 @@ func (s *EvolutionService) GetConnectionStatus(instanceName string) (string, err
 	return "disconnected", nil
 }
 
+// GetMediaBase64 fetches media content as base64 from Evolution API
+func (s *EvolutionService) GetMediaBase64(instanceName, messageID string) (string, string, error) {
+	// Get the external message ID from our database
+	var externalID string
+	err := s.db.QueryRow("SELECT external_id FROM messages WHERE id = $1", messageID).Scan(&externalID)
+	if err != nil || externalID == "" {
+		return "", "", fmt.Errorf("external message ID not found")
+	}
+
+	payload := map[string]interface{}{
+		"message": map[string]interface{}{
+			"key": map[string]interface{}{
+				"id": externalID,
+			},
+		},
+		"convertToMp4": false,
+	}
+
+	body, _ := json.Marshal(payload)
+
+	httpReq, err := http.NewRequest("POST", fmt.Sprintf("%s/chat/getBase64FromMediaMessage/%s", s.cfg.EvolutionAPIURL, instanceName), bytes.NewBuffer(body))
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("apikey", s.cfg.EvolutionAPIKey)
+
+	resp, err := s.client.Do(httpReq)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to call Evolution API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return "", "", fmt.Errorf("Evolution API error (status %d)", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	base64Data, _ := result["base64"].(string)
+	mimeType, _ := result["mimetype"].(string)
+
+	if base64Data == "" {
+		return "", "", fmt.Errorf("no base64 data in response")
+	}
+
+	return base64Data, mimeType, nil
+}
+
 // DisconnectInstance disconnects a WhatsApp instance
 func (s *EvolutionService) DisconnectInstance(instanceName string) error {
 	httpReq, err := http.NewRequest("DELETE", fmt.Sprintf("%s/instance/logout/%s", s.cfg.EvolutionAPIURL, instanceName), nil)
@@ -465,7 +520,7 @@ func (s *EvolutionService) handleConnectionUpdate(instanceName string, event map
 
 func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[string]interface{}) {
 	data, _ := event["data"].(map[string]interface{})
-	
+
 	// Get instance info
 	var instance models.WhatsAppInstance
 	err := s.db.QueryRow(`
@@ -546,7 +601,7 @@ func (s *EvolutionService) handleMessageUpdate(instanceName string, event map[st
 	data, _ := event["data"].(map[string]interface{})
 	key, _ := data["key"].(map[string]interface{})
 	messageID, _ := key["id"].(string)
-	
+
 	update, _ := data["update"].(map[string]interface{})
 	status := "sent"
 	if s, ok := update["status"].(string); ok {

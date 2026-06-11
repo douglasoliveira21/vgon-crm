@@ -312,7 +312,7 @@ export default function ConversationsPage() {
                   {msg.message_type === 'image' && msg.media_url && (
                     <div className="mb-2">
                       <img
-                        src={msg.media_url}
+                        src={`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`}
                         alt="Imagem"
                         className="max-w-full rounded-lg max-h-60 object-cover"
                         onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
@@ -323,7 +323,7 @@ export default function ConversationsPage() {
                   {msg.message_type === 'audio' && msg.media_url && (
                     <div className="mb-1">
                       <audio controls className="max-w-full h-10" preload="metadata">
-                        <source src={msg.media_url} />
+                        <source src={`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`} />
                         Seu navegador não suporta áudio.
                       </audio>
                     </div>
@@ -332,7 +332,7 @@ export default function ConversationsPage() {
                   {msg.message_type === 'video' && msg.media_url && (
                     <div className="mb-2">
                       <video controls className="max-w-full rounded-lg max-h-60">
-                        <source src={msg.media_url} />
+                        <source src={`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`} />
                       </video>
                     </div>
                   )}

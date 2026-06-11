@@ -13,6 +13,9 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 		return c.JSON(fiber.Map{"status": "ok", "service": "EvoCRM Pro"})
 	})
 
+	// Media proxy (public - serves cached media)
+	app.Get("/media/:messageId", MediaProxy(svc))
+
 	api := app.Group("/api")
 
 	// ============================================
