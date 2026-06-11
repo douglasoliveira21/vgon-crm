@@ -625,7 +625,7 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	}
 
 	// Get or create contact
-	contactID := s.getOrCreateContact(instance.CompanyID, phone, data)
+	contactID := s.getOrCreateContact(instance.CompanyID, phone, data, instanceName)
 
 	// Get or create conversation
 	conversationID := s.getOrCreateConversation(instance.CompanyID, contactID, instance.ChannelID)
@@ -831,11 +831,17 @@ func (s *EvolutionService) handlePresenceUpdate(instanceName string, event map[s
 	})
 }
 
-func (s *EvolutionService) getOrCreateContact(companyID, phone string, data map[string]interface{}) string {
+func (s *EvolutionService) getOrCreateContact(companyID, phone string, data map[string]interface{}, instanceName string) string {
 	var contactID string
 	err := s.db.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, phone).Scan(&contactID)
 	if err == nil {
 		log.Printf("[CONTACT] Found existing contact %s for phone %s", contactID, phone)
+		// If no avatar yet, fetch in background
+		var avatarURL *string
+		s.db.QueryRow("SELECT avatar_url FROM contacts WHERE id = $1", contactID).Scan(&avatarURL)
+		if avatarURL == nil || *avatarURL == "" {
+			go s.fetchAndSaveContactPhoto(instanceName, phone, contactID)
+		}
 		return contactID
 	}
 
@@ -852,7 +858,21 @@ func (s *EvolutionService) getOrCreateContact(companyID, phone string, data map[
 	`, contactID, companyID, pushName, phone)
 
 	log.Printf("[CONTACT] Created new contact %s for phone %s", contactID, phone)
+
+	// Fetch profile photo in background
+	go s.fetchAndSaveContactPhoto(instanceName, phone, contactID)
+
 	return contactID
+}
+
+func (s *EvolutionService) fetchAndSaveContactPhoto(instanceName, phone, contactID string) {
+	if instanceName == "" {
+		return
+	}
+	_, err := s.SyncContactPhoto(instanceName, phone, contactID)
+	if err != nil {
+		log.Printf("[PHOTO] Could not fetch photo for %s: %v", phone, err)
+	}
 }
 
 func (s *EvolutionService) getOrCreateConversation(companyID, contactID string, channelID *string) string {
