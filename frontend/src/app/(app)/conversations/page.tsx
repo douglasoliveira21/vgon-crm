@@ -117,9 +117,8 @@ export default function ConversationsPage() {
   useEffect(() => {
     const handleNewMessage = (data: Message) => {
       if (selectedConv && data.conversation_id === selectedConv.id) {
-        // Avoid duplicates - don't add if it's our own message (already shown optimistically)
+        // User is viewing this chat - add message and don't count as unread
         if (data.sender_type === 'user' && data.sender_id === user?.id) {
-          // Replace temp message with real one
           setMessages((prev) => {
             const withoutTemp = prev.filter((m) => !m.id.startsWith('temp-'))
             const exists = withoutTemp.find((m) => m.id === data.id)
@@ -134,12 +133,35 @@ export default function ConversationsPage() {
           })
         }
         scrollToBottom()
-      }
-      fetchConversations()
 
-      // Browser notification
-      if (data.sender_type === 'contact' && document.hidden) {
-        showNotification(data)
+        // Update sidebar - no unread since user is viewing
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === data.conversation_id
+              ? { ...c, last_message_preview: data.content || '📎 Mídia', last_message_at: data.created_at, unread_count: 0 }
+              : c
+          )
+        )
+      } else {
+        // Message for another chat - update sidebar with unread count
+        setConversations((prev) => {
+          const exists = prev.find((c) => c.id === data.conversation_id)
+          if (exists) {
+            return prev.map((c) =>
+              c.id === data.conversation_id
+                ? { ...c, last_message_preview: data.content || '📎 Mídia', last_message_at: data.created_at, unread_count: (c.unread_count || 0) + 1 }
+                : c
+            )
+          }
+          // New conversation not in list - refetch
+          fetchConversations()
+          return prev
+        })
+
+        // Browser notification only when not viewing this chat
+        if (data.sender_type === 'contact') {
+          showNotification(data)
+        }
       }
     }
 
@@ -159,7 +181,6 @@ export default function ConversationsPage() {
       if (selectedConv && data.conversation_id === selectedConv.id) {
         setContactTyping(data.is_typing)
         setContactRecording(data.is_recording || false)
-        // Auto-clear after 5 seconds
         if (data.is_typing) {
           setTimeout(() => {
             setContactTyping(false)
