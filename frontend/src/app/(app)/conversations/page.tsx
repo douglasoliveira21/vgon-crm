@@ -278,6 +278,38 @@ export default function ConversationsPage() {
     } catch {}
   }
 
+  // Auto-refresh messages when chat is open (fallback for WebSocket)
+  useEffect(() => {
+    if (!selectedConv) return
+
+    const interval = setInterval(async () => {
+      try {
+        const response = await api.get(`/conversations/${selectedConv.id}/messages`)
+        const newMessages = response.data.messages || []
+        setMessages((prev) => {
+          // Only update if there are new messages (compare length)
+          if (newMessages.length > prev.filter((m: Message) => !m.id.startsWith('temp-')).length) {
+            // Keep temp messages and merge with new
+            const tempMsgs = prev.filter((m: Message) => m.id.startsWith('temp-'))
+            return [...newMessages, ...tempMsgs]
+          }
+          return prev
+        })
+      } catch {}
+    }, 5000) // Every 5 seconds
+
+    return () => clearInterval(interval)
+  }, [selectedConv?.id])
+
+  // Auto-refresh conversation list
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchConversations()
+    }, 10000) // Every 10 seconds
+
+    return () => clearInterval(interval)
+  }, [filter, statusFilter])
+
   const selectConversation = async (conv: Conversation) => {
     setSelectedConv(conv)
     if (selectedConv) wsService.leaveConversation(selectedConv.id)
