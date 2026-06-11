@@ -310,19 +310,52 @@ export default function ConversationsPage() {
 
                   {msg.message_type === 'image' && msg.media_url && (
                     <div className="mb-2">
-                      <Image size={40} className="opacity-50" />
-                      <span className="text-xs opacity-70">[Imagem]</span>
+                      <img
+                        src={msg.media_url}
+                        alt="Imagem"
+                        className="max-w-full rounded-lg max-h-60 object-cover"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                      />
+                    </div>
+                  )}
+
+                  {msg.message_type === 'audio' && msg.media_url && (
+                    <div className="mb-1">
+                      <audio controls className="max-w-full h-10" preload="metadata">
+                        <source src={msg.media_url} />
+                        Seu navegador não suporta áudio.
+                      </audio>
+                    </div>
+                  )}
+
+                  {msg.message_type === 'video' && msg.media_url && (
+                    <div className="mb-2">
+                      <video controls className="max-w-full rounded-lg max-h-60">
+                        <source src={msg.media_url} />
+                      </video>
                     </div>
                   )}
 
                   {msg.message_type === 'document' && (
                     <div className="flex items-center gap-2 mb-1">
                       <FileText size={16} />
-                      <span className="text-xs">[Documento]</span>
+                      {msg.media_url ? (
+                        <a href={msg.media_url} target="_blank" rel="noopener noreferrer" className="text-xs underline">
+                          {msg.media_filename || 'Documento'}
+                        </a>
+                      ) : (
+                        <span className="text-xs">{msg.media_filename || 'Documento'}</span>
+                      )}
                     </div>
                   )}
 
-                  {msg.content && (
+                  {msg.message_type === 'sticker' && msg.media_url && (
+                    <div className="mb-1">
+                      <img src={msg.media_url} alt="Sticker" className="w-32 h-32 object-contain" />
+                    </div>
+                  )}
+
+                  {msg.content && msg.message_type !== 'audio' && (
                     <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                   )}
 
