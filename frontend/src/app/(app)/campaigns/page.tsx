@@ -194,8 +194,46 @@ function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCr
   const [name, setName] = useState('')
   const [messageContent, setMessageContent] = useState('')
   const [sendSpeed, setSendSpeed] = useState(30)
+  const [targetType, setTargetType] = useState('all') // all, tag, selected
   const [filterTag, setFilterTag] = useState('')
+  const [contactSearch, setContactSearch] = useState('')
+  const [allContacts, setAllContacts] = useState<Array<{id: string; name: string; phone: string}>>([])
+  const [selectedContacts, setSelectedContacts] = useState<Array<{id: string; name: string; phone: string}>>([])
+  const [searchResults, setSearchResults] = useState<Array<{id: string; name: string; phone: string}>>([])
+  const [tags, setTags] = useState<Array<{id: string; name: string; color: string}>>([])
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    api.get('/tags').then(res => setTags(res.data.tags || [])).catch(() => {})
+    api.get('/contacts', { params: { limit: 200 } }).then(res => {
+      setAllContacts((res.data.contacts || []).map((c: any) => ({ id: c.id, name: c.name || c.phone, phone: c.phone })))
+    }).catch(() => {})
+  }, [])
+
+  const searchContact = (query: string) => {
+    setContactSearch(query)
+    if (query.length < 2) { setSearchResults([]); return }
+    const results = allContacts.filter(c =>
+      c.name?.toLowerCase().includes(query.toLowerCase()) || c.phone?.includes(query)
+    ).slice(0, 10)
+    setSearchResults(results)
+  }
+
+  const addContact = (contact: {id: string; name: string; phone: string}) => {
+    if (!selectedContacts.find(c => c.id === contact.id)) {
+      setSelectedContacts([...selectedContacts, contact])
+    }
+    setContactSearch('')
+    setSearchResults([])
+  }
+
+  const removeContact = (id: string) => {
+    setSelectedContacts(selectedContacts.filter(c => c.id !== id))
+  }
+
+  const selectAll = () => {
+    setSelectedContacts(allContacts)
+  }
 
   const handleCreate = async () => {
     if (!name.trim()) { toast.error('Nome é obrigatório'); return }
@@ -207,6 +245,8 @@ function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCr
         message_content: messageContent,
         message_type: 'text',
         send_speed: sendSpeed,
+        filter_tag: targetType === 'tag' ? filterTag : undefined,
+        total_contacts: targetType === 'all' ? allContacts.length : selectedContacts.length,
       })
       toast.success('Campanha criada!')
       onCreated()
@@ -233,7 +273,7 @@ function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCr
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="input"
-              placeholder="Ex: Promoção de Natal, Lembrete de pagamento..."
+              placeholder="Ex: Promoção de Natal, Lembrete..."
             />
           </div>
 
@@ -243,13 +283,110 @@ function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCr
               value={messageContent}
               onChange={(e) => setMessageContent(e.target.value)}
               className="input resize-none"
-              rows={5}
+              rows={4}
               placeholder="Olá {{nome}}, temos uma novidade para você!"
             />
             <p className="text-xs text-gray-400 mt-1">
               Variáveis: {'{{nome}}'}, {'{{telefone}}'}, {'{{empresa}}'}, {'{{email}}'}
             </p>
           </div>
+
+          {/* Target audience */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Enviar para</label>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-gray-50" onClick={() => setTargetType('all')}>
+                <input type="radio" name="target" checked={targetType === 'all'} onChange={() => setTargetType('all')} />
+                <div>
+                  <p className="text-sm font-medium text-gray-900">Todos os contatos ({allContacts.length})</p>
+                  <p className="text-xs text-gray-400">Envia para toda a base de contatos</p>
+                </div>
+              </label>
+              <label className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-gray-50" onClick={() => setTargetType('tag')}>
+                <input type="radio" name="target" checked={targetType === 'tag'} onChange={() => setTargetType('tag')} />
+                <div>
+                  <p className="text-sm font-medium text-gray-900">Por tag</p>
+                  <p className="text-xs text-gray-400">Envia apenas para contatos com uma tag específica</p>
+                </div>
+              </label>
+              <label className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-gray-50" onClick={() => setTargetType('selected')}>
+                <input type="radio" name="target" checked={targetType === 'selected'} onChange={() => setTargetType('selected')} />
+                <div>
+                  <p className="text-sm font-medium text-gray-900">Selecionar contatos</p>
+                  <p className="text-xs text-gray-400">Escolha manualmente quem vai receber</p>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* Tag filter */}
+          {targetType === 'tag' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Selecionar tag</label>
+              <select
+                value={filterTag}
+                onChange={(e) => setFilterTag(e.target.value)}
+                className="input"
+              >
+                <option value="">Selecione uma tag...</option>
+                {tags.map(tag => (
+                  <option key={tag.id} value={tag.id}>{tag.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Contact selection */}
+          {targetType === 'selected' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Buscar contatos ({selectedContacts.length} selecionados)
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={contactSearch}
+                  onChange={(e) => searchContact(e.target.value)}
+                  className="input"
+                  placeholder="Buscar por nome ou telefone..."
+                />
+                {searchResults.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-32 overflow-y-auto">
+                    {searchResults.map(c => (
+                      <button
+                        key={c.id}
+                        onClick={() => addContact(c)}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-50 text-sm border-b border-gray-50"
+                      >
+                        {c.name} <span className="text-gray-400">({c.phone})</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <button onClick={selectAll} className="text-xs text-primary-600 mt-2 hover:underline">
+                Selecionar todos ({allContacts.length})
+              </button>
+
+              {/* Selected contacts list */}
+              {selectedContacts.length > 0 && (
+                <div className="mt-2 max-h-32 overflow-y-auto space-y-1">
+                  {selectedContacts.slice(0, 20).map(c => (
+                    <div key={c.id} className="flex items-center justify-between px-2 py-1 bg-gray-50 rounded text-xs">
+                      <span>{c.name}</span>
+                      <button onClick={() => removeContact(c.id)} className="text-red-400 hover:text-red-600">
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                  {selectedContacts.length > 20 && (
+                    <p className="text-xs text-gray-400 px-2">+ {selectedContacts.length - 20} mais...</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Velocidade de envio</label>
@@ -258,18 +395,15 @@ function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCr
               onChange={(e) => setSendSpeed(parseInt(e.target.value))}
               className="input"
             >
-              <option value={10}>10 mensagens/minuto (seguro)</option>
-              <option value={20}>20 mensagens/minuto</option>
-              <option value={30}>30 mensagens/minuto</option>
-              <option value={60}>60 mensagens/minuto (risco de bloqueio)</option>
+              <option value={10}>10 msg/min (seguro)</option>
+              <option value={20}>20 msg/min</option>
+              <option value={30}>30 msg/min</option>
+              <option value={60}>60 msg/min (risco)</option>
             </select>
-            <p className="text-xs text-gray-400 mt-1">
-              ⚠️ Velocidades altas podem causar bloqueio temporário do WhatsApp
-            </p>
           </div>
 
           <div className="p-3 bg-yellow-50 rounded-lg text-xs text-yellow-700">
-            📋 A campanha será enviada para todos os contatos ativos. Certifique-se de que os contatos autorizaram o recebimento (LGPD).
+            ⚠️ Respeite a LGPD. Envie apenas para contatos que autorizaram o recebimento.
           </div>
         </div>
 
