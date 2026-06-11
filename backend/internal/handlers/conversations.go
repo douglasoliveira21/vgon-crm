@@ -250,8 +250,8 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 		}
 
 		svc.DB.Exec(`
-			INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, media_filename, external_id, status)
-			VALUES ($1, $2, $3, 'user', $4, $5, $6, $7, $8, 'sent')
+			INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, media_url, media_filename, external_id, status)
+			VALUES ($1, $2, $3, 'user', $4, $5, $6, 'sent', $7, $8, 'sent')
 		`, msgID, conversationID, companyID, userID, content, body.MediaType, body.FileName, externalID)
 
 		svc.DB.Exec(`UPDATE conversations SET last_message_at = NOW(), last_message_preview = $1, updated_at = NOW() WHERE id = $2`,
@@ -308,8 +308,8 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 		// Save message to DB
 		msgID := uuid.New().String()
 		svc.DB.Exec(`
-			INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, external_id, status)
-			VALUES ($1, $2, $3, 'user', $4, '🎵 Áudio', 'audio', $5, 'sent')
+			INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, media_url, external_id, status)
+			VALUES ($1, $2, $3, 'user', $4, '🎵 Áudio', 'audio', 'sent', $5, 'sent')
 		`, msgID, conversationID, companyID, userID, externalID)
 
 		// Update conversation
