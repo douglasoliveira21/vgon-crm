@@ -269,8 +269,6 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 		})
 	}
 }
-	}
-}
 
 func SendAudioMessage(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
