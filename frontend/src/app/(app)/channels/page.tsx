@@ -156,6 +156,15 @@ export default function ChannelsPage() {
     }
   }
 
+  const syncContacts = async (instanceId: string) => {
+    try {
+      const response = await api.post(`/whatsapp/instances/${instanceId}/sync-contacts`)
+      toast.success(`${response.data.count} contatos sincronizados! Fotos sendo baixadas em segundo plano.`)
+    } catch (error) {
+      toast.error('Erro ao sincronizar contatos')
+    }
+  }
+
   const getStatusBadge = (status: string) => {
     const statusMap: Record<string, { label: string; class: string; icon: any }> = {
       connected: { label: 'Conectado', class: 'badge-green', icon: Wifi },
@@ -260,6 +269,15 @@ export default function ChannelsPage() {
                   title="Ver QR Code"
                 >
                   <QrCode size={18} />
+                </button>
+              )}
+              {instance.status === 'connected' && (
+                <button
+                  onClick={() => syncContacts(instance.id)}
+                  className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                  title="Sincronizar contatos e fotos"
+                >
+                  <RefreshCw size={18} />
                 </button>
               )}
               <button

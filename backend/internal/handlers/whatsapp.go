@@ -135,6 +135,46 @@ func DeleteWhatsAppInstance(svc *services.Container) fiber.Handler {
 	}
 }
 
+func SyncWhatsAppContacts(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		instanceID := c.Params("id")
+
+		var instanceName string
+		err := svc.DB.QueryRow("SELECT instance_name FROM whatsapp_instances WHERE id = $1 AND company_id = $2", instanceID, companyID).Scan(&instanceName)
+		if err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Instance not found"})
+		}
+
+		count, err := svc.Evolution.SyncContacts(instanceName, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		// Sync photos in background
+		go svc.Evolution.SyncAllContactPhotos(instanceName, companyID)
+
+		return c.JSON(fiber.Map{"message": "Contacts synced", "count": count})
+	}
+}
+
+func SyncWhatsAppPhotos(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		instanceID := c.Params("id")
+
+		var instanceName string
+		err := svc.DB.QueryRow("SELECT instance_name FROM whatsapp_instances WHERE id = $1 AND company_id = $2", instanceID, companyID).Scan(&instanceName)
+		if err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Instance not found"})
+		}
+
+		go svc.Evolution.SyncAllContactPhotos(instanceName, companyID)
+
+		return c.JSON(fiber.Map{"message": "Photo sync started in background"})
+	}
+}
+
 func HandleEvolutionWebhook(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		instanceName := c.Params("instanceName")

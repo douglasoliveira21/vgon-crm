@@ -675,10 +675,14 @@ export default function ConversationsPage() {
                 selectedConv?.id === conv.id && 'bg-primary-50 border-l-2 border-l-primary-500'
               )}
             >
-              <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <span className="text-primary-700 font-medium text-sm">
-                  {conv.contact_name?.charAt(0)?.toUpperCase() || '?'}
-                </span>
+              <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden">
+                {conv.contact_avatar_url ? (
+                  <img src={`${process.env.NEXT_PUBLIC_API_URL}${conv.contact_avatar_url}`} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-primary-700 font-medium text-sm">
+                    {conv.contact_name?.charAt(0)?.toUpperCase() || '?'}
+                  </span>
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">

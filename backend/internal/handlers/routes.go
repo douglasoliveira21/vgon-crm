@@ -60,6 +60,8 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	whatsapp.Get("/instances/:id/status", GetWhatsAppStatus(svc))
 	whatsapp.Post("/instances/:id/disconnect", DisconnectWhatsAppInstance(svc))
 	whatsapp.Delete("/instances/:id", DeleteWhatsAppInstance(svc))
+	whatsapp.Post("/instances/:id/sync-contacts", SyncWhatsAppContacts(svc))
+	whatsapp.Post("/instances/:id/sync-photos", SyncWhatsAppPhotos(svc))
 
 	// Conversations
 	conversations := protected.Group("/conversations")
