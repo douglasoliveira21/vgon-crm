@@ -15,24 +15,38 @@ import (
 
 // SyncContacts fetches contacts from Evolution API and saves to database
 func (s *EvolutionService) SyncContacts(instanceName, companyID string) (int, error) {
-	// Fetch contacts from Evolution API
-	httpReq, err := http.NewRequest("GET", fmt.Sprintf("%s/chat/fetchAllContacts/%s", s.cfg.EvolutionAPIURL, instanceName), nil)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create request: %w", err)
+	// Try multiple endpoint formats (varies by Evolution API version)
+	endpoints := []string{
+		fmt.Sprintf("%s/chat/findContacts/%s", s.cfg.EvolutionAPIURL, instanceName),
+		fmt.Sprintf("%s/chat/fetchAllContacts/%s", s.cfg.EvolutionAPIURL, instanceName),
 	}
 
-	httpReq.Header.Set("apikey", s.cfg.EvolutionAPIKey)
+	var respBody []byte
+	var success bool
 
-	resp, err := s.client.Do(httpReq)
-	if err != nil {
-		return 0, fmt.Errorf("failed to fetch contacts: %w", err)
+	for _, endpoint := range endpoints {
+		httpReq, err := http.NewRequest("POST", endpoint, bytes.NewBuffer([]byte("{}")))
+		if err != nil {
+			continue
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("apikey", s.cfg.EvolutionAPIKey)
+
+		resp, err := s.client.Do(httpReq)
+		if err != nil {
+			continue
+		}
+		respBody, _ = io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
+			success = true
+			break
+		}
 	}
-	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("Evolution API error (status %d): %s", resp.StatusCode, string(respBody))
+	if !success {
+		return 0, fmt.Errorf("failed to fetch contacts from Evolution API: %s", string(respBody))
 	}
 
 	var contacts []map[string]interface{}
