@@ -29,6 +29,9 @@ Thumbs.db
 backend/server
 *.exe
 
+# Go sum (generated during build)
+backend/go.sum
+
 # Coverage
 coverage/
 *.cover

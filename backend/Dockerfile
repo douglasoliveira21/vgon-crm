@@ -8,7 +8,7 @@ COPY go.mod ./
 RUN go mod download || true
 
 COPY . .
-RUN go mod tidy
+RUN rm -f go.sum && go mod tidy
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server ./cmd/server
 
 FROM alpine:3.19
