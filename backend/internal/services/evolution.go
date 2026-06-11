@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/evocrm/backend/internal/config"
@@ -629,6 +630,12 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 
 	// Skip if message from us (already tracked)
 	if fromMe {
+		return
+	}
+
+	// Skip group messages (groups have @g.us in JID)
+	if strings.Contains(remoteJid, "@g.us") || strings.Contains(remoteJid, "@broadcast") {
+		log.Printf("[WEBHOOK] Skipping group/broadcast message from %s", remoteJid)
 		return
 	}
 

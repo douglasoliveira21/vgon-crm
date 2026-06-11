@@ -1,7 +1,9 @@
 'use client'
 
 import { useAuthStore } from '@/store/auth'
-import { User, Building, Shield, Bell, Palette } from 'lucide-react'
+import api from '@/lib/api'
+import toast from 'react-hot-toast'
+import { User, Building, Shield, Bell, Palette, MessageSquare } from 'lucide-react'
 
 export default function SettingsPage() {
   const { user } = useAuthStore()
@@ -100,6 +102,48 @@ export default function SettingsPage() {
             </label>
             <label className="flex items-center justify-between">
               <span className="text-sm text-gray-700">Recados internos</span>
+              <input type="checkbox" defaultChecked className="rounded border-gray-300" />
+            </label>
+          </div>
+        </div>
+
+        {/* Channels / WhatsApp */}
+        <div className="card p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <MessageSquare size={20} className="text-gray-400" />
+            <h2 className="text-lg font-semibold text-gray-900">WhatsApp / Canais</h2>
+          </div>
+
+          <div className="space-y-3">
+            <label className="flex items-center justify-between">
+              <div>
+                <span className="text-sm text-gray-700">Receber mensagens de grupos</span>
+                <p className="text-xs text-gray-400">Se desativado, mensagens de grupos do WhatsApp serão ignoradas</p>
+              </div>
+              <input
+                type="checkbox"
+                defaultChecked={false}
+                onChange={async (e) => {
+                  try {
+                    await api.put('/settings', { receive_group_messages: e.target.checked })
+                    toast.success(e.target.checked ? 'Mensagens de grupos ativadas' : 'Mensagens de grupos desativadas')
+                  } catch {}
+                }}
+                className="rounded border-gray-300"
+              />
+            </label>
+            <label className="flex items-center justify-between">
+              <div>
+                <span className="text-sm text-gray-700">Ignorar mensagens de status/stories</span>
+                <p className="text-xs text-gray-400">Não receber atualizações de status do WhatsApp</p>
+              </div>
+              <input type="checkbox" defaultChecked className="rounded border-gray-300" />
+            </label>
+            <label className="flex items-center justify-between">
+              <div>
+                <span className="text-sm text-gray-700">Enviar confirmação de leitura</span>
+                <p className="text-xs text-gray-400">Marcar mensagens como lidas ao visualizar no CRM</p>
+              </div>
               <input type="checkbox" defaultChecked className="rounded border-gray-300" />
             </label>
           </div>
