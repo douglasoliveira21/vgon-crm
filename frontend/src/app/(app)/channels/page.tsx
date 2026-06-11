@@ -15,6 +15,7 @@ import {
   Power,
   MessageCircle,
   X,
+  Mail,
 } from 'lucide-react'
 
 interface WhatsAppInstance {
@@ -31,6 +32,8 @@ export default function ChannelsPage() {
   const [instances, setInstances] = useState<WhatsAppInstance[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [activeTab, setActiveTab] = useState('whatsapp')
+  const [showEmailModal, setShowEmailModal] = useState(false)
   const [instanceName, setInstanceName] = useState('')
   const [creating, setCreating] = useState(false)
   const [qrCode, setQrCode] = useState<string | null>(null)
@@ -187,10 +190,10 @@ export default function ChannelsPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Canais & Integrações</h1>
-          <p className="text-gray-500 mt-1">Gerencie suas conexões WhatsApp via Evolution API</p>
+          <p className="text-gray-500 mt-1">Gerencie suas conexões de atendimento</p>
         </div>
         <button
           onClick={() => setShowCreateModal(true)}
@@ -201,6 +204,29 @@ export default function ChannelsPage() {
         </button>
       </div>
 
+      {/* Channel type tabs */}
+      <div className="flex gap-2 mb-6">
+        <button
+          onClick={() => setActiveTab('whatsapp')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors ${
+            activeTab === 'whatsapp' ? 'bg-green-100 text-green-700' : 'text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          <MessageCircle size={16} /> WhatsApp
+        </button>
+        <button
+          onClick={() => setActiveTab('email')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors ${
+            activeTab === 'email' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          <Mail size={16} /> E-mail
+        </button>
+      </div>
+
+      {/* WhatsApp Tab */}
+      {activeTab === 'whatsapp' && (
+      <>
       {/* QR Code Display */}
       {qrCode && (
         <div className="card p-8 mb-6 text-center">
@@ -326,6 +352,88 @@ export default function ChannelsPage() {
           </div>
         )}
       </div>
+      </>
+      )}
+
+      {/* Email Tab */}
+      {activeTab === 'email' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-gray-500">Configure integrações de e-mail para receber e responder mensagens</p>
+            <button onClick={() => setShowEmailModal(true)} className="btn-primary">
+              <Plus size={18} /> Conectar E-mail
+            </button>
+          </div>
+
+          <div className="card p-12 text-center">
+            <Mail size={40} className="text-blue-300 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Integração de E-mail</h3>
+            <p className="text-gray-500 text-sm max-w-md mx-auto mb-6">
+              Conecte sua conta de e-mail para receber e responder mensagens diretamente pelo CRM.
+              Suportamos Gmail, Outlook e IMAP genérico.
+            </p>
+            <button onClick={() => setShowEmailModal(true)} className="btn-primary inline-flex">
+              <Plus size={18} /> Conectar E-mail
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Email Setup Modal */}
+      {showEmailModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-semibold text-gray-900">Conectar E-mail</h3>
+              <button onClick={() => setShowEmailModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={20} />
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-500 mb-6">Selecione seu provedor de e-mail:</p>
+
+            <div className="space-y-3">
+              <button className="w-full flex items-center gap-4 p-4 border border-gray-200 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-colors text-left">
+                <img src="https://www.google.com/gmail/about/static-2.0/images/logo-gmail.png" alt="Gmail" className="w-8 h-8 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                <div>
+                  <p className="font-medium text-gray-900">Gmail</p>
+                  <p className="text-xs text-gray-500">Conectar via Google OAuth</p>
+                </div>
+                <span className="ml-auto badge badge-yellow">Em breve</span>
+              </button>
+
+              <button className="w-full flex items-center gap-4 p-4 border border-gray-200 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-colors text-left">
+                <Mail size={24} className="text-blue-600" />
+                <div>
+                  <p className="font-medium text-gray-900">Outlook / Microsoft 365</p>
+                  <p className="text-xs text-gray-500">Conectar via Microsoft OAuth</p>
+                </div>
+                <span className="ml-auto badge badge-yellow">Em breve</span>
+              </button>
+
+              <button className="w-full flex items-center gap-4 p-4 border border-gray-200 rounded-xl hover:border-blue-500 hover:bg-blue-50 transition-colors text-left">
+                <Mail size={24} className="text-gray-600" />
+                <div>
+                  <p className="font-medium text-gray-900">IMAP / SMTP</p>
+                  <p className="text-xs text-gray-500">Conectar qualquer provedor via IMAP</p>
+                </div>
+                <span className="ml-auto badge badge-yellow">Em breve</span>
+              </button>
+            </div>
+
+            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+              <p className="text-xs text-gray-500">
+                💡 A integração de e-mail está em desenvolvimento. Em breve você poderá receber e responder
+                e-mails diretamente pelo CRM, na mesma interface das conversas WhatsApp.
+              </p>
+            </div>
+
+            <button onClick={() => setShowEmailModal(false)} className="btn-secondary w-full mt-4">
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Create Modal */}
       {showCreateModal && (
