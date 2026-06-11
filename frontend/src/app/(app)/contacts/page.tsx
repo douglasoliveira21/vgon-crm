@@ -117,7 +117,12 @@ export default function ContactsPage() {
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 bg-primary-100 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0">
                       {contact.avatar_url ? (
-                        <img src={`${process.env.NEXT_PUBLIC_API_URL}${contact.avatar_url}`} alt="" className="w-full h-full object-cover" />
+                        <img
+                          src={contact.avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${contact.avatar_url}` : contact.avatar_url}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                        />
                       ) : (
                         <span className="text-primary-700 text-sm font-medium">
                           {contact.name?.charAt(0)?.toUpperCase() || '?'}

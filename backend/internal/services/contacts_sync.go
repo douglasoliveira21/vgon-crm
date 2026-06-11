@@ -7,8 +7,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/google/uuid"
@@ -181,34 +179,10 @@ func (s *EvolutionService) SyncContactPhoto(instanceName, phone, contactID strin
 		return "", fmt.Errorf("no profile picture URL")
 	}
 
-	// Download the photo and save locally
-	photoResp, err := http.Get(pictureURL)
-	if err != nil {
-		return "", fmt.Errorf("failed to download photo: %w", err)
-	}
-	defer photoResp.Body.Close()
+	// Save the external URL directly in database (no local download needed)
+	s.db.Exec("UPDATE contacts SET avatar_url = $1, updated_at = NOW() WHERE id = $2", pictureURL, contactID)
 
-	if photoResp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("photo download failed with status %d", photoResp.StatusCode)
-	}
-
-	// Save to disk
-	avatarsDir := "/app/uploads/avatars"
-	os.MkdirAll(avatarsDir, 0755)
-
-	fileName := contactID + ".jpg"
-	filePath := filepath.Join(avatarsDir, fileName)
-
-	photoData, _ := io.ReadAll(photoResp.Body)
-	if err := os.WriteFile(filePath, photoData, 0644); err != nil {
-		return "", fmt.Errorf("failed to save photo: %w", err)
-	}
-
-	// Update contact avatar in database
-	avatarURL := "/uploads/avatars/" + fileName
-	s.db.Exec("UPDATE contacts SET avatar_url = $1, updated_at = NOW() WHERE id = $2", avatarURL, contactID)
-
-	return avatarURL, nil
+	return pictureURL, nil
 }
 
 // SyncAllContactPhotos syncs photos for all contacts of a company

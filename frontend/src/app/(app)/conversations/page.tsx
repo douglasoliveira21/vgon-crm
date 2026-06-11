@@ -677,7 +677,12 @@ export default function ConversationsPage() {
             >
               <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden">
                 {conv.contact_avatar_url ? (
-                  <img src={`${process.env.NEXT_PUBLIC_API_URL}${conv.contact_avatar_url}`} alt="" className="w-full h-full object-cover" />
+                  <img
+                    src={conv.contact_avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${conv.contact_avatar_url}` : conv.contact_avatar_url}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden') }}
+                  />
                 ) : (
                   <span className="text-primary-700 font-medium text-sm">
                     {conv.contact_name?.charAt(0)?.toUpperCase() || '?'}
