@@ -369,6 +369,7 @@ func GetDeals(svc *services.Container) fiber.Handler {
 func CreateDeal(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
 
 		var body struct {
 			FunnelID   string  `json:"funnel_id"`
@@ -389,8 +390,11 @@ func CreateDeal(svc *services.Container) fiber.Handler {
 		if body.ContactID != "" {
 			contactID = body.ContactID
 		}
+		// Auto-assign to current user if not specified
 		if body.AssignedTo != "" {
 			assignedTo = body.AssignedTo
+		} else {
+			assignedTo = userID
 		}
 
 		_, err := svc.DB.Exec(`

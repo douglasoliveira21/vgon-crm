@@ -74,7 +74,7 @@ export default function FunnelsPage() {
     }
   }
 
-  const createDeal = async (data: { title: string; value: number; contact_name: string }) => {
+  const createDeal = async (data: { title: string; value: number; contact_id: string; contact_name: string }) => {
     if (!selectedFunnel || !targetStageId) return
     try {
       await api.post('/deals', {
@@ -82,6 +82,7 @@ export default function FunnelsPage() {
         stage_id: targetStageId,
         title: data.title,
         value: data.value,
+        contact_id: data.contact_id || undefined,
       })
       toast.success('Oportunidade criada')
       setShowCreateDeal(false)
@@ -420,7 +421,20 @@ function CreateFunnelModal({ onClose, onCreated }: { onClose: () => void; onCrea
 function CreateDealModal({ onClose, onCreated }: { onClose: () => void; onCreated: (data: any) => void }) {
   const [title, setTitle] = useState('')
   const [value, setValue] = useState('')
-  const [contactName, setContactName] = useState('')
+  const [contactSearch, setContactSearch] = useState('')
+  const [selectedContact, setSelectedContact] = useState<{id: string; name: string; phone: string} | null>(null)
+  const [contacts, setContacts] = useState<Array<{id: string; name: string; phone: string}>>([])
+  const [showContactResults, setShowContactResults] = useState(false)
+
+  const searchContacts = async (query: string) => {
+    setContactSearch(query)
+    if (query.length < 2) { setContacts([]); setShowContactResults(false); return }
+    try {
+      const response = await api.get('/contacts', { params: { search: query, limit: 5 } })
+      setContacts((response.data.contacts || []).map((c: any) => ({ id: c.id, name: c.name || c.phone, phone: c.phone })))
+      setShowContactResults(true)
+    } catch {}
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -451,22 +465,59 @@ function CreateDealModal({ onClose, onCreated }: { onClose: () => void; onCreate
               placeholder="0,00"
             />
           </div>
-          <div>
+          <div className="relative">
             <label className="block text-sm font-medium text-gray-700 mb-1">Contato</label>
-            <input
-              type="text"
-              value={contactName}
-              onChange={(e) => setContactName(e.target.value)}
-              className="input"
-              placeholder="Nome do contato"
-            />
+            {selectedContact ? (
+              <div className="flex items-center justify-between p-2 bg-green-50 border border-green-200 rounded-lg">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">{selectedContact.name}</p>
+                  <p className="text-xs text-gray-500">{selectedContact.phone}</p>
+                </div>
+                <button onClick={() => { setSelectedContact(null); setContactSearch('') }} className="text-gray-400 hover:text-red-500">
+                  <X size={14} />
+                </button>
+              </div>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  value={contactSearch}
+                  onChange={(e) => searchContacts(e.target.value)}
+                  className="input"
+                  placeholder="Buscar contato por nome ou telefone..."
+                />
+                {showContactResults && contacts.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                    {contacts.map((contact) => (
+                      <button
+                        key={contact.id}
+                        onClick={() => {
+                          setSelectedContact(contact)
+                          setContactSearch('')
+                          setShowContactResults(false)
+                        }}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-50 border-b border-gray-50"
+                      >
+                        <p className="text-sm font-medium text-gray-900">{contact.name}</p>
+                        <p className="text-xs text-gray-400">{contact.phone}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
 
         <div className="flex gap-3 mt-6">
           <button onClick={onClose} className="btn-secondary flex-1">Cancelar</button>
           <button
-            onClick={() => onCreated({ title, value: parseFloat(value) || 0, contact_name: contactName })}
+            onClick={() => onCreated({
+              title,
+              value: parseFloat(value) || 0,
+              contact_id: selectedContact?.id || '',
+              contact_name: selectedContact?.name || '',
+            })}
             disabled={!title.trim()}
             className="btn-primary flex-1"
           >
