@@ -373,9 +373,22 @@ func (s *EvolutionService) DeleteInstance(instanceName string) error {
 
 // SendTextMessage sends a text message via WhatsApp
 func (s *EvolutionService) SendTextMessage(instanceName, phone, text string) (string, error) {
+	return s.SendTextMessageWithQuote(instanceName, phone, text, "")
+}
+
+// SendTextMessageWithQuote sends a text message with optional quoted message
+func (s *EvolutionService) SendTextMessageWithQuote(instanceName, phone, text, quotedMsgID string) (string, error) {
 	payload := map[string]interface{}{
 		"number": phone,
 		"text":   text,
+	}
+
+	if quotedMsgID != "" {
+		payload["quoted"] = map[string]interface{}{
+			"key": map[string]interface{}{
+				"id": quotedMsgID,
+			},
+		}
 	}
 
 	body, _ := json.Marshal(payload)
