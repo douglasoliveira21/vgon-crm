@@ -162,6 +162,11 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	users.Get("/", GetUsers(svc))
 	users.Post("/", CreateUser(svc))
 
+	// Telephony
+	telephony := protected.Group("/telephony")
+	telephony.Post("/provider", SaveTelephonyProvider(svc))
+	telephony.Get("/provider", GetTelephonyProvider(svc))
+
 	// ============================================
 	// WebSocket
 	// ============================================
