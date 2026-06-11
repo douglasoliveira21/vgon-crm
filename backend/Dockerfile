@@ -20,6 +20,7 @@ FROM alpine:3.19
 WORKDIR /app
 
 RUN apk add --no-cache ca-certificates tzdata
+RUN mkdir -p /app/uploads
 
 COPY --from=builder /app/server .
 COPY --from=builder /app/migrations ./migrations

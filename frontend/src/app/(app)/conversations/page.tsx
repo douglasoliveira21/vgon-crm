@@ -720,7 +720,14 @@ export default function ConversationsPage() {
 
                   {msg.message_type === 'image' && msg.media_url && (
                     <div className="mb-2">
-                      {msg.sender_type === 'user' && msg.media_url === 'sent' ? (
+                      {msg.media_url.startsWith('/uploads/') ? (
+                        <img
+                          src={`${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`}
+                          alt="Imagem"
+                          className="max-w-full rounded-lg max-h-60 object-cover cursor-pointer"
+                          onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`, '_blank')}
+                        />
+                      ) : msg.media_url === 'sent' ? (
                         <div className="flex items-center gap-2 text-xs opacity-70">
                           <Camera size={16} /> Imagem enviada
                         </div>
@@ -738,14 +745,14 @@ export default function ConversationsPage() {
 
                   {msg.message_type === 'audio' && msg.media_url && (
                     <div className="mb-1">
-                      {msg.sender_type === 'user' && msg.media_url === 'sent' ? (
+                      {msg.media_url === 'sent' ? (
                         <div className="flex items-center gap-2 text-xs opacity-70">
                           <Mic size={16} /> Áudio enviado ✓
                         </div>
                       ) : (
                         <div className="flex items-center gap-2">
                           <audio id={`audio-${msg.id}`} controls className="max-w-full h-10 flex-1" preload="metadata">
-                            <source src={`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`} />
+                            <source src={msg.media_url.startsWith('/uploads/') ? `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}` : `${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`} />
                           </audio>
                           <div className="flex gap-1">
                             {[1, 1.5, 2].map((speed) => (

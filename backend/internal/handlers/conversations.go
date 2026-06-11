@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"strings"
 	"time"
 
 	"github.com/evocrm/backend/internal/services"
@@ -238,21 +239,42 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 			mediaToSend = body.MediaBase64
 		}
 
+		// Save file to disk
+		var savedFileName string
+		if body.MediaBase64 != "" {
+			ext := services.GetExtensionFromBase64(body.MediaBase64)
+			if ext == "" {
+				ext = services.GetExtensionFromType(body.MediaType)
+			}
+			// Try to get extension from filename
+			if body.FileName != "" {
+				if dotIdx := strings.LastIndex(body.FileName, "."); dotIdx != -1 {
+					ext = body.FileName[dotIdx:]
+				}
+			}
+			var err error
+			savedFileName, err = services.SaveBase64File(body.MediaBase64, ext)
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save file"})
+			}
+		}
+
 		if phone != "" && instanceName != "" && mediaToSend != "" {
 			externalID, _ = svc.Evolution.SendMediaMessage(instanceName, phone, body.MediaType, mediaToSend, body.Caption, body.FileName)
 		}
 
-		// Save message to DB
+		// Save message to DB with local file URL
 		msgID := uuid.New().String()
 		content := body.Caption
 		if content == "" {
 			content = body.FileName
 		}
+		mediaURL := "/uploads/" + savedFileName
 
 		svc.DB.Exec(`
 			INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, media_url, media_filename, external_id, status)
-			VALUES ($1, $2, $3, 'user', $4, $5, $6, 'sent', $7, $8, 'sent')
-		`, msgID, conversationID, companyID, userID, content, body.MediaType, body.FileName, externalID)
+			VALUES ($1, $2, $3, 'user', $4, $5, $6, $7, $8, $9, 'sent')
+		`, msgID, conversationID, companyID, userID, content, body.MediaType, mediaURL, body.FileName, externalID)
 
 		svc.DB.Exec(`UPDATE conversations SET last_message_at = NOW(), last_message_preview = $1, updated_at = NOW() WHERE id = $2`,
 			"📎 "+body.FileName, conversationID)
@@ -284,6 +306,20 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
 		}
 
+		// Save audio file to disk
+		var savedFileName string
+		if body.AudioBase64 != "" {
+			ext := services.GetExtensionFromBase64(body.AudioBase64)
+			if ext == "" {
+				ext = ".ogg"
+			}
+			var err error
+			savedFileName, err = services.SaveBase64File(body.AudioBase64, ext)
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save audio"})
+			}
+		}
+
 		// Get contact phone and instance
 		var phone, instanceName string
 		svc.DB.QueryRow(`
@@ -305,12 +341,13 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 			}
 		}
 
-		// Save message to DB
+		// Save message to DB with local file URL
 		msgID := uuid.New().String()
+		mediaURL := "/uploads/" + savedFileName
 		svc.DB.Exec(`
 			INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, media_url, external_id, status)
-			VALUES ($1, $2, $3, 'user', $4, '🎵 Áudio', 'audio', 'sent', $5, 'sent')
-		`, msgID, conversationID, companyID, userID, externalID)
+			VALUES ($1, $2, $3, 'user', $4, '🎵 Áudio', 'audio', $5, $6, 'sent')
+		`, msgID, conversationID, companyID, userID, mediaURL, externalID)
 
 		// Update conversation
 		svc.DB.Exec(`UPDATE conversations SET last_message_at = NOW(), last_message_preview = '🎵 Áudio', updated_at = NOW() WHERE id = $1`, conversationID)

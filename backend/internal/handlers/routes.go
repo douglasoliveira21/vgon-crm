@@ -13,6 +13,11 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 		return c.JSON(fiber.Map{"status": "ok", "service": "EvoCRM Pro"})
 	})
 
+	// Static files - uploads
+	app.Static("/uploads", "/app/uploads", fiber.Static{
+		Browse: false,
+	})
+
 	// Media proxy (public - serves cached media)
 	app.Get("/media/:messageId", MediaProxy(svc))
 
