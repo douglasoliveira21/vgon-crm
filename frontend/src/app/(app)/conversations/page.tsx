@@ -20,6 +20,7 @@ import {
   Image,
   FileText,
   X,
+  MessageSquare,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
