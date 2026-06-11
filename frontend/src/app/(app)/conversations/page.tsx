@@ -104,6 +104,7 @@ export default function ConversationsPage() {
   const [recordingTime, setRecordingTime] = useState(0)
   const [contactTyping, setContactTyping] = useState(false)
   const [contactRecording, setContactRecording] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null)
@@ -543,6 +544,90 @@ export default function ConversationsPage() {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
   }
 
+  // Handle paste (Ctrl+V) with files
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items || !selectedConv) return
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (item.type.startsWith('image/') || item.type.startsWith('video/') || item.type.startsWith('audio/') || item.type.startsWith('application/')) {
+        e.preventDefault()
+        const file = item.getAsFile()
+        if (file) {
+          sendFileToChat(file)
+        }
+        return
+      }
+    }
+  }
+
+  // Handle drag & drop
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+    if (!selectedConv) return
+
+    const files = e.dataTransfer?.files
+    if (files && files.length > 0) {
+      sendFileToChat(files[0])
+    }
+  }
+
+  // Send file from paste/drop
+  const sendFileToChat = (file: File) => {
+    if (!selectedConv) return
+
+    let mediaType = 'document'
+    if (file.type.startsWith('image/')) mediaType = 'image'
+    else if (file.type.startsWith('video/')) mediaType = 'video'
+    else if (file.type.startsWith('audio/')) mediaType = 'audio'
+
+    const reader = new FileReader()
+    reader.readAsDataURL(file)
+    reader.onloadend = async () => {
+      const base64File = reader.result as string
+
+      try {
+        await api.post(`/conversations/${selectedConv!.id}/messages/media`, {
+          media_base64: base64File,
+          media_type: mediaType,
+          file_name: file.name,
+          caption: '',
+        })
+
+        const optimisticMsg: Message = {
+          id: `temp-file-${Date.now()}`,
+          conversation_id: selectedConv!.id,
+          sender_type: 'user',
+          sender_id: user?.id,
+          content: file.name,
+          message_type: mediaType,
+          media_url: base64File,
+          media_filename: file.name,
+          status: 'sent',
+          is_private: false,
+          created_at: new Date().toISOString(),
+        }
+        setMessages((prev) => [...prev, optimisticMsg])
+        scrollToBottom()
+        toast.success(`${mediaType === 'image' ? 'Imagem' : mediaType === 'video' ? 'Vídeo' : 'Arquivo'} enviado`)
+      } catch {
+        toast.error('Erro ao enviar arquivo')
+      }
+    }
+  }
+
   return (
     <div className="flex h-screen">
       {/* Conversation List */}
@@ -624,7 +709,22 @@ export default function ConversationsPage() {
 
       {/* Chat Area */}
       {selectedConv ? (
-        <div className="flex-1 flex flex-col bg-gray-50">
+        <div
+          className={clsx('flex-1 flex flex-col bg-gray-50 relative', isDragging && 'ring-2 ring-primary-500 ring-inset')}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          onPaste={handlePaste}
+        >
+          {/* Drag overlay */}
+          {isDragging && (
+            <div className="absolute inset-0 bg-primary-500/10 z-10 flex items-center justify-center pointer-events-none">
+              <div className="bg-white rounded-xl shadow-lg p-6 text-center">
+                <Paperclip size={32} className="text-primary-600 mx-auto mb-2" />
+                <p className="text-gray-700 font-medium">Solte o arquivo aqui</p>
+              </div>
+            </div>
+          )}
           {/* Chat Header */}
           <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
