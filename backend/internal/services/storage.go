@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/base64"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,10 +13,15 @@ import (
 
 const uploadsDir = "/app/uploads"
 
+func init() {
+	// Ensure uploads directory exists on startup
+	os.MkdirAll(uploadsDir, 0777)
+}
+
 // SaveBase64File saves a base64 encoded file to disk and returns the file path
 func SaveBase64File(base64Data, fileExtension string) (string, error) {
 	// Ensure uploads directory exists
-	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+	if err := os.MkdirAll(uploadsDir, 0777); err != nil {
 		return "", fmt.Errorf("failed to create uploads dir: %w", err)
 	}
 
@@ -46,8 +52,10 @@ func SaveBase64File(base64Data, fileExtension string) (string, error) {
 
 	// Write file
 	if err := os.WriteFile(filePath, decoded, 0644); err != nil {
-		return "", fmt.Errorf("failed to write file: %w", err)
+		return "", fmt.Errorf("failed to write file %s: %w", filePath, err)
 	}
+
+	log.Printf("[STORAGE] Saved file: %s (%d bytes)", filePath, len(decoded))
 
 	return fileName, nil
 }
