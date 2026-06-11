@@ -74,6 +74,7 @@ func (s *EvolutionService) CreateInstance(req *CreateInstanceRequest) (*models.W
 				"CONNECTION_UPDATE",
 				"CONTACTS_UPSERT",
 				"QRCODE_UPDATED",
+				"PRESENCE_UPDATE",
 			},
 		},
 	}
@@ -488,6 +489,8 @@ func (s *EvolutionService) HandleWebhook(instanceName string, event map[string]i
 		s.handleMessageUpdate(instanceName, event)
 	case "qrcode.updated":
 		s.handleQRCodeUpdate(instanceName, event)
+	case "presence.update":
+		s.handlePresenceUpdate(instanceName, event)
 	default:
 		log.Printf("[WEBHOOK] Unhandled event: %s for instance: %s", eventType, instanceName)
 	}
@@ -711,6 +714,48 @@ func (s *EvolutionService) handleQRCodeUpdate(instanceName string, event map[str
 			"qrcode":        base64,
 		})
 	}
+}
+
+func (s *EvolutionService) handlePresenceUpdate(instanceName string, event map[string]interface{}) {
+	data, _ := event["data"].(map[string]interface{})
+
+	// Extract participant JID
+	participant, _ := data["id"].(string)
+	if participant == "" {
+		participant, _ = data["participant"].(string)
+	}
+
+	presence, _ := data["presence"].(string)
+	// presence can be: "composing", "recording", "paused", "available", "unavailable"
+
+	phone := extractPhoneFromJid(participant)
+	if phone == "" {
+		return
+	}
+
+	// Get company ID
+	var companyID string
+	s.db.QueryRow("SELECT company_id FROM whatsapp_instances WHERE instance_name = $1", instanceName).Scan(&companyID)
+	if companyID == "" {
+		return
+	}
+
+	// Find contact and their active conversation
+	var contactID, conversationID string
+	s.db.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, phone).Scan(&contactID)
+	if contactID == "" {
+		return
+	}
+	s.db.QueryRow("SELECT id FROM conversations WHERE company_id = $1 AND contact_id = $2 AND status != 'resolved' ORDER BY created_at DESC LIMIT 1", companyID, contactID).Scan(&conversationID)
+
+	isTyping := presence == "composing" || presence == "recording"
+
+	s.wsHub.BroadcastToCompany(companyID, "typing", map[string]interface{}{
+		"conversation_id": conversationID,
+		"contact_phone":   phone,
+		"is_typing":       isTyping,
+		"is_recording":    presence == "recording",
+	})
 }
 
 func (s *EvolutionService) getOrCreateContact(companyID, phone string, data map[string]interface{}) string {

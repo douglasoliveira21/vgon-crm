@@ -102,6 +102,8 @@ export default function ConversationsPage() {
   // Audio recording
   const [isRecording, setIsRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
+  const [contactTyping, setContactTyping] = useState(false)
+  const [contactRecording, setContactRecording] = useState(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null)
@@ -153,11 +155,27 @@ export default function ConversationsPage() {
       }
     }
 
+    const handleTyping = (data: { conversation_id: string; is_typing: boolean; is_recording: boolean }) => {
+      if (selectedConv && data.conversation_id === selectedConv.id) {
+        setContactTyping(data.is_typing)
+        setContactRecording(data.is_recording || false)
+        // Auto-clear after 5 seconds
+        if (data.is_typing) {
+          setTimeout(() => {
+            setContactTyping(false)
+            setContactRecording(false)
+          }, 5000)
+        }
+      }
+    }
+
     wsService.on('new_message', handleNewMessage)
     wsService.on('message_status', handleMessageStatus)
+    wsService.on('typing', handleTyping)
     return () => {
       wsService.off('new_message', handleNewMessage)
       wsService.off('message_status', handleMessageStatus)
+      wsService.off('typing', handleTyping)
     }
   }, [selectedConv])
 
@@ -733,6 +751,16 @@ export default function ConversationsPage() {
               </div>
             ))}
             <div ref={messagesEndRef} />
+            {/* Typing indicator */}
+            {contactTyping && (
+              <div className="flex justify-start message-enter">
+                <div className="bg-white rounded-2xl rounded-bl-md px-4 py-2.5 shadow-sm border border-gray-100">
+                  <p className="text-xs text-gray-500 italic">
+                    {contactRecording ? '🎙️ Gravando áudio...' : '✍️ Digitando...'}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Message Input */}
