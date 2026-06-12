@@ -172,6 +172,15 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	telephony.Get("/queues", GetQueues(svc))
 	telephony.Post("/queues", CreateQueue(svc))
 	telephony.Delete("/queues/:id", DeleteQueue(svc))
+	telephony.Post("/call", TelephonyCall(svc))
+	telephony.Post("/hangup", TelephonyHangup(svc))
+	telephony.Post("/transfer", TelephonyTransfer(svc))
+	telephony.Post("/hold", TelephonyHold(svc))
+	telephony.Post("/unhold", TelephonyUnhold(svc))
+	telephony.Get("/status", TelephonyStatus(svc))
+
+	// Call history
+	protected.Get("/calls/history", GetCallHistory(svc))
 
 	// ============================================
 	// WebSocket

@@ -19,6 +19,7 @@ type Container struct {
 	Message   *MessageService
 	Contact   *ContactService
 	Bot       *BotEngine
+	Asterisk  *AsteriskService
 }
 
 // NewContainer creates a new service container
@@ -35,6 +36,7 @@ func NewContainer(db *sql.DB, rdb *redis.Client, cfg *config.Config, wsHub *webs
 	container.Message = NewMessageService(db, rdb, wsHub)
 	container.Contact = NewContactService(db)
 	container.Bot = NewBotEngine(db, wsHub, container.Evolution)
+	container.Asterisk = NewAsteriskService(db, wsHub, cfg)
 
 	// Link bot engine to evolution service
 	container.Evolution.botEngine = container.Bot
