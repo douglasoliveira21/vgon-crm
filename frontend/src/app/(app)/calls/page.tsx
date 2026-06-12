@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/auth'
+import { useSIP } from '@/hooks/useSIP'
 import {
   Phone,
   PhoneIncoming,
@@ -30,6 +31,7 @@ import {
 
 export default function CallsPage() {
   const { user } = useAuthStore()
+  const sip = useSIP()
   const [activeTab, setActiveTab] = useState('softphone')
   const [sipConfig, setSipConfig] = useState({
     display_name: '',
