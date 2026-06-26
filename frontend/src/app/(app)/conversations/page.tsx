@@ -253,8 +253,10 @@ export default function ConversationsPage() {
       })
     }
 
-    // Play notification sound ONLY if browser tab is not active
-    if (document.hidden) {
+    // Play notification sound
+    // If tab is not active: always play
+    // If tab is active: play only if not viewing this specific conversation
+    if (document.hidden || !selectedConv || selectedConv.id !== msg.conversation_id) {
       playNotificationSound()
     }
   }
@@ -265,7 +267,8 @@ export default function ConversationsPage() {
     const alertUnassigned = alertEvents.unassigned !== false
     const alertOthers = alertEvents.assigned_to_others !== false
 
-    if (!conv) return alertUnassigned // Unknown conversation, treat as unassigned
+    // If conversation not in current filtered list, still alert (could be from another tab)
+    if (!conv) return true
 
     if (conv.assigned_to === user?.id) {
       return alertMine
@@ -373,7 +376,7 @@ export default function ConversationsPage() {
 
     const interval = setInterval(async () => {
       try {
-        const response = await api.get(`/conversations/${selectedConv.id}/messages`)
+        const response = await api.get(`/conversations/${selectedConv.id}/messages`, { params: { limit: 200 } })
         const newMessages: Message[] = response.data.messages || []
         setMessages((prev) => {
           // Count real messages (not temp)
@@ -393,7 +396,7 @@ export default function ConversationsPage() {
           return prev
         })
       } catch {}
-    }, 5000)
+    }, 3000)
 
     return () => clearInterval(interval)
   }, [selectedConv?.id])
@@ -414,7 +417,7 @@ export default function ConversationsPage() {
     wsService.joinConversation(conv.id)
 
     try {
-      const response = await api.get(`/conversations/${conv.id}/messages`)
+      const response = await api.get(`/conversations/${conv.id}/messages`, { params: { limit: 200 } })
       setMessages(response.data.messages || [])
       scrollToBottom()
     } catch (error) {

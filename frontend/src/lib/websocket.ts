@@ -4,8 +4,8 @@ class WebSocketService {
   private ws: WebSocket | null = null
   private handlers: Map<string, WSEventHandler[]> = new Map()
   private reconnectAttempts = 0
-  private maxReconnectAttempts = 5
-  private reconnectDelay = 3000
+  private maxReconnectAttempts = 50
+  private reconnectDelay = 2000
 
   connect(token: string) {
     const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001'
