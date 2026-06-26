@@ -754,7 +754,7 @@ export default function ConversationsPage() {
   return (
     <div className="flex h-screen">
       {/* Conversation List */}
-      <div className="w-80 border-r border-gray-200 bg-white flex flex-col">
+      <div className="w-96 border-r border-gray-200 bg-white flex flex-col">
         <div className="p-4 border-b border-gray-100">
           <h2 className="text-lg font-semibold text-gray-900 mb-3">Conversas</h2>
           <div className="relative mb-3">
