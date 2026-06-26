@@ -87,7 +87,7 @@ export default function ConversationsPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [newMessage, setNewMessage] = useState('')
   const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState('all')
+  const [filter, setFilter] = useState('mine')
   const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -113,6 +113,9 @@ export default function ConversationsPage() {
   // Attachment preview
   const [pendingFile, setPendingFile] = useState<{ file: File; preview: string; type: string } | null>(null)
   const [pendingCaption, setPendingCaption] = useState('')
+
+  // Tab unread counts
+  const [tabUnreadCounts, setTabUnreadCounts] = useState<{ mine: number; unassigned: number; all: number }>({ mine: 0, unassigned: 0, all: 0 })
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
 
   // Context menu & reply
@@ -124,6 +127,7 @@ export default function ConversationsPage() {
 
   useEffect(() => {
     fetchConversations()
+    fetchTabUnreadCounts()
     fetchUsers()
     fetchTeams()
   }, [filter, statusFilter])
@@ -236,8 +240,7 @@ export default function ConversationsPage() {
 
       // Tab filter
       if (filter === 'mine') params.assigned_to = user?.id
-      if (filter === 'unassigned') params.status = 'open'
-      if (filter === 'resolved') params.status = 'resolved'
+      if (filter === 'unassigned') params.unassigned = 'true'
 
       // Status dropdown filter overrides
       if (statusFilter && statusFilter !== 'all_status') {
@@ -249,6 +252,9 @@ export default function ConversationsPage() {
         params.status = 'open,in_progress,pending'
       }
       if (filter === 'mine' && !statusFilter) {
+        params.status = 'open,in_progress,pending'
+      }
+      if (filter === 'unassigned' && !statusFilter) {
         params.status = 'open,in_progress,pending'
       }
 
@@ -264,6 +270,25 @@ export default function ConversationsPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const fetchTabUnreadCounts = async () => {
+    try {
+      const [mineRes, unassignedRes, allRes] = await Promise.all([
+        api.get('/conversations', { params: { assigned_to: user?.id, status: 'open,in_progress,pending' } }),
+        api.get('/conversations', { params: { unassigned: 'true', status: 'open,in_progress,pending' } }),
+        api.get('/conversations', { params: { status: 'open,in_progress,pending' } }),
+      ])
+      const mineConvs: Conversation[] = mineRes.data.conversations || []
+      const unassignedConvs: Conversation[] = unassignedRes.data.conversations || []
+      const allConvs: Conversation[] = allRes.data.conversations || []
+
+      setTabUnreadCounts({
+        mine: mineConvs.reduce((sum, c) => sum + (c.unread_count || 0), 0),
+        unassigned: unassignedConvs.reduce((sum, c) => sum + (c.unread_count || 0), 0),
+        all: allConvs.reduce((sum, c) => sum + (c.unread_count || 0), 0),
+      })
+    } catch {}
   }
 
   const fetchUsers = async () => {
@@ -315,6 +340,7 @@ export default function ConversationsPage() {
   useEffect(() => {
     const interval = setInterval(() => {
       fetchConversations()
+      fetchTabUnreadCounts()
     }, 10000) // Every 10 seconds
 
     return () => clearInterval(interval)
@@ -743,22 +769,30 @@ export default function ConversationsPage() {
           </div>
           <div className="flex flex-wrap gap-1">
             {[
-              { id: 'all', label: 'Todas' },
               { id: 'mine', label: 'Minhas' },
-              { id: 'unassigned', label: 'Sem dono' },
-              { id: 'resolved', label: 'Resolvidas' },
-            ].map((f) => (
-              <button
-                key={f.id}
-                onClick={() => setFilter(f.id)}
-                className={clsx(
-                  'px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
-                  filter === f.id ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'
-                )}
-              >
-                {f.label}
-              </button>
-            ))}
+              { id: 'unassigned', label: 'Não atribuídas' },
+              { id: 'all', label: 'Todas' },
+            ].map((f) => {
+              const tabUnread = tabUnreadCounts[f.id as keyof typeof tabUnreadCounts] || 0
+
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => setFilter(f.id)}
+                  className={clsx(
+                    'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5',
+                    filter === f.id ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'
+                  )}
+                >
+                  {f.label}
+                  {tabUnread > 0 && (
+                    <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 bg-primary-600 text-white text-[10px] font-bold rounded-full">
+                      {tabUnread > 99 ? '99+' : tabUnread}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
           </div>
           {/* Status filter */}
           <select
