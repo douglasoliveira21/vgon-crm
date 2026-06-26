@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { useSIP } from '@/hooks/useSIP'
@@ -35,6 +36,7 @@ import {
 
 export default function CallsPage() {
   const sip = useSIP()
+  const router = useRouter()
   const [activeTab, setActiveTab] = useState('dashboard')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [showConfig, setShowConfig] = useState(false)
@@ -58,6 +60,35 @@ export default function CallsPage() {
     stun_server: 'stun:stun.l.google.com:19302',
     auto_register: true,
   })
+
+  // Incoming call CRM data
+  const [incomingContact, setIncomingContact] = useState<{name: string; company?: string; phone: string; id?: string} | null>(null)
+  const [loadingContact, setLoadingContact] = useState(false)
+
+  // Fetch contact when incoming call starts
+  useEffect(() => {
+    if (sip.isIncoming && sip.incomingNumber) {
+      setLoadingContact(true)
+      api.get('/contacts', { params: { search: sip.incomingNumber, limit: 1 } })
+        .then(res => {
+          const contacts = res.data.contacts || []
+          if (contacts.length > 0) {
+            setIncomingContact({
+              name: contacts[0].name,
+              company: contacts[0].company || contacts[0].tags?.[0] || '',
+              phone: contacts[0].phone,
+              id: contacts[0].id,
+            })
+          } else {
+            setIncomingContact(null)
+          }
+        })
+        .catch(() => setIncomingContact(null))
+        .finally(() => setLoadingContact(false))
+    } else {
+      setIncomingContact(null)
+    }
+  }, [sip.isIncoming, sip.incomingNumber])
 
   useEffect(() => {
     loadConfig()
@@ -228,6 +259,7 @@ export default function CallsPage() {
         <button onClick={() => setActiveTab('extensions')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'extensions' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>📱 Ramais</button>
         <button onClick={() => setActiveTab('history')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'history' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>📋 Histórico</button>
         <button onClick={() => setActiveTab('queues')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'queues' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>👥 Filas</button>
+        <button onClick={() => router.push('/calls/recordings')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap text-gray-500 hover:bg-gray-100`}>🎙️ Gravações</button>
       </div>
 
       {/* Dashboard */}
@@ -344,9 +376,40 @@ export default function CallsPage() {
             </div>
             <h3 className="text-xl font-bold text-gray-900">Chamada recebida</h3>
             <p className="text-lg text-gray-700 mt-2">{sip.incomingNumber}</p>
-            <div className="flex gap-4 justify-center mt-6">
-              <button onClick={() => sip.endCall()} className="p-4 bg-red-600 text-white rounded-full hover:bg-red-700"><PhoneOff size={24} /></button>
-              <button onClick={() => { sip.answerCall(); setPhoneNumber(sip.incomingNumber) }} className="p-4 bg-green-600 text-white rounded-full hover:bg-green-700"><Phone size={24} /></button>
+
+            {/* CRM Contact Info */}
+            {loadingContact && (
+              <p className="text-xs text-gray-400 mt-2">Buscando contato...</p>
+            )}
+            {incomingContact && (
+              <div className="mt-3 p-3 bg-blue-50 rounded-lg text-left">
+                <p className="text-sm font-semibold text-blue-900">{incomingContact.name}</p>
+                {incomingContact.company && (
+                  <p className="text-xs text-blue-700">{incomingContact.company}</p>
+                )}
+              </div>
+            )}
+            {!loadingContact && !incomingContact && (
+              <p className="text-xs text-gray-400 mt-2">Contato não encontrado no CRM</p>
+            )}
+
+            <div className="flex gap-3 justify-center mt-6">
+              <button onClick={() => sip.endCall()} className="p-4 bg-red-600 text-white rounded-full hover:bg-red-700" title="Rejeitar">
+                <PhoneOff size={24} />
+              </button>
+              <button onClick={() => { sip.answerCall(); setPhoneNumber(sip.incomingNumber) }} className="p-4 bg-green-600 text-white rounded-full hover:bg-green-700" title="Atender">
+                <Phone size={24} />
+              </button>
+            </div>
+            <div className="flex gap-2 justify-center mt-3">
+              {!incomingContact && (
+                <button
+                  onClick={() => { window.open(`/contacts?new=true&phone=${sip.incomingNumber}`, '_blank') }}
+                  className="text-xs text-primary-600 hover:underline"
+                >
+                  + Criar Contato
+                </button>
+              )}
             </div>
           </div>
         </div>

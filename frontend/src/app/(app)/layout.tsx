@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import Sidebar from '@/components/layout/sidebar'
+import SIPAutoRegister from '@/components/telephony/SIPAutoRegister'
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -25,6 +26,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <main className="ml-64 min-h-screen">
         {children}
       </main>
+      <SIPAutoRegister />
     </div>
   )
 }
