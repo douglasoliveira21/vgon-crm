@@ -935,6 +935,54 @@ function NodeConfigPanel({ node, onUpdate }: { node: Node; onUpdate: (config: Re
     )
   }
 
+  // --- GLPI NODES ---
+  if (nodeType === 'glpi_open_ticket') {
+    return (
+      <div className="space-y-3">
+        <div className="p-3 bg-orange-50 rounded-lg text-xs text-orange-700">
+          🎫 <strong>Abrir Chamado GLPI</strong>
+          <br/><br/>
+          Este bloco inicia um fluxo conversacional com o cliente para abertura de chamado no GLPI.
+          <br/><br/>
+          O bot irá perguntar automaticamente:
+          <br/>1. Nome da empresa (busca entidade no GLPI)
+          <br/>2. Confirmação da entidade
+          <br/>3. Nome completo
+          <br/>4. E-mail de contato
+          <br/>5. Título do problema
+          <br/>6. Descrição detalhada
+          <br/><br/>
+          Após coletar todas as informações, o chamado será aberto no GLPI e o número do ticket retornado ao cliente.
+          <br/><br/>
+          📞 O telefone é capturado automaticamente do WhatsApp.
+        </div>
+        <div className="p-2 bg-yellow-50 rounded-lg text-xs text-yellow-700">
+          ⚠️ Requer configuração das variáveis GLPI_BASE_URL, GLPI_APP_TOKEN e GLPI_USER_TOKEN no servidor.
+        </div>
+      </div>
+    )
+  }
+
+  if (nodeType === 'glpi_check_status') {
+    return (
+      <div className="space-y-3">
+        <div className="p-3 bg-orange-50 rounded-lg text-xs text-orange-700">
+          🔍 <strong>Consultar Chamado GLPI</strong>
+          <br/><br/>
+          Este bloco permite que o cliente consulte o status de um chamado existente.
+          <br/><br/>
+          O bot irá:
+          <br/>1. Pedir o número do ticket
+          <br/>2. Buscar o chamado no GLPI
+          <br/>3. Retornar: título, status, data de abertura e última atualização
+        </div>
+        <div className="p-2 bg-yellow-50 rounded-lg text-xs text-yellow-700">
+          ⚠️ Requer configuração das variáveis GLPI_BASE_URL, GLPI_APP_TOKEN e GLPI_USER_TOKEN no servidor.
+        </div>
+      </div>
+    )
+  }
+
   // Default
   return (
     <div className="p-3 bg-gray-50 rounded-lg text-xs text-gray-500">
