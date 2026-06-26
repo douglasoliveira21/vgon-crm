@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -158,7 +159,7 @@ func (s *EvolutionService) SyncContacts(instanceName, companyID string) (int, er
 	return synced, nil
 }
 
-// SyncContactPhoto fetches profile photo for a contact from Evolution API
+// SyncContactPhoto fetches profile photo for a contact from Evolution API and saves locally
 func (s *EvolutionService) SyncContactPhoto(instanceName, phone, contactID string) (string, error) {
 	payload := map[string]interface{}{
 		"number": phone,
@@ -205,10 +206,58 @@ func (s *EvolutionService) SyncContactPhoto(instanceName, phone, contactID strin
 		return "", fmt.Errorf("no profile picture URL")
 	}
 
-	// Save the external URL directly in database (no local download needed)
-	s.db.Exec("UPDATE contacts SET avatar_url = $1, updated_at = NOW() WHERE id = $2", pictureURL, contactID)
+	// Download the image and save locally
+	localPath, err := s.downloadAndSaveAvatar(pictureURL, contactID)
+	if err != nil {
+		// Fallback: save the external URL
+		s.db.Exec("UPDATE contacts SET avatar_url = $1, updated_at = NOW() WHERE id = $2", pictureURL, contactID)
+		return pictureURL, nil
+	}
 
-	return pictureURL, nil
+	// Save local path in database
+	s.db.Exec("UPDATE contacts SET avatar_url = $1, updated_at = NOW() WHERE id = $2", localPath, contactID)
+
+	return localPath, nil
+}
+
+// downloadAndSaveAvatar downloads an image from URL and saves it to local storage
+func (s *EvolutionService) downloadAndSaveAvatar(imageURL, contactID string) (string, error) {
+	// Download image
+	resp, err := http.Get(imageURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to download avatar: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download returned status %d", resp.StatusCode)
+	}
+
+	imageData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read image data: %w", err)
+	}
+
+	if len(imageData) == 0 {
+		return "", fmt.Errorf("empty image data")
+	}
+
+	// Create directory structure: /app/uploads/avatars/
+	dir := "/app/uploads/avatars"
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create avatar directory: %w", err)
+	}
+
+	// Save file
+	fileName := fmt.Sprintf("%s.jpg", contactID)
+	filePath := fmt.Sprintf("%s/%s", dir, fileName)
+
+	if err := os.WriteFile(filePath, imageData, 0644); err != nil {
+		return "", fmt.Errorf("failed to save avatar: %w", err)
+	}
+
+	// Return the URL path (served by static files)
+	return fmt.Sprintf("/uploads/avatars/%s", fileName), nil
 }
 
 // SyncAllContactPhotos syncs photos for all contacts of a company
