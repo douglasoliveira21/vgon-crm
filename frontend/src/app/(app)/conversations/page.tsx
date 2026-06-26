@@ -29,6 +29,7 @@ import {
   Video,
   Camera,
   RotateCcw,
+  UsersRound,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import toast from 'react-hot-toast'
@@ -1283,7 +1284,7 @@ export default function ConversationsPage() {
 
       {/* Right Panel - Contact */}
       {selectedConv && (
-        <ContactPanel conversation={selectedConv} />
+        <ContactPanel conversation={selectedConv} users={users} teams={teams} onAssignUser={transferToUser} onAssignTeam={transferToTeam} />
       )}
 
       {/* Transfer Modal */}
@@ -1486,12 +1487,14 @@ export default function ConversationsPage() {
 
 
 // Contact Panel with Tags and Funnel
-function ContactPanel({ conversation }: { conversation: Conversation }) {
+function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam }: { conversation: Conversation; users: UserItem[]; teams: TeamItem[]; onAssignUser: (userId: string) => void; onAssignTeam: (teamId: string) => void }) {
   const [tags, setTags] = useState<Array<{id: string; name: string; color: string}>>([])
   const [contactTags, setContactTags] = useState<Array<{id: string; name: string; color: string}>>([])
   const [funnels, setFunnels] = useState<Array<{id: string; name: string; stages: Array<{id: string; name: string}>}>>([])
   const [showTagSelect, setShowTagSelect] = useState(false)
   const [showFunnelSelect, setShowFunnelSelect] = useState(false)
+  const [showAssignUser, setShowAssignUser] = useState(false)
+  const [showAssignTeam, setShowAssignTeam] = useState(false)
 
   useEffect(() => {
     api.get('/tags').then(res => setTags(res.data.tags || [])).catch(() => {})
@@ -1585,6 +1588,72 @@ function ContactPanel({ conversation }: { conversation: Conversation }) {
             <p className="text-sm text-gray-700 mt-1">{conversation.assigned_to_name}</p>
           </div>
         )}
+
+        {/* Assign to User */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-medium text-gray-400 uppercase">Atribuir a Técnico</label>
+            <button
+              onClick={() => { setShowAssignUser(!showAssignUser); setShowAssignTeam(false) }}
+              className="text-xs text-primary-600 hover:text-primary-700"
+            >
+              {showAssignUser ? 'Fechar' : 'Selecionar'}
+            </button>
+          </div>
+          {showAssignUser && (
+            <div className="p-2 bg-gray-50 rounded-lg space-y-1 max-h-40 overflow-y-auto">
+              {users.map(u => (
+                <button
+                  key={u.id}
+                  onClick={() => { onAssignUser(u.id); setShowAssignUser(false) }}
+                  className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-white flex items-center gap-2"
+                >
+                  <div className="w-6 h-6 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span className="text-primary-700 text-[10px] font-medium">{u.name.charAt(0)}</span>
+                  </div>
+                  <span className="truncate">{u.name}</span>
+                  {u.is_online && <div className="w-2 h-2 bg-green-500 rounded-full ml-auto flex-shrink-0" />}
+                </button>
+              ))}
+              {users.length === 0 && (
+                <p className="text-xs text-gray-400 px-2">Nenhum técnico disponível</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Assign to Team */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-medium text-gray-400 uppercase">Atribuir a Time</label>
+            <button
+              onClick={() => { setShowAssignTeam(!showAssignTeam); setShowAssignUser(false) }}
+              className="text-xs text-primary-600 hover:text-primary-700"
+            >
+              {showAssignTeam ? 'Fechar' : 'Selecionar'}
+            </button>
+          </div>
+          {showAssignTeam && (
+            <div className="p-2 bg-gray-50 rounded-lg space-y-1 max-h-40 overflow-y-auto">
+              {teams.map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => { onAssignTeam(t.id); setShowAssignTeam(false) }}
+                  className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-white flex items-center gap-2"
+                >
+                  <div className="w-6 h-6 bg-orange-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <UsersRound size={12} className="text-orange-600" />
+                  </div>
+                  <span className="truncate">{t.name}</span>
+                  <span className="text-gray-400 ml-auto text-[10px]">{t.member_count} membros</span>
+                </button>
+              ))}
+              {teams.length === 0 && (
+                <p className="text-xs text-gray-400 px-2">Nenhum time criado</p>
+              )}
+            </div>
+          )}
+        </div>
 
         <div>
           <label className="text-xs font-medium text-gray-400 uppercase">Canal</label>
