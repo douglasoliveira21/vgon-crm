@@ -11,6 +11,7 @@ interface User {
   role_name: string
   avatar_url?: string
   is_online: boolean
+  is_super_admin?: boolean
 }
 
 interface AuthState {

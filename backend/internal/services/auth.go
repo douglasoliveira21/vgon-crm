@@ -47,13 +47,13 @@ func (s *AuthService) Login(req *LoginRequest) (*AuthResponse, error) {
 
 	err := s.db.QueryRow(`
 		SELECT u.id, u.company_id, u.name, u.email, u.password_hash, u.avatar_url, 
-			   u.is_active, u.is_online, r.slug, r.name
+			   u.is_active, u.is_online, COALESCE(u.is_super_admin, false), r.slug, r.name
 		FROM users u
 		LEFT JOIN roles r ON u.role_id = r.id
 		WHERE u.email = $1 AND u.is_active = true
 	`, strings.ToLower(req.Email)).Scan(
 		&user.ID, &user.CompanyID, &user.Name, &user.Email, &user.PasswordHash,
-		&user.AvatarURL, &user.IsActive, &user.IsOnline, &roleSlug, &user.RoleName,
+		&user.AvatarURL, &user.IsActive, &user.IsOnline, &user.IsSuperAdmin, &roleSlug, &user.RoleName,
 	)
 
 	if err != nil {
@@ -219,13 +219,13 @@ func (s *AuthService) GetUserByID(userID string) (*models.User, error) {
 	var user models.User
 	err := s.db.QueryRow(`
 		SELECT u.id, u.company_id, u.name, u.email, u.avatar_url, u.phone,
-			   u.is_active, u.is_online, r.slug, r.name
+			   u.is_active, u.is_online, COALESCE(u.is_super_admin, false), r.slug, r.name
 		FROM users u
 		LEFT JOIN roles r ON u.role_id = r.id
 		WHERE u.id = $1
 	`, userID).Scan(
 		&user.ID, &user.CompanyID, &user.Name, &user.Email, &user.AvatarURL,
-		&user.Phone, &user.IsActive, &user.IsOnline, &user.RoleSlug, &user.RoleName,
+		&user.Phone, &user.IsActive, &user.IsOnline, &user.IsSuperAdmin, &user.RoleSlug, &user.RoleName,
 	)
 	if err != nil {
 		return nil, err

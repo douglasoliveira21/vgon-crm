@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -99,6 +100,29 @@ func GenerateTokens(userID, companyID, roleSlug, email string, cfg *config.Confi
 	}
 
 	return accessTokenString, refreshTokenString, nil
+}
+
+// SuperAdminMiddleware checks if the authenticated user has is_super_admin = true
+func SuperAdminMiddleware(db *sql.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userID := c.Locals("user_id").(string)
+
+		var isSuperAdmin bool
+		err := db.QueryRow("SELECT COALESCE(is_super_admin, false) FROM users WHERE id = $1", userID).Scan(&isSuperAdmin)
+		if err != nil {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "Access denied",
+			})
+		}
+
+		if !isSuperAdmin {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error": "Super admin access required",
+			})
+		}
+
+		return c.Next()
+	}
 }
 
 // RBACMiddleware checks if user has required permission

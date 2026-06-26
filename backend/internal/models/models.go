@@ -36,6 +36,7 @@ type User struct {
 	Phone        *string    `json:"phone,omitempty"`
 	IsActive     bool       `json:"is_active"`
 	IsOnline     bool       `json:"is_online"`
+	IsSuperAdmin bool       `json:"is_super_admin"`
 	LastSeenAt   *time.Time `json:"last_seen_at,omitempty"`
 	RoleName     string     `json:"role_name,omitempty"`
 	RoleSlug     string     `json:"role_slug,omitempty"`

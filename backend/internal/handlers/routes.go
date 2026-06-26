@@ -195,6 +195,17 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	protected.Get("/calls/history", GetCallHistory(svc))
 
 	// ============================================
+	// Super Admin Routes
+	// ============================================
+	admin := api.Group("/admin", middleware.AuthMiddleware(svc.Config), middleware.SuperAdminMiddleware(svc.DB))
+	admin.Get("/tenants", GetTenants(svc))
+	admin.Post("/tenants", CreateTenant(svc))
+	admin.Get("/tenants/:id", GetTenant(svc))
+	admin.Put("/tenants/:id", UpdateTenant(svc))
+	admin.Delete("/tenants/:id", DeleteTenant(svc))
+	admin.Get("/stats", GetAdminStats(svc))
+
+	// ============================================
 	// WebSocket
 	// ============================================
 	app.Get("/ws", WebSocketHandler(wsHub, svc.Config))
