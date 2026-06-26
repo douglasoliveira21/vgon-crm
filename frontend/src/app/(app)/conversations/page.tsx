@@ -416,6 +416,16 @@ export default function ConversationsPage() {
     if (selectedConv) wsService.leaveConversation(selectedConv.id)
     wsService.joinConversation(conv.id)
 
+    // Mark as read in backend
+    if (conv.unread_count > 0) {
+      api.post(`/conversations/${conv.id}/read`).catch(() => {})
+    }
+
+    // Update local state immediately
+    setConversations((prev) =>
+      prev.map((c) => (c.id === conv.id ? { ...c, unread_count: 0 } : c))
+    )
+
     try {
       const response = await api.get(`/conversations/${conv.id}/messages`, { params: { limit: 200 } })
       setMessages(response.data.messages || [])

@@ -212,6 +212,17 @@ func ReopenConversation(svc *services.Container) fiber.Handler {
 	}
 }
 
+func MarkConversationRead(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		conversationID := c.Params("id")
+
+		svc.DB.Exec("UPDATE conversations SET unread_count = 0 WHERE id = $1 AND company_id = $2", conversationID, companyID)
+
+		return c.JSON(fiber.Map{"message": "Marked as read"})
+	}
+}
+
 func GetConversationMessages(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
