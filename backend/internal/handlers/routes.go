@@ -135,6 +135,13 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	protected.Get("/metrics", GetMetrics(svc))
 	protected.Get("/metrics/attendance", GetAttendanceMetrics(svc))
 
+	// GLPI
+	glpi := protected.Group("/glpi")
+	glpi.Post("/tickets", GLPICreateTicket(svc))
+	glpi.Get("/tickets/:id", GLPIGetTicket(svc))
+	glpi.Get("/entities", GLPIGetEntities(svc))
+	glpi.Get("/entities/:id", GLPIGetEntity(svc))
+
 	// Announcements
 	announcements := protected.Group("/announcements")
 	announcements.Get("/", GetAnnouncements(svc))

@@ -38,6 +38,11 @@ type Config struct {
 	// Rate Limit
 	RateLimitMax    int
 	RateLimitWindow time.Duration
+
+	// GLPI
+	GLPIBaseURL  string
+	GLPIAppToken string
+	GLPIUserToken string
 }
 
 func Load() *Config {
@@ -61,6 +66,9 @@ func Load() *Config {
 		StorageUseSSL:       getEnv("STORAGE_USE_SSL", "false") == "true",
 		RateLimitMax:        100,
 		RateLimitWindow:     time.Minute,
+		GLPIBaseURL:         getEnv("GLPI_BASE_URL", ""),
+		GLPIAppToken:        getEnv("GLPI_APP_TOKEN", ""),
+		GLPIUserToken:       getEnv("GLPI_USER_TOKEN", ""),
 	}
 }
 
