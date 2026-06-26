@@ -234,14 +234,47 @@ export default function ConversationsPage() {
   }, [])
 
   const showNotification = (msg: Message) => {
+    // Get notification preferences
+    const notifSettings = JSON.parse(localStorage.getItem('notification_settings') || '{}')
+    const alertEvents = JSON.parse(localStorage.getItem('notification_alert_events') || '{}')
+
+    // Find the conversation this message belongs to
+    const conv = conversations.find(c => c.id === msg.conversation_id)
+
+    // Check if we should alert based on conversation assignment rules
+    const shouldAlert = checkShouldAlert(conv, alertEvents)
+    if (!shouldAlert) return
+
+    // Browser notification (always if permission granted)
     if ('Notification' in window && Notification.permission === 'granted') {
       new Notification('Nova mensagem', {
         body: msg.content || 'Mídia recebida',
         icon: '/favicon.ico',
       })
     }
-    // Play notification sound
-    playNotificationSound()
+
+    // Play notification sound ONLY if browser tab is not active
+    if (document.hidden) {
+      playNotificationSound()
+    }
+  }
+
+  const checkShouldAlert = (conv: Conversation | undefined, alertEvents: any) => {
+    // Default: alert for all if no settings configured
+    const alertMine = alertEvents.assigned_to_me !== false
+    const alertUnassigned = alertEvents.unassigned !== false
+    const alertOthers = alertEvents.assigned_to_others !== false
+
+    if (!conv) return alertUnassigned // Unknown conversation, treat as unassigned
+
+    if (conv.assigned_to === user?.id) {
+      return alertMine
+    }
+    if (!conv.assigned_to) {
+      return alertUnassigned
+    }
+    // Assigned to someone else
+    return alertOthers
   }
 
   const playNotificationSound = () => {

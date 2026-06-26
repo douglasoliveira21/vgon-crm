@@ -111,6 +111,9 @@ export default function SettingsPage() {
         {/* Notification Sound */}
         <NotificationSoundSettings />
 
+        {/* Alert Events */}
+        <NotificationAlertEvents />
+
         {/* Channels / WhatsApp */}
         <div className="card p-6">
           <div className="flex items-center gap-3 mb-4">
@@ -155,6 +158,84 @@ export default function SettingsPage() {
 
         {/* Tags */}
         <TagsManager />
+      </div>
+    </div>
+  )
+}
+
+function NotificationAlertEvents() {
+  const [assignedToMe, setAssignedToMe] = useState(true)
+  const [unassigned, setUnassigned] = useState(true)
+  const [assignedToOthers, setAssignedToOthers] = useState(false)
+
+  useEffect(() => {
+    try {
+      const settings = JSON.parse(localStorage.getItem('notification_alert_events') || '{}')
+      if (settings.assigned_to_me !== undefined) setAssignedToMe(settings.assigned_to_me)
+      if (settings.unassigned !== undefined) setUnassigned(settings.unassigned)
+      if (settings.assigned_to_others !== undefined) setAssignedToOthers(settings.assigned_to_others)
+    } catch {}
+  }, [])
+
+  const save = (mine: boolean, unass: boolean, others: boolean) => {
+    const settings = { assigned_to_me: mine, unassigned: unass, assigned_to_others: others }
+    localStorage.setItem('notification_alert_events', JSON.stringify(settings))
+  }
+
+  return (
+    <div className="card p-6">
+      <div className="flex items-center gap-3 mb-2">
+        <Bell size={20} className="text-gray-400" />
+        <h2 className="text-lg font-semibold text-gray-900">Eventos de Alerta para Conversas</h2>
+      </div>
+      <p className="text-xs text-gray-400 mb-4">
+        Receberá alertas de conversas atribuídas e de quaisquer conversas não atendidas.
+        O som será emitido <strong>apenas quando a janela do navegador não estiver ativa</strong>.
+      </p>
+
+      <div className="space-y-3">
+        <label className="flex items-center justify-between">
+          <div>
+            <span className="text-sm font-medium text-gray-700">Conversas atribuídas a mim</span>
+            <p className="text-xs text-gray-400">Alerta quando receber mensagem em conversas suas</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={assignedToMe}
+            onChange={(e) => { setAssignedToMe(e.target.checked); save(e.target.checked, unassigned, assignedToOthers) }}
+            className="rounded border-gray-300 w-5 h-5 text-primary-600"
+          />
+        </label>
+
+        <label className="flex items-center justify-between">
+          <div>
+            <span className="text-sm font-medium text-gray-700">Conversas não atribuídas</span>
+            <p className="text-xs text-gray-400">Alerta quando mensagem chega em conversa sem atendente</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={unassigned}
+            onChange={(e) => { setUnassigned(e.target.checked); save(assignedToMe, e.target.checked, assignedToOthers) }}
+            className="rounded border-gray-300 w-5 h-5 text-primary-600"
+          />
+        </label>
+
+        <label className="flex items-center justify-between">
+          <div>
+            <span className="text-sm font-medium text-gray-700">Conversas atribuídas a outras pessoas</span>
+            <p className="text-xs text-gray-400">Alerta quando mensagem chega em conversa de outro atendente</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={assignedToOthers}
+            onChange={(e) => { setAssignedToOthers(e.target.checked); save(assignedToMe, unassigned, e.target.checked) }}
+            className="rounded border-gray-300 w-5 h-5 text-primary-600"
+          />
+        </label>
+      </div>
+
+      <div className="mt-4 p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
+        💡 O alerta de áudio será reproduzido <strong>somente quando a aba do navegador não estiver ativa</strong> (minimizada ou em outra aba). Quando você está na aba, apenas a notificação visual do navegador será exibida.
       </div>
     </div>
   )
