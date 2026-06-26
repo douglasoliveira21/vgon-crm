@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 type GLPIService struct {
@@ -37,6 +38,8 @@ type GLPIEntity struct {
 }
 
 func NewGLPIService(baseURL, appToken string) *GLPIService {
+	// Remove trailing slash if present
+	baseURL = strings.TrimRight(baseURL, "/")
 	return &GLPIService{
 		baseURL:  baseURL,
 		appToken: appToken,
@@ -45,7 +48,7 @@ func NewGLPIService(baseURL, appToken string) *GLPIService {
 
 // InitSession creates a session with GLPI using user_token
 func (g *GLPIService) InitSession(userToken string) (string, error) {
-	req, err := http.NewRequest("GET", g.baseURL+"/apirest.php/initSession", nil)
+	req, err := http.NewRequest("GET", g.baseURL+"/initSession", nil)
 	if err != nil {
 		return "", err
 	}
@@ -85,7 +88,7 @@ func (g *GLPIService) CreateTicket(sessionToken string, title, content string, e
 	}
 
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequest("POST", g.baseURL+"/apirest.php/Ticket", bytes.NewReader(body))
+	req, err := http.NewRequest("POST", g.baseURL+"/Ticket", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +121,7 @@ func (g *GLPIService) CreateTicket(sessionToken string, title, content string, e
 
 // GetTicket retrieves a ticket by ID
 func (g *GLPIService) GetTicket(sessionToken string, ticketID int) (*GLPITicket, error) {
-	url := fmt.Sprintf("%s/apirest.php/Ticket/%d", g.baseURL, ticketID)
+	url := fmt.Sprintf("%s/Ticket/%d", g.baseURL, ticketID)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -147,7 +150,7 @@ func (g *GLPIService) GetTicket(sessionToken string, ticketID int) (*GLPITicket,
 
 // GetEntities retrieves entities available in GLPI
 func (g *GLPIService) GetEntities(sessionToken string) ([]GLPIEntity, error) {
-	req, err := http.NewRequest("GET", g.baseURL+"/apirest.php/Entity?range=0-100", nil)
+	req, err := http.NewRequest("GET", g.baseURL+"/Entity?range=0-100", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +178,7 @@ func (g *GLPIService) GetEntities(sessionToken string) ([]GLPIEntity, error) {
 
 // GetEntity retrieves a specific entity by ID
 func (g *GLPIService) GetEntity(sessionToken string, entityID int) (*GLPIEntity, error) {
-	url := fmt.Sprintf("%s/apirest.php/Entity/%d", g.baseURL, entityID)
+	url := fmt.Sprintf("%s/Entity/%d", g.baseURL, entityID)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -204,7 +207,7 @@ func (g *GLPIService) GetEntity(sessionToken string, entityID int) (*GLPIEntity,
 
 // KillSession ends a GLPI session
 func (g *GLPIService) KillSession(sessionToken string) {
-	req, _ := http.NewRequest("GET", g.baseURL+"/apirest.php/killSession", nil)
+	req, _ := http.NewRequest("GET", g.baseURL+"/killSession", nil)
 	req.Header.Set("App-Token", g.appToken)
 	req.Header.Set("Session-Token", sessionToken)
 	http.DefaultClient.Do(req)
