@@ -397,3 +397,211 @@ func GetAdminStats(svc *services.Container) fiber.Handler {
 func itoa(i int) string {
 	return fmt.Sprintf("%d", i)
 }
+
+// AdminGetTenantUsers returns all users for a specific tenant
+func AdminGetTenantUsers(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		tenantID := c.Params("id")
+
+		rows, err := svc.DB.Query(`
+			SELECT u.id, u.name, u.email, u.is_active, u.is_online, COALESCE(r.name, '') as role_name, u.created_at
+			FROM users u
+			LEFT JOIN roles r ON u.role_id = r.id
+			WHERE u.company_id = $1
+			ORDER BY u.created_at DESC
+		`, tenantID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to fetch users"})
+		}
+		defer rows.Close()
+
+		type UserRow struct {
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			Email     string `json:"email"`
+			IsActive  bool   `json:"is_active"`
+			IsOnline  bool   `json:"is_online"`
+			RoleName  string `json:"role_name"`
+			CreatedAt string `json:"created_at"`
+		}
+
+		users := []UserRow{}
+		for rows.Next() {
+			var u UserRow
+			rows.Scan(&u.ID, &u.Name, &u.Email, &u.IsActive, &u.IsOnline, &u.RoleName, &u.CreatedAt)
+			users = append(users, u)
+		}
+
+		return c.JSON(fiber.Map{"users": users})
+	}
+}
+
+// AdminCreateTenantUser creates a new user for a specific tenant
+func AdminCreateTenantUser(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		tenantID := c.Params("id")
+
+		var req struct {
+			Name     string `json:"name"`
+			Email    string `json:"email"`
+			Password string `json:"password"`
+			Role     string `json:"role"` // admin, agent, supervisor
+		}
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		if req.Name == "" || req.Email == "" || req.Password == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Name, email and password are required"})
+		}
+
+		// Check max users limit
+		var currentUsers, maxUsers int
+		svc.DB.QueryRow("SELECT COUNT(*) FROM users WHERE company_id = $1", tenantID).Scan(&currentUsers)
+		svc.DB.QueryRow("SELECT max_users FROM companies WHERE id = $1", tenantID).Scan(&maxUsers)
+		if currentUsers >= maxUsers {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": fmt.Sprintf("Limite de usuários atingido (%d/%d). Aumente o plano.", currentUsers, maxUsers)})
+		}
+
+		// Check if email already exists
+		var exists bool
+		svc.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)", strings.ToLower(req.Email)).Scan(&exists)
+		if exists {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Email já está em uso"})
+		}
+
+		// Hash password
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to hash password"})
+		}
+
+		// Get role
+		roleSlug := req.Role
+		if roleSlug == "" {
+			roleSlug = "agent"
+		}
+		var roleID string
+		err = svc.DB.QueryRow("SELECT id FROM roles WHERE slug = $1 AND (company_id = $2 OR is_system = true) LIMIT 1", roleSlug, tenantID).Scan(&roleID)
+		if err != nil {
+			// Fallback to any system role
+			svc.DB.QueryRow("SELECT id FROM roles WHERE is_system = true LIMIT 1").Scan(&roleID)
+		}
+
+		userID := uuid.New().String()
+		_, err = svc.DB.Exec(`
+			INSERT INTO users (id, company_id, role_id, name, email, password_hash)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`, userID, tenantID, roleID, req.Name, strings.ToLower(req.Email), string(hashedPassword))
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create user: " + err.Error()})
+		}
+
+		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+			"id":    userID,
+			"name":  req.Name,
+			"email": req.Email,
+			"role":  roleSlug,
+		})
+	}
+}
+
+// AdminResetUserPassword resets a user's password
+func AdminResetUserPassword(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userID := c.Params("userId")
+
+		var req struct {
+			NewPassword string `json:"new_password"`
+		}
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		if req.NewPassword == "" || len(req.NewPassword) < 6 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Password must be at least 6 characters"})
+		}
+
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to hash password"})
+		}
+
+		result, err := svc.DB.Exec("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2", string(hashedPassword), userID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update password"})
+		}
+
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
+		}
+
+		return c.JSON(fiber.Map{"message": "Password updated successfully"})
+	}
+}
+
+// AdminUpdateUser updates a user's details
+func AdminUpdateUser(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userID := c.Params("userId")
+
+		var req struct {
+			Name     string `json:"name"`
+			Email    string `json:"email"`
+			IsActive *bool  `json:"is_active"`
+		}
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		updates := []string{}
+		args := []interface{}{}
+		argIdx := 1
+
+		if req.Name != "" {
+			updates = append(updates, "name = $"+itoa(argIdx))
+			args = append(args, req.Name)
+			argIdx++
+		}
+		if req.Email != "" {
+			updates = append(updates, "email = $"+itoa(argIdx))
+			args = append(args, strings.ToLower(req.Email))
+			argIdx++
+		}
+		if req.IsActive != nil {
+			updates = append(updates, "is_active = $"+itoa(argIdx))
+			args = append(args, *req.IsActive)
+			argIdx++
+		}
+
+		if len(updates) == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "No fields to update"})
+		}
+
+		updates = append(updates, "updated_at = NOW()")
+		query := "UPDATE users SET " + strings.Join(updates, ", ") + " WHERE id = $" + itoa(argIdx)
+		args = append(args, userID)
+
+		_, err := svc.DB.Exec(query, args...)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update user"})
+		}
+
+		return c.JSON(fiber.Map{"message": "User updated successfully"})
+	}
+}
+
+// AdminDeleteUser deactivates a user
+func AdminDeleteUser(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userID := c.Params("userId")
+
+		_, err := svc.DB.Exec("UPDATE users SET is_active = false, updated_at = NOW() WHERE id = $1", userID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to deactivate user"})
+		}
+
+		return c.JSON(fiber.Map{"message": "User deactivated"})
+	}
+}

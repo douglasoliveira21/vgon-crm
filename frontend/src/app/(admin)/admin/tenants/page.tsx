@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import {
@@ -47,6 +48,7 @@ interface EditTenantForm {
 }
 
 export default function TenantsPage() {
+  const router = useRouter()
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -292,6 +294,13 @@ export default function TenantsPage() {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => router.push(`/admin/tenants/${tenant.id}`)}
+                        className="p-2 text-gray-400 hover:text-blue-400 hover:bg-gray-700 rounded-lg transition-colors"
+                        title="Gerenciar usuários"
+                      >
+                        <Users className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={() => openEditModal(tenant)}
                         className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"

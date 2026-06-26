@@ -205,6 +205,13 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	admin.Delete("/tenants/:id", DeleteTenant(svc))
 	admin.Get("/stats", GetAdminStats(svc))
 
+	// Admin user management
+	admin.Get("/tenants/:id/users", AdminGetTenantUsers(svc))
+	admin.Post("/tenants/:id/users", AdminCreateTenantUser(svc))
+	admin.Put("/users/:userId/password", AdminResetUserPassword(svc))
+	admin.Put("/users/:userId", AdminUpdateUser(svc))
+	admin.Delete("/users/:userId", AdminDeleteUser(svc))
+
 	// ============================================
 	// WebSocket
 	// ============================================
