@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 
 	"github.com/evocrm/backend/internal/services"
 	"github.com/gofiber/fiber/v2"
@@ -722,6 +723,50 @@ func GetMetrics(svc *services.Container) fiber.Handler {
 		}
 
 		return c.JSON(fiber.Map{"metrics": metrics})
+	}
+}
+
+func GetAttendanceMetrics(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		assignedTo := c.Query("assigned_to")
+
+		var attended, resolved int
+		var totalTimeMinutes, avgTimeMinutes float64
+
+		// Base filter
+		baseFilter := "company_id = $1"
+		args := []interface{}{companyID}
+		argIdx := 2
+
+		if assignedTo != "" {
+			baseFilter += fmt.Sprintf(" AND assigned_to = $%d", argIdx)
+			args = append(args, assignedTo)
+			argIdx++
+		}
+
+		// Attended = conversations that have assigned_to set (in_progress or resolved)
+		queryAttended := fmt.Sprintf("SELECT COUNT(*) FROM conversations WHERE %s AND assigned_to IS NOT NULL", baseFilter)
+		svc.DB.QueryRow(queryAttended, args...).Scan(&attended)
+
+		// Resolved
+		queryResolved := fmt.Sprintf("SELECT COUNT(*) FROM conversations WHERE %s AND status = 'resolved'", baseFilter)
+		svc.DB.QueryRow(queryResolved, args...).Scan(&resolved)
+
+		// Average time of attendance (from created_at to updated_at when resolved)
+		queryAvg := fmt.Sprintf(`
+			SELECT COALESCE(EXTRACT(EPOCH FROM AVG(updated_at - created_at))/60, 0),
+			       COALESCE(EXTRACT(EPOCH FROM SUM(updated_at - created_at))/60, 0)
+			FROM conversations WHERE %s AND status = 'resolved' AND updated_at IS NOT NULL
+		`, baseFilter)
+		svc.DB.QueryRow(queryAvg, args...).Scan(&avgTimeMinutes, &totalTimeMinutes)
+
+		return c.JSON(fiber.Map{
+			"attended":           attended,
+			"resolved":           resolved,
+			"total_time_minutes": totalTimeMinutes,
+			"avg_time_minutes":   avgTimeMinutes,
+		})
 	}
 }
 

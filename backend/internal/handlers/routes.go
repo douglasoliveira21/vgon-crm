@@ -133,6 +133,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 
 	// Metrics
 	protected.Get("/metrics", GetMetrics(svc))
+	protected.Get("/metrics/attendance", GetAttendanceMetrics(svc))
 
 	// Announcements
 	announcements := protected.Group("/announcements")

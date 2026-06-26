@@ -11,15 +11,40 @@ import {
   Clock,
   CheckCircle,
   AlertCircle,
+  Headphones,
+  Timer,
 } from 'lucide-react'
+
+interface UserItem {
+  id: string
+  name: string
+  email: string
+  role_name?: string
+}
+
+interface AttendanceMetrics {
+  attended: number
+  resolved: number
+  total_time_minutes: number
+  avg_time_minutes: number
+}
 
 export default function MetricsPage() {
   const [metrics, setMetrics] = useState<any>({})
   const [loading, setLoading] = useState(true)
+  const [users, setUsers] = useState<UserItem[]>([])
+  const [selectedUser, setSelectedUser] = useState('')
+  const [attendance, setAttendance] = useState<AttendanceMetrics>({ attended: 0, resolved: 0, total_time_minutes: 0, avg_time_minutes: 0 })
+  const [loadingAttendance, setLoadingAttendance] = useState(true)
 
   useEffect(() => {
     fetchMetrics()
+    fetchUsers()
   }, [])
+
+  useEffect(() => {
+    fetchAttendanceMetrics()
+  }, [selectedUser])
 
   const fetchMetrics = async () => {
     try {
@@ -30,6 +55,34 @@ export default function MetricsPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const fetchUsers = async () => {
+    try {
+      const response = await api.get('/users')
+      setUsers(response.data.users || [])
+    } catch {}
+  }
+
+  const fetchAttendanceMetrics = async () => {
+    setLoadingAttendance(true)
+    try {
+      const params: any = {}
+      if (selectedUser) params.assigned_to = selectedUser
+      const response = await api.get('/metrics/attendance', { params })
+      setAttendance(response.data || { attended: 0, resolved: 0, total_time_minutes: 0, avg_time_minutes: 0 })
+    } catch {
+      setAttendance({ attended: 0, resolved: 0, total_time_minutes: 0, avg_time_minutes: 0 })
+    } finally {
+      setLoadingAttendance(false)
+    }
+  }
+
+  const formatTime = (minutes: number) => {
+    if (minutes < 60) return `${Math.round(minutes)} min`
+    const hours = Math.floor(minutes / 60)
+    const mins = Math.round(minutes % 60)
+    return `${hours}h ${mins}min`
   }
 
   if (loading) {
@@ -129,7 +182,7 @@ export default function MetricsPage() {
       </div>
 
       {/* Deals Overview */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <div className="card p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Vendas</h3>
           <div className="space-y-4">
@@ -173,6 +226,76 @@ export default function MetricsPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Attendance Metrics */}
+      <div className="card p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Métricas de Atendimento</h3>
+            <p className="text-sm text-gray-500 mt-0.5">Chamados atendidos, resolvidos e tempos</p>
+          </div>
+          <select
+            value={selectedUser}
+            onChange={(e) => setSelectedUser(e.target.value)}
+            className="text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-700 bg-gray-50 focus:border-primary-500 outline-none min-w-[200px]"
+          >
+            <option value="">Todos os atendentes</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>{u.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {loadingAttendance ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-24 bg-gray-100 rounded-xl animate-pulse"></div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-blue-50 rounded-xl p-4">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-9 h-9 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <Headphones size={18} className="text-blue-600" />
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-gray-900">{attendance.attended}</p>
+              <p className="text-xs text-gray-500 mt-0.5">Chamados Atendidos</p>
+            </div>
+
+            <div className="bg-green-50 rounded-xl p-4">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-9 h-9 bg-green-100 rounded-lg flex items-center justify-center">
+                  <CheckCircle size={18} className="text-green-600" />
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-gray-900">{attendance.resolved}</p>
+              <p className="text-xs text-gray-500 mt-0.5">Chamados Resolvidos</p>
+            </div>
+
+            <div className="bg-purple-50 rounded-xl p-4">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-9 h-9 bg-purple-100 rounded-lg flex items-center justify-center">
+                  <Clock size={18} className="text-purple-600" />
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-gray-900">{formatTime(attendance.total_time_minutes)}</p>
+              <p className="text-xs text-gray-500 mt-0.5">Tempo Total de Atendimento</p>
+            </div>
+
+            <div className="bg-orange-50 rounded-xl p-4">
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-9 h-9 bg-orange-100 rounded-lg flex items-center justify-center">
+                  <Timer size={18} className="text-orange-600" />
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-gray-900">{formatTime(attendance.avg_time_minutes)}</p>
+              <p className="text-xs text-gray-500 mt-0.5">Média de Tempo de Atendimento</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
