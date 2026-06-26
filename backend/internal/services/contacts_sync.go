@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -212,7 +213,13 @@ func (s *EvolutionService) SyncContactPhoto(instanceName, phone, contactID strin
 
 // SyncAllContactPhotos syncs photos for all contacts of a company
 func (s *EvolutionService) SyncAllContactPhotos(instanceName, companyID string) {
-	rows, err := s.db.Query("SELECT id, phone FROM contacts WHERE company_id = $1 AND avatar_url IS NULL AND phone IS NOT NULL", companyID)
+	// Sync contacts without photo OR with photo older than 24h
+	rows, err := s.db.Query(`
+		SELECT id, phone FROM contacts 
+		WHERE company_id = $1 AND phone IS NOT NULL 
+		AND (avatar_url IS NULL OR updated_at < NOW() - INTERVAL '24 hours')
+		LIMIT 100
+	`, companyID)
 	if err != nil {
 		return
 	}
@@ -229,10 +236,50 @@ func (s *EvolutionService) SyncAllContactPhotos(instanceName, companyID string) 
 		}
 
 		// Rate limit - don't hammer the API
-		if count > 50 {
+		time.Sleep(500 * time.Millisecond)
+		if count > 100 {
 			break
 		}
 	}
 
 	log.Printf("[SYNC] Synced %d contact photos for instance %s", count, instanceName)
+}
+
+// StartPeriodicPhotoSync starts a background goroutine that syncs contact photos every 6 hours
+func (s *EvolutionService) StartPeriodicPhotoSync() {
+	go func() {
+		// Wait 2 minutes before first run (let server fully start)
+		time.Sleep(2 * time.Minute)
+
+		for {
+			s.syncAllCompanyPhotos()
+			// Run every 6 hours
+			time.Sleep(6 * time.Hour)
+		}
+	}()
+	log.Println("[SYNC] Periodic photo sync started (every 6 hours)")
+}
+
+func (s *EvolutionService) syncAllCompanyPhotos() {
+	// Get all active instances
+	rows, err := s.db.Query(`
+		SELECT wi.instance_name, c.id as company_id
+		FROM whatsapp_instances wi
+		JOIN channels ch ON wi.channel_id = ch.id
+		JOIN companies c ON ch.company_id = c.id
+		WHERE ch.status = 'connected' AND c.is_active = true
+	`)
+	if err != nil {
+		log.Printf("[SYNC] Failed to get instances for photo sync: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var instanceName, companyID string
+		rows.Scan(&instanceName, &companyID)
+		s.SyncAllContactPhotos(instanceName, companyID)
+		// Pause between companies
+		time.Sleep(5 * time.Second)
+	}
 }

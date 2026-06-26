@@ -55,6 +55,9 @@ func main() {
 	// Initialize services
 	svc := services.NewContainer(db, rdb, cfg, wsHub)
 
+	// Start periodic background tasks
+	svc.Evolution.StartPeriodicPhotoSync()
+
 	// Initialize Fiber app
 	app := fiber.New(fiber.Config{
 		BodyLimit:    50 * 1024 * 1024, // 50MB
