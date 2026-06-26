@@ -97,7 +97,7 @@ export default function QuickRepliesPage() {
       (r.category && r.category.toLowerCase().includes(search.toLowerCase()))
   )
 
-  const categories = [...new Set(replies.map((r) => r.category).filter(Boolean))]
+  const categories = Array.from(new Set(replies.map((r) => r.category).filter(Boolean))) as string[]
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
