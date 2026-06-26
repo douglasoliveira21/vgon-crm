@@ -12,7 +12,7 @@ import (
 func TelephonyCall(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
-		userID := c.Locals("user_id").(string)
+		_ = c.Locals("user_id").(string)
 
 		var body struct {
 			Destination string `json:"destination"`
