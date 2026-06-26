@@ -22,16 +22,29 @@ import {
   Keyboard,
   Wifi,
   WifiOff,
+  Users,
+  Activity,
+  BarChart3,
+  Server,
+  CheckCircle,
+  XCircle,
+  PhoneCall,
+  ListMusic,
+  GitBranch,
 } from 'lucide-react'
 
 export default function CallsPage() {
   const sip = useSIP()
-  const [activeTab, setActiveTab] = useState('softphone')
+  const [activeTab, setActiveTab] = useState('dashboard')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [showConfig, setShowConfig] = useState(false)
   const [showDTMF, setShowDTMF] = useState(false)
   const [contactResults, setContactResults] = useState<Array<{name: string; phone: string}>>([])
   const [callHistory, setCallHistory] = useState<Array<{id: string; direction: string; number: string; name?: string; duration: number; status: string; date: string}>>([])
+  const [extensions, setExtensions] = useState<Array<{id: string; extension_number: string; display_name: string; status: string; can_call_external: boolean}>>([])
+  const [queues, setQueues] = useState<Array<{id: string; name: string; strategy: string}>>([])
+  const [serverStatus, setServerStatus] = useState<{ari: boolean; ami: boolean; webrtc: boolean} | null>(null)
+  const [dashboardStats, setDashboardStats] = useState<any>(null)
 
   const [sipConfig, setSipConfig] = useState({
     display_name: '',
@@ -46,7 +59,14 @@ export default function CallsPage() {
     auto_register: true,
   })
 
-  useEffect(() => { loadConfig() }, [])
+  useEffect(() => {
+    loadConfig()
+    fetchExtensions()
+    fetchQueues()
+    fetchCallHistory()
+    fetchDashboardStats()
+    testServerConnection()
+  }, [])
 
   const loadConfig = async () => {
     try {
@@ -66,6 +86,55 @@ export default function CallsPage() {
         }))
       }
     } catch {}
+  }
+
+  const fetchExtensions = async () => {
+    try {
+      const res = await api.get('/telephony/extensions')
+      setExtensions(res.data.extensions || [])
+    } catch {}
+  }
+
+  const fetchQueues = async () => {
+    try {
+      const res = await api.get('/telephony/queues')
+      setQueues(res.data.queues || [])
+    } catch {}
+  }
+
+  const fetchCallHistory = async () => {
+    try {
+      const res = await api.get('/calls/history', { params: { limit: 50 } })
+      setCallHistory((res.data.calls || []).map((c: any) => ({
+        id: c.id, direction: c.direction, number: c.direction === 'inbound' ? c.from_number : c.to_number,
+        name: c.contact_name, duration: c.duration || 0, status: c.status, date: c.created_at,
+      })))
+    } catch {}
+  }
+
+  const fetchDashboardStats = async () => {
+    try {
+      const res = await api.get('/calls/history', { params: { limit: 500 } })
+      const calls = res.data.calls || []
+      const today = new Date().toISOString().split('T')[0]
+      const todayCalls = calls.filter((c: any) => c.created_at?.startsWith(today))
+      setDashboardStats({
+        total: calls.length,
+        today_inbound: todayCalls.filter((c: any) => c.direction === 'inbound').length,
+        today_outbound: todayCalls.filter((c: any) => c.direction === 'outbound').length,
+        today_missed: todayCalls.filter((c: any) => c.status === 'missed' || c.status === 'no_answer').length,
+        avg_duration: calls.length > 0 ? Math.round(calls.reduce((s: number, c: any) => s + (c.duration || 0), 0) / calls.length) : 0,
+      })
+    } catch {}
+  }
+
+  const testServerConnection = async () => {
+    try {
+      const res = await api.get('/telephony/status')
+      setServerStatus({ ari: !res.data.error, ami: true, webrtc: sip.status === 'online' })
+    } catch {
+      setServerStatus({ ari: false, ami: false, webrtc: false })
+    }
   }
 
   const saveConfig = async () => {
@@ -153,10 +222,118 @@ export default function CallsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 mb-6">
-        <button onClick={() => setActiveTab('softphone')} className={`px-4 py-2 rounded-lg text-sm font-medium ${activeTab === 'softphone' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>📞 Softphone</button>
-        <button onClick={() => setActiveTab('history')} className={`px-4 py-2 rounded-lg text-sm font-medium ${activeTab === 'history' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>📋 Histórico</button>
+      <div className="flex gap-2 mb-6 overflow-x-auto">
+        <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'dashboard' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>📊 Dashboard</button>
+        <button onClick={() => setActiveTab('softphone')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'softphone' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>📞 Softphone</button>
+        <button onClick={() => setActiveTab('extensions')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'extensions' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>📱 Ramais</button>
+        <button onClick={() => setActiveTab('history')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'history' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>📋 Histórico</button>
+        <button onClick={() => setActiveTab('queues')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'queues' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>👥 Filas</button>
       </div>
+
+      {/* Dashboard */}
+      {activeTab === 'dashboard' && (
+        <div className="space-y-6">
+          {/* Server Status */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="card p-4 flex items-center gap-3">
+              <Server size={20} className={serverStatus?.ari ? 'text-green-500' : 'text-red-500'} />
+              <div>
+                <p className="text-xs text-gray-500">Servidor ARI</p>
+                <p className="text-sm font-medium">{serverStatus?.ari ? '🟢 Conectado' : '🔴 Desconectado'}</p>
+              </div>
+            </div>
+            <div className="card p-4 flex items-center gap-3">
+              <Activity size={20} className={serverStatus?.ami ? 'text-green-500' : 'text-red-500'} />
+              <div>
+                <p className="text-xs text-gray-500">AMI</p>
+                <p className="text-sm font-medium">{serverStatus?.ami ? '🟢 Conectado' : '🔴 Desconectado'}</p>
+              </div>
+            </div>
+            <div className="card p-4 flex items-center gap-3">
+              <Wifi size={20} className={sip.status === 'online' ? 'text-green-500' : 'text-red-500'} />
+              <div>
+                <p className="text-xs text-gray-500">WebRTC</p>
+                <p className="text-sm font-medium">{sip.status === 'online' ? '🟢 Conectado' : sip.status === 'registering' ? '🟡 Registrando' : '🔴 Desconectado'}</p>
+              </div>
+            </div>
+            <div className="card p-4 flex items-center gap-3">
+              <Users size={20} className="text-blue-500" />
+              <div>
+                <p className="text-xs text-gray-500">Ramais Registrados</p>
+                <p className="text-sm font-medium">{extensions.length}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="card p-4 text-center">
+              <PhoneCall size={24} className="text-blue-500 mx-auto mb-2" />
+              <p className="text-2xl font-bold">{dashboardStats?.today_inbound || 0}</p>
+              <p className="text-xs text-gray-500">Recebidas hoje</p>
+            </div>
+            <div className="card p-4 text-center">
+              <PhoneOutgoing size={24} className="text-green-500 mx-auto mb-2" />
+              <p className="text-2xl font-bold">{dashboardStats?.today_outbound || 0}</p>
+              <p className="text-xs text-gray-500">Realizadas hoje</p>
+            </div>
+            <div className="card p-4 text-center">
+              <PhoneMissed size={24} className="text-red-500 mx-auto mb-2" />
+              <p className="text-2xl font-bold">{dashboardStats?.today_missed || 0}</p>
+              <p className="text-xs text-gray-500">Perdidas hoje</p>
+            </div>
+            <div className="card p-4 text-center">
+              <Clock size={24} className="text-purple-500 mx-auto mb-2" />
+              <p className="text-2xl font-bold">{dashboardStats?.avg_duration ? fmt(dashboardStats.avg_duration) : '0:00'}</p>
+              <p className="text-xs text-gray-500">Tempo médio</p>
+            </div>
+            <div className="card p-4 text-center">
+              <BarChart3 size={24} className="text-orange-500 mx-auto mb-2" />
+              <p className="text-2xl font-bold">{dashboardStats?.total || 0}</p>
+              <p className="text-xs text-gray-500">Total chamadas</p>
+            </div>
+          </div>
+
+          {/* Quick Actions */}
+          <div className="card p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Atalhos Rápidos</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <button onClick={() => setShowConfig(true)} className="p-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-center transition-colors">
+                <Settings size={20} className="text-gray-600 mx-auto mb-1" />
+                <p className="text-xs text-gray-700 font-medium">Configurar Servidor</p>
+              </button>
+              <button onClick={() => setActiveTab('softphone')} className="p-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-center transition-colors">
+                <Phone size={20} className="text-green-600 mx-auto mb-1" />
+                <p className="text-xs text-gray-700 font-medium">Abrir Discador</p>
+              </button>
+              <button onClick={() => setActiveTab('extensions')} className="p-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-center transition-colors">
+                <Users size={20} className="text-blue-600 mx-auto mb-1" />
+                <p className="text-xs text-gray-700 font-medium">Ramais</p>
+              </button>
+              <button onClick={() => setActiveTab('history')} className="p-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-center transition-colors">
+                <Clock size={20} className="text-purple-600 mx-auto mb-1" />
+                <p className="text-xs text-gray-700 font-medium">Histórico</p>
+              </button>
+              <button onClick={() => setActiveTab('queues')} className="p-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-center transition-colors">
+                <ListMusic size={20} className="text-orange-600 mx-auto mb-1" />
+                <p className="text-xs text-gray-700 font-medium">Filas</p>
+              </button>
+              <button onClick={() => testServerConnection()} className="p-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-center transition-colors">
+                <Activity size={20} className="text-cyan-600 mx-auto mb-1" />
+                <p className="text-xs text-gray-700 font-medium">Testar Conexão</p>
+              </button>
+              <button onClick={doRegister} className="p-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-center transition-colors">
+                <Wifi size={20} className="text-indigo-600 mx-auto mb-1" />
+                <p className="text-xs text-gray-700 font-medium">Registrar Ramal</p>
+              </button>
+              <button onClick={() => setActiveTab('queues')} className="p-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-center transition-colors">
+                <GitBranch size={20} className="text-pink-600 mx-auto mb-1" />
+                <p className="text-xs text-gray-700 font-medium">URA</p>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Incoming Call Popup */}
       {sip.isIncoming && (
@@ -275,6 +452,70 @@ export default function CallsPage() {
                   <div className="text-right">
                     <p className="text-sm">{fmt(call.duration)}</p>
                     <button onClick={() => handleMakeCall(call.number)} className="text-xs text-primary-600">Religar</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Extensions Tab */}
+      {activeTab === 'extensions' && (
+        <div className="card p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900">Ramais</h3>
+            <button onClick={() => setShowConfig(true)} className="btn-primary text-sm">+ Novo Ramal</button>
+          </div>
+          {extensions.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">
+              <Phone size={32} className="mx-auto mb-3 opacity-50" />
+              <p>Nenhum ramal cadastrado</p>
+              <p className="text-xs mt-1">Configure os ramais na aba de configurações do servidor</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {extensions.map((ext) => (
+                <div key={ext.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-3 h-3 rounded-full ${ext.status === 'online' ? 'bg-green-500' : 'bg-gray-300'}`} />
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{ext.display_name}</p>
+                      <p className="text-xs text-gray-500">Ramal: {ext.extension_number}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`badge text-xs ${ext.status === 'online' ? 'badge-green' : 'badge-gray'}`}>
+                      {ext.status === 'online' ? 'Online' : 'Offline'}
+                    </span>
+                    {ext.can_call_external && <span className="text-xs text-gray-400">Ext. ✓</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Queues Tab */}
+      {activeTab === 'queues' && (
+        <div className="card p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900">Filas de Atendimento</h3>
+          </div>
+          {queues.length === 0 ? (
+            <div className="text-center py-8 text-gray-400">
+              <Users size={32} className="mx-auto mb-3 opacity-50" />
+              <p>Nenhuma fila criada</p>
+              <p className="text-xs mt-1">Filas distribuem chamadas entre os atendentes</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {queues.map((q) => (
+                <div key={q.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{q.name}</p>
+                    <p className="text-xs text-gray-500">Estratégia: {q.strategy}</p>
                   </div>
                 </div>
               ))}
