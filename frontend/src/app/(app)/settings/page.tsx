@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useAuthStore } from '@/store/auth'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { User, Building, Shield, Bell, Palette, MessageSquare, Tag } from 'lucide-react'
+import { User, Building, Shield, Bell, Palette, MessageSquare, Tag, Volume2, Play } from 'lucide-react'
 
 export default function SettingsPage() {
   const { user } = useAuthStore()
@@ -108,6 +108,9 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* Notification Sound */}
+        <NotificationSoundSettings />
+
         {/* Channels / WhatsApp */}
         <div className="card p-6">
           <div className="flex items-center gap-3 mb-4">
@@ -152,6 +155,141 @@ export default function SettingsPage() {
 
         {/* Tags */}
         <TagsManager />
+      </div>
+    </div>
+  )
+}
+
+function NotificationSoundSettings() {
+  const [enabled, setEnabled] = useState(true)
+  const [sound, setSound] = useState('notification-1')
+  const [volume, setVolume] = useState(50)
+
+  const soundOptions = [
+    { id: 'notification-1', label: 'Padrão' },
+    { id: 'notification-2', label: 'Suave' },
+    { id: 'notification-3', label: 'Alerta' },
+    { id: 'notification-4', label: 'Mensagem' },
+    { id: 'notification-5', label: 'Pop' },
+    { id: 'notification-6', label: 'Ding' },
+  ]
+
+  useEffect(() => {
+    try {
+      const settings = JSON.parse(localStorage.getItem('notification_settings') || '{}')
+      if (settings.enabled !== undefined) setEnabled(settings.enabled)
+      if (settings.sound) setSound(settings.sound)
+      if (settings.volume !== undefined) setVolume(settings.volume)
+    } catch {}
+  }, [])
+
+  const saveSettings = (newEnabled: boolean, newSound: string, newVolume: number) => {
+    const settings = { enabled: newEnabled, sound: newSound, volume: newVolume }
+    localStorage.setItem('notification_settings', JSON.stringify(settings))
+  }
+
+  const toggleEnabled = (val: boolean) => {
+    setEnabled(val)
+    saveSettings(val, sound, volume)
+    toast.success(val ? 'Som de notificação ativado' : 'Som de notificação desativado')
+  }
+
+  const changeSound = (newSound: string) => {
+    setSound(newSound)
+    saveSettings(enabled, newSound, volume)
+    // Play preview
+    try {
+      const audio = new Audio(`/sounds/${newSound}.wav`)
+      audio.volume = volume / 100
+      audio.play().catch(() => {})
+    } catch {}
+  }
+
+  const changeVolume = (newVolume: number) => {
+    setVolume(newVolume)
+    saveSettings(enabled, sound, newVolume)
+  }
+
+  const testSound = () => {
+    try {
+      const audio = new Audio(`/sounds/${sound}.wav`)
+      audio.volume = volume / 100
+      audio.play().catch(() => toast.error('Não foi possível reproduzir o som. Verifique se os arquivos existem em /public/sounds/'))
+    } catch {
+      toast.error('Erro ao reproduzir som')
+    }
+  }
+
+  return (
+    <div className="card p-6">
+      <div className="flex items-center gap-3 mb-4">
+        <Volume2 size={20} className="text-gray-400" />
+        <h2 className="text-lg font-semibold text-gray-900">Som de Notificação</h2>
+      </div>
+
+      <div className="space-y-4">
+        {/* Toggle */}
+        <label className="flex items-center justify-between">
+          <div>
+            <span className="text-sm font-medium text-gray-700">Ativar som de notificação</span>
+            <p className="text-xs text-gray-400">Reproduzir um som ao receber nova mensagem</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => toggleEnabled(e.target.checked)}
+            className="rounded border-gray-300 w-5 h-5 text-primary-600"
+          />
+        </label>
+
+        {enabled && (
+          <>
+            {/* Sound selection */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Escolher som</label>
+              <div className="grid grid-cols-2 gap-2">
+                {soundOptions.map((option) => (
+                  <button
+                    key={option.id}
+                    onClick={() => changeSound(option.id)}
+                    className={`px-3 py-2.5 text-sm rounded-lg border transition-colors text-left flex items-center gap-2 ${
+                      sound === option.id
+                        ? 'border-primary-500 bg-primary-50 text-primary-700 font-medium'
+                        : 'border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <span className="text-lg">{sound === option.id ? '🔊' : '🔈'}</span>
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Volume */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Volume: {volume}%
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={volume}
+                onChange={(e) => changeVolume(Number(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-primary-600"
+              />
+              <div className="flex justify-between text-xs text-gray-400 mt-1">
+                <span>Silencioso</span>
+                <span>Alto</span>
+              </div>
+            </div>
+
+            {/* Test button */}
+            <button onClick={testSound} className="btn-secondary text-sm flex items-center gap-2">
+              <Play size={14} /> Testar som
+            </button>
+          </>
+        )}
       </div>
     </div>
   )

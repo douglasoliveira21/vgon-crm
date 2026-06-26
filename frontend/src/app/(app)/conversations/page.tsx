@@ -240,6 +240,20 @@ export default function ConversationsPage() {
         icon: '/favicon.ico',
       })
     }
+    // Play notification sound
+    playNotificationSound()
+  }
+
+  const playNotificationSound = () => {
+    try {
+      const settings = JSON.parse(localStorage.getItem('notification_settings') || '{}')
+      if (settings.enabled === false) return
+      const soundFile = settings.sound || 'notification-1'
+      const volume = settings.volume != null ? settings.volume / 100 : 0.5
+      const audio = new Audio(`/sounds/${soundFile}.wav`)
+      audio.volume = volume
+      audio.play().catch(() => {})
+    } catch {}
   }
 
   const fetchConversations = async () => {
