@@ -19,6 +19,7 @@ import {
   Settings,
   LogOut,
   MessageCircle,
+  Zap,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
@@ -35,6 +36,7 @@ const menuItems = [
   { label: 'Chamadas', href: '/calls', icon: Phone },
   { label: 'Métricas', href: '/metrics', icon: BarChart3 },
   { label: 'Widget', href: '/widget', icon: Globe },
+  { label: 'Respostas Rápidas', href: '/quick-replies', icon: Zap },
   { label: 'Configurações', href: '/settings', icon: Settings },
 ]
 

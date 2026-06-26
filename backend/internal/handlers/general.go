@@ -1021,15 +1021,23 @@ func GetQuickReplies(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
 
-		rows, _ := svc.DB.Query("SELECT id, shortcut, title, content FROM quick_replies WHERE company_id = $1 ORDER BY shortcut", companyID)
+		rows, _ := svc.DB.Query(`
+			SELECT id, shortcut, title, content, category, created_at
+			FROM quick_replies WHERE company_id = $1 ORDER BY shortcut
+		`, companyID)
 
-		var replies []map[string]string
+		var replies []map[string]interface{}
 		if rows != nil {
 			defer rows.Close()
 			for rows.Next() {
-				var id, shortcut, title, content string
-				rows.Scan(&id, &shortcut, &title, &content)
-				replies = append(replies, map[string]string{"id": id, "shortcut": shortcut, "title": title, "content": content})
+				var id, shortcut, content string
+				var title, category *string
+				var createdAt string
+				rows.Scan(&id, &shortcut, &title, &content, &category, &createdAt)
+				replies = append(replies, map[string]interface{}{
+					"id": id, "shortcut": shortcut, "title": title,
+					"content": content, "category": category, "created_at": createdAt,
+				})
 			}
 		}
 
@@ -1046,14 +1054,74 @@ func CreateQuickReply(svc *services.Container) fiber.Handler {
 			Shortcut string `json:"shortcut"`
 			Title    string `json:"title"`
 			Content  string `json:"content"`
+			Category string `json:"category"`
 		}
-		c.BodyParser(&body)
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		if body.Shortcut == "" || body.Content == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Shortcut and content are required"})
+		}
 
 		id := uuid.New().String()
-		svc.DB.Exec("INSERT INTO quick_replies (id, company_id, shortcut, title, content, created_by) VALUES ($1, $2, $3, $4, $5, $6)",
-			id, companyID, body.Shortcut, body.Title, body.Content, userID)
+		_, err := svc.DB.Exec(`
+			INSERT INTO quick_replies (id, company_id, shortcut, title, content, category, created_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`, id, companyID, body.Shortcut, body.Title, body.Content, body.Category, userID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
 
-		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"id": id})
+		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+			"id": id, "shortcut": body.Shortcut, "title": body.Title,
+			"content": body.Content, "category": body.Category,
+		})
+	}
+}
+
+func UpdateQuickReply(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		replyID := c.Params("id")
+
+		var body struct {
+			Shortcut string `json:"shortcut"`
+			Title    string `json:"title"`
+			Content  string `json:"content"`
+			Category string `json:"category"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		if body.Shortcut == "" || body.Content == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Shortcut and content are required"})
+		}
+
+		_, err := svc.DB.Exec(`
+			UPDATE quick_replies SET shortcut = $1, title = $2, content = $3, category = $4, updated_at = NOW()
+			WHERE id = $5 AND company_id = $6
+		`, body.Shortcut, body.Title, body.Content, body.Category, replyID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"message": "Quick reply updated"})
+	}
+}
+
+func DeleteQuickReply(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		replyID := c.Params("id")
+
+		_, err := svc.DB.Exec("DELETE FROM quick_replies WHERE id = $1 AND company_id = $2", replyID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"message": "Quick reply deleted"})
 	}
 }
 

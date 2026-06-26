@@ -166,6 +166,8 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	quickReplies := protected.Group("/quick-replies")
 	quickReplies.Get("/", GetQuickReplies(svc))
 	quickReplies.Post("/", CreateQuickReply(svc))
+	quickReplies.Put("/:id", UpdateQuickReply(svc))
+	quickReplies.Delete("/:id", DeleteQuickReply(svc))
 
 	// Users
 	users := protected.Group("/users")

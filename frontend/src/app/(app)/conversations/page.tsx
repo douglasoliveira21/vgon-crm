@@ -126,11 +126,18 @@ export default function ConversationsPage() {
   const audioChunksRef = useRef<Blob[]>([])
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
+  // Quick replies
+  const [quickReplies, setQuickReplies] = useState<{ id: string; shortcut: string; title: string | null; content: string; category: string | null }[]>([])
+  const [showQuickReplies, setShowQuickReplies] = useState(false)
+  const [quickReplyFilter, setQuickReplyFilter] = useState('')
+  const [selectedQuickReplyIndex, setSelectedQuickReplyIndex] = useState(0)
+
   useEffect(() => {
     fetchConversations()
     fetchTabUnreadCounts()
     fetchUsers()
     fetchTeams()
+    fetchQuickReplies()
   }, [filter, statusFilter])
 
   useEffect(() => {
@@ -303,6 +310,13 @@ export default function ConversationsPage() {
     try {
       const response = await api.get('/teams')
       setTeams(response.data.teams || [])
+    } catch {}
+  }
+
+  const fetchQuickReplies = async () => {
+    try {
+      const response = await api.get('/quick-replies')
+      setQuickReplies(response.data.quick_replies || [])
     } catch {}
   }
 
@@ -1224,10 +1238,86 @@ export default function ConversationsPage() {
                   <input
                     type="text"
                     value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    placeholder="Digite uma mensagem..."
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setNewMessage(val)
+                      // Quick reply trigger
+                      if (val.startsWith('/')) {
+                        setShowQuickReplies(true)
+                        setQuickReplyFilter(val.slice(1).toLowerCase())
+                        setSelectedQuickReplyIndex(0)
+                      } else {
+                        setShowQuickReplies(false)
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (showQuickReplies) {
+                        const filtered = quickReplies.filter(
+                          (r) =>
+                            r.shortcut.toLowerCase().includes(quickReplyFilter) ||
+                            r.content.toLowerCase().includes(quickReplyFilter) ||
+                            (r.title && r.title.toLowerCase().includes(quickReplyFilter))
+                        )
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault()
+                          setSelectedQuickReplyIndex((prev) => Math.min(prev + 1, filtered.length - 1))
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault()
+                          setSelectedQuickReplyIndex((prev) => Math.max(prev - 1, 0))
+                        } else if (e.key === 'Enter' && filtered.length > 0) {
+                          e.preventDefault()
+                          setNewMessage(filtered[selectedQuickReplyIndex].content)
+                          setShowQuickReplies(false)
+                        } else if (e.key === 'Escape') {
+                          setShowQuickReplies(false)
+                        }
+                      }
+                    }}
+                    placeholder="Digite uma mensagem... (/ para atalhos)"
                     className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500/20 outline-none pr-10"
                   />
+
+                  {/* Quick Replies Dropdown */}
+                  {showQuickReplies && (() => {
+                    const filtered = quickReplies.filter(
+                      (r) =>
+                        r.shortcut.toLowerCase().includes(quickReplyFilter) ||
+                        r.content.toLowerCase().includes(quickReplyFilter) ||
+                        (r.title && r.title.toLowerCase().includes(quickReplyFilter))
+                    )
+                    if (filtered.length === 0) return null
+                    return (
+                      <div className="absolute bottom-14 left-0 w-full bg-white rounded-xl shadow-xl border border-gray-200 max-h-60 overflow-y-auto z-50">
+                        <div className="p-2 border-b border-gray-100">
+                          <span className="text-xs text-gray-400 font-medium px-2">Respostas Rápidas</span>
+                        </div>
+                        {filtered.map((reply, idx) => (
+                          <button
+                            key={reply.id}
+                            type="button"
+                            onClick={() => {
+                              setNewMessage(reply.content)
+                              setShowQuickReplies(false)
+                            }}
+                            className={clsx(
+                              'w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors flex items-start gap-3',
+                              idx === selectedQuickReplyIndex && 'bg-primary-50'
+                            )}
+                          >
+                            <code className="text-xs bg-gray-100 text-primary-600 px-1.5 py-0.5 rounded font-mono shrink-0 mt-0.5">
+                              {reply.shortcut}
+                            </code>
+                            <div className="flex-1 min-w-0">
+                              {reply.title && (
+                                <p className="text-sm font-medium text-gray-700 truncate">{reply.title}</p>
+                              )}
+                              <p className="text-xs text-gray-500 truncate">{reply.content}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  })()}
                   <button
                     type="button"
                     onClick={() => setShowEmojiPicker(!showEmojiPicker)}
