@@ -72,6 +72,11 @@ func (s *AsteriskService) GetAsteriskConfig(companyID string) (*AsteriskConfig, 
 // ARI REST API Methods
 // ============================================
 
+// ARIRequest performs a request to the Asterisk ARI REST API (public wrapper)
+func (s *AsteriskService) ARIRequest(cfg *AsteriskConfig, method, path string, body interface{}) ([]byte, error) {
+	return s.ariRequest(cfg, method, path, body)
+}
+
 func (s *AsteriskService) ariRequest(cfg *AsteriskConfig, method, path string, body interface{}) ([]byte, error) {
 	url := fmt.Sprintf("http://%s:%d/ari%s", cfg.Host, 8088, path) // ARI default port 8088
 

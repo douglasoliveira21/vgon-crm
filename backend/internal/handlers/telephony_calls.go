@@ -280,6 +280,252 @@ func DeleteRecording(svc *services.Container) fiber.Handler {
 	}
 }
 
+// ============================================
+// Conference Calls
+// ============================================
+
+// POST /api/telephony/conference - Create a conference room
+func CreateConference(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+
+		var body struct {
+			Name string `json:"name"`
+		}
+		c.BodyParser(&body)
+
+		if body.Name == "" {
+			body.Name = "Conference"
+		}
+
+		cfg, err := svc.Asterisk.GetAsteriskConfig(companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Telephony provider not configured"})
+		}
+
+		conferenceID := fmt.Sprintf("conf-%s", uuid.New().String()[:8])
+
+		// Create a mixing bridge via ARI
+		payload := map[string]interface{}{
+			"type":     "mixing",
+			"bridgeId": conferenceID,
+			"name":     body.Name,
+		}
+
+		_, err = svc.Asterisk.ARIRequest(cfg, "POST", "/bridges", payload)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": fmt.Sprintf("Failed to create conference: %v", err)})
+		}
+
+		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+			"conference_id": conferenceID,
+			"name":          body.Name,
+			"status":        "created",
+		})
+	}
+}
+
+// POST /api/telephony/conference/:id/add - Add participant to conference
+func AddToConference(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		conferenceID := c.Params("id")
+
+		var body struct {
+			ChannelID string `json:"channel_id"`
+			Extension string `json:"extension"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		cfg, err := svc.Asterisk.GetAsteriskConfig(companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Telephony provider not configured"})
+		}
+
+		channelID := body.ChannelID
+
+		// If extension provided instead of channel, originate a call to that extension
+		if channelID == "" && body.Extension != "" {
+			newChannelID := fmt.Sprintf("conf-leg-%s", uuid.New().String()[:8])
+			payload := map[string]interface{}{
+				"endpoint":  fmt.Sprintf("PJSIP/%s", body.Extension),
+				"app":       "evocrm",
+				"channelId": newChannelID,
+				"variables": map[string]string{
+					"COMPANY_ID":    companyID,
+					"CONFERENCE_ID": conferenceID,
+				},
+			}
+			_, err = svc.Asterisk.ARIRequest(cfg, "POST", "/channels", payload)
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": fmt.Sprintf("Failed to call participant: %v", err)})
+			}
+			channelID = newChannelID
+		}
+
+		if channelID == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "channel_id or extension is required"})
+		}
+
+		// Add channel to the bridge
+		_, err = svc.Asterisk.ARIRequest(cfg, "POST", fmt.Sprintf("/bridges/%s/addChannel", conferenceID), map[string]interface{}{
+			"channel": channelID,
+		})
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": fmt.Sprintf("Failed to add to conference: %v", err)})
+		}
+
+		return c.JSON(fiber.Map{
+			"status":     "added",
+			"channel_id": channelID,
+		})
+	}
+}
+
+// POST /api/telephony/conference/:id/remove - Remove participant from conference
+func RemoveFromConference(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		conferenceID := c.Params("id")
+
+		var body struct {
+			ChannelID string `json:"channel_id"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		if body.ChannelID == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "channel_id is required"})
+		}
+
+		cfg, err := svc.Asterisk.GetAsteriskConfig(companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Telephony provider not configured"})
+		}
+
+		_, err = svc.Asterisk.ARIRequest(cfg, "POST", fmt.Sprintf("/bridges/%s/removeChannel", conferenceID), map[string]interface{}{
+			"channel": body.ChannelID,
+		})
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": fmt.Sprintf("Failed to remove from conference: %v", err)})
+		}
+
+		return c.JSON(fiber.Map{"status": "removed", "channel_id": body.ChannelID})
+	}
+}
+
+// DELETE /api/telephony/conference/:id - End conference (destroy bridge)
+func EndConference(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		conferenceID := c.Params("id")
+
+		cfg, err := svc.Asterisk.GetAsteriskConfig(companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Telephony provider not configured"})
+		}
+
+		_, err = svc.Asterisk.ARIRequest(cfg, "DELETE", fmt.Sprintf("/bridges/%s", conferenceID), nil)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": fmt.Sprintf("Failed to end conference: %v", err)})
+		}
+
+		return c.JSON(fiber.Map{"status": "ended", "conference_id": conferenceID})
+	}
+}
+
+// ============================================
+// Recording Control
+// ============================================
+
+// POST /api/telephony/recording/start - Start recording a channel
+func StartRecording(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+
+		var body struct {
+			ChannelID string `json:"channel_id"`
+			CallID    string `json:"call_id"`
+			Format    string `json:"format"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		if body.ChannelID == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "channel_id is required"})
+		}
+
+		if body.Format == "" {
+			body.Format = "wav"
+		}
+
+		cfg, err := svc.Asterisk.GetAsteriskConfig(companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Telephony provider not configured"})
+		}
+
+		recordingName := fmt.Sprintf("%s/%s_%s", companyID, body.ChannelID, time.Now().Format("20060102_150405"))
+
+		payload := map[string]interface{}{
+			"name":               recordingName,
+			"format":             body.Format,
+			"maxDurationSeconds": 3600,
+			"ifExists":           "overwrite",
+		}
+
+		_, err = svc.Asterisk.ARIRequest(cfg, "POST", fmt.Sprintf("/channels/%s/record", body.ChannelID), payload)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": fmt.Sprintf("Failed to start recording: %v", err)})
+		}
+
+		// Update call record with recording path
+		if body.CallID != "" {
+			recordingURL := fmt.Sprintf("%s/%s.%s", companyID, recordingName, body.Format)
+			svc.DB.Exec("UPDATE call_records SET recording_url = $1 WHERE id = $2 AND company_id = $3", recordingURL, body.CallID, companyID)
+		}
+
+		return c.JSON(fiber.Map{
+			"status":         "recording",
+			"recording_name": recordingName,
+		})
+	}
+}
+
+// POST /api/telephony/recording/stop - Stop recording a channel
+func StopRecording(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+
+		var body struct {
+			ChannelID     string `json:"channel_id"`
+			RecordingName string `json:"recording_name"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		if body.RecordingName == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "recording_name is required"})
+		}
+
+		cfg, err := svc.Asterisk.GetAsteriskConfig(companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Telephony provider not configured"})
+		}
+
+		_, err = svc.Asterisk.ARIRequest(cfg, "POST", fmt.Sprintf("/recordings/live/%s/stop", body.RecordingName), nil)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": fmt.Sprintf("Failed to stop recording: %v", err)})
+		}
+
+		return c.JSON(fiber.Map{"status": "stopped", "recording_name": body.RecordingName})
+	}
+}
+
 // GET /api/calls/history - Get call history
 func GetCallHistory(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {

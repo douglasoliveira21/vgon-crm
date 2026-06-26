@@ -260,6 +260,7 @@ export default function CallsPage() {
         <button onClick={() => setActiveTab('history')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'history' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>📋 Histórico</button>
         <button onClick={() => setActiveTab('queues')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'queues' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>👥 Filas</button>
         <button onClick={() => router.push('/calls/recordings')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap text-gray-500 hover:bg-gray-100`}>🎙️ Gravações</button>
+        <button onClick={() => router.push('/calls/ivr')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap text-gray-500 hover:bg-gray-100`}>📞 URA</button>
       </div>
 
       {/* Dashboard */}
