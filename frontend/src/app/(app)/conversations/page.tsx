@@ -538,6 +538,19 @@ export default function ConversationsPage() {
     }
   }
 
+  // Unassign conversation
+  const unassignConversation = async () => {
+    if (!selectedConv) return
+    try {
+      await api.post(`/conversations/${selectedConv.id}/unassign`)
+      toast.success('Conversa desatribuída')
+      setSelectedConv({ ...selectedConv, assigned_to: undefined, assigned_to_name: undefined, status: 'open' })
+      fetchConversations()
+    } catch {
+      toast.error('Erro ao desatribuir')
+    }
+  }
+
   // Resolve conversation
   const resolveConversation = async () => {
     if (!selectedConv) return
@@ -1284,7 +1297,7 @@ export default function ConversationsPage() {
 
       {/* Right Panel - Contact */}
       {selectedConv && (
-        <ContactPanel conversation={selectedConv} users={users} teams={teams} onAssignUser={transferToUser} onAssignTeam={transferToTeam} />
+        <ContactPanel conversation={selectedConv} users={users} teams={teams} onAssignUser={transferToUser} onAssignTeam={transferToTeam} onUnassign={unassignConversation} />
       )}
 
       {/* Transfer Modal */}
@@ -1487,7 +1500,7 @@ export default function ConversationsPage() {
 
 
 // Contact Panel with Tags and Funnel
-function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam }: { conversation: Conversation; users: UserItem[]; teams: TeamItem[]; onAssignUser: (userId: string) => void; onAssignTeam: (teamId: string) => void }) {
+function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, onUnassign }: { conversation: Conversation; users: UserItem[]; teams: TeamItem[]; onAssignUser: (userId: string) => void; onAssignTeam: (teamId: string) => void; onUnassign: () => void }) {
   const [tags, setTags] = useState<Array<{id: string; name: string; color: string}>>([])
   const [contactTags, setContactTags] = useState<Array<{id: string; name: string; color: string}>>([])
   const [funnels, setFunnels] = useState<Array<{id: string; name: string; stages: Array<{id: string; name: string}>}>>([])
@@ -1585,7 +1598,15 @@ function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam }
         {conversation.assigned_to_name && (
           <div>
             <label className="text-xs font-medium text-gray-400 uppercase">Atendente</label>
-            <p className="text-sm text-gray-700 mt-1">{conversation.assigned_to_name}</p>
+            <div className="flex items-center justify-between mt-1">
+              <p className="text-sm text-gray-700">{conversation.assigned_to_name}</p>
+              <button
+                onClick={onUnassign}
+                className="text-xs text-red-500 hover:text-red-700 font-medium"
+              >
+                Desatribuir
+              </button>
+            </div>
           </div>
         )}
 

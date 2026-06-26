@@ -151,6 +151,20 @@ func AssignConversation(svc *services.Container) fiber.Handler {
 	}
 }
 
+func UnassignConversation(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		conversationID := c.Params("id")
+
+		_, err := svc.DB.Exec(`UPDATE conversations SET assigned_to = NULL, status = 'open', updated_at = NOW() WHERE id = $1 AND company_id = $2`, conversationID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"message": "Conversation unassigned"})
+	}
+}
+
 func TransferConversation(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
