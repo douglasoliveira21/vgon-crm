@@ -156,3 +156,46 @@ func GLPIGetEntity(svc *services.Container) fiber.Handler {
 		})
 	}
 }
+
+
+// POST /api/glpi/flow/start - Start a GLPI flow for a conversation
+func GLPIStartFlow(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+
+		var body struct {
+			ConversationID string `json:"conversation_id"`
+			Mode           string `json:"mode"` // "open_ticket" or "check_status"
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+
+		if body.ConversationID == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "conversation_id is required"})
+		}
+		if body.Mode == "" {
+			body.Mode = "open_ticket"
+		}
+
+		// Get conversation details
+		var contactID, phone, instanceName string
+		svc.DB.QueryRow(`
+			SELECT c.contact_id, co.phone, COALESCE(wi.instance_name, '')
+			FROM conversations c
+			JOIN contacts co ON c.contact_id = co.id
+			LEFT JOIN channels ch ON c.channel_id = ch.id
+			LEFT JOIN whatsapp_instances wi ON wi.channel_id = ch.id
+			WHERE c.id = $1 AND c.company_id = $2
+		`, body.ConversationID, companyID).Scan(&contactID, &phone, &instanceName)
+
+		if phone == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Conversation not found or no phone"})
+		}
+
+		// Start GLPI flow
+		go svc.GLPIFlow.StartGLPIFlow(companyID, body.ConversationID, contactID, instanceName, phone, body.Mode)
+
+		return c.JSON(fiber.Map{"message": "GLPI flow started", "mode": body.Mode})
+	}
+}

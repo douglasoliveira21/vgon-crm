@@ -121,6 +121,14 @@ const NODE_CATEGORIES = [
       { type: 'wait_business_hours', label: 'Esperar horário', icon: '🏢' },
     ],
   },
+  {
+    name: 'GLPI - Chamados',
+    color: 'orange',
+    nodes: [
+      { type: 'glpi_open_ticket', label: 'Abrir chamado GLPI', icon: '🎫' },
+      { type: 'glpi_check_status', label: 'Consultar chamado GLPI', icon: '🔍' },
+    ],
+  },
 ]
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -130,6 +138,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   yellow: 'border-yellow-500 bg-yellow-50',
   purple: 'border-purple-500 bg-purple-50',
   gray: 'border-gray-500 bg-gray-50',
+  orange: 'border-orange-500 bg-orange-50',
 }
 
 const NODE_COLORS: Record<string, string> = {
@@ -139,9 +148,11 @@ const NODE_COLORS: Record<string, string> = {
   condition: '#F59E0B',
   action: '#8B5CF6',
   wait: '#6B7280',
+  glpi: '#F97316',
 }
 
 function getNodeColor(type: string): string {
+  if (type.startsWith('glpi')) return NODE_COLORS.glpi
   if (type.startsWith('trigger')) return NODE_COLORS.trigger
   if (type.startsWith('send')) return NODE_COLORS.send
   if (type.startsWith('ask')) return NODE_COLORS.ask

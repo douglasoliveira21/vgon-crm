@@ -13,9 +13,10 @@ import (
 )
 
 type BotEngine struct {
-	db    *sql.DB
-	wsHub *websocket.Hub
-	evo   *EvolutionService
+	db       *sql.DB
+	wsHub    *websocket.Hub
+	evo      *EvolutionService
+	glpiFlow *GLPIFlowEngine
 }
 
 func NewBotEngine(db *sql.DB, wsHub *websocket.Hub, evo *EvolutionService) *BotEngine {
@@ -217,6 +218,10 @@ func (e *BotEngine) executeNode(node BotNode, companyID, conversationID, contact
 		return e.nodeTransferTeam(node, companyID, conversationID)
 	case "call_webhook", "action_webhook":
 		return e.nodeCallWebhook(node)
+	case "glpi_open_ticket":
+		return e.nodeGLPIOpenTicket(companyID, conversationID, contactID, instanceName, phone)
+	case "glpi_check_status":
+		return e.nodeGLPICheckStatus(companyID, conversationID, contactID, instanceName, phone)
 	case "end", "action_close_conversation":
 		cc, _ := config["close_conversation"].(bool)
 		node.Data["close_conversation"] = cc
@@ -379,6 +384,23 @@ func (e *BotEngine) nodeTransferTeam(node BotNode, companyID, conversationID str
 
 func (e *BotEngine) nodeCallWebhook(node BotNode) error {
 	// TODO: Implement webhook call
+	return nil
+}
+
+func (e *BotEngine) nodeGLPIOpenTicket(companyID, conversationID, contactID, instanceName, phone string) error {
+	if e.glpiFlow != nil {
+		e.glpiFlow.StartGLPIFlow(companyID, conversationID, contactID, instanceName, phone, "open_ticket")
+		// Pause the bot since GLPI flow will take over the conversation
+		e.db.Exec("UPDATE bot_executions SET status = 'paused' WHERE conversation_id = $1 AND status = 'running'", conversationID)
+	}
+	return nil
+}
+
+func (e *BotEngine) nodeGLPICheckStatus(companyID, conversationID, contactID, instanceName, phone string) error {
+	if e.glpiFlow != nil {
+		e.glpiFlow.StartGLPIFlow(companyID, conversationID, contactID, instanceName, phone, "check_status")
+		e.db.Exec("UPDATE bot_executions SET status = 'paused' WHERE conversation_id = $1 AND status = 'running'", conversationID)
+	}
 	return nil
 }
 

@@ -21,6 +21,7 @@ type Container struct {
 	Bot       *BotEngine
 	Asterisk  *AsteriskService
 	GLPI      *GLPIService
+	GLPIFlow  *GLPIFlowEngine
 }
 
 // NewContainer creates a new service container
@@ -39,9 +40,14 @@ func NewContainer(db *sql.DB, rdb *redis.Client, cfg *config.Config, wsHub *webs
 	container.Bot = NewBotEngine(db, wsHub, container.Evolution)
 	container.Asterisk = NewAsteriskService(db, wsHub, cfg)
 	container.GLPI = NewGLPIService(cfg.GLPIBaseURL, cfg.GLPIAppToken)
+	container.GLPIFlow = NewGLPIFlowEngine(db, wsHub, container.Evolution, container.GLPI, cfg.GLPIUserToken)
 
 	// Link bot engine to evolution service
 	container.Evolution.botEngine = container.Bot
+	container.Evolution.glpiFlow = container.GLPIFlow
+
+	// Link GLPI flow to bot engine
+	container.Bot.glpiFlow = container.GLPIFlow
 
 	return container
 }

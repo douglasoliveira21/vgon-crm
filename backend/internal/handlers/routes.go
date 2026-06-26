@@ -141,6 +141,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	glpi.Get("/tickets/:id", GLPIGetTicket(svc))
 	glpi.Get("/entities", GLPIGetEntities(svc))
 	glpi.Get("/entities/:id", GLPIGetEntity(svc))
+	glpi.Post("/flow/start", GLPIStartFlow(svc))
 
 	// Announcements
 	announcements := protected.Group("/announcements")

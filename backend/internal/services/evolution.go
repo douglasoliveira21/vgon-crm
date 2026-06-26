@@ -18,11 +18,12 @@ import (
 )
 
 type EvolutionService struct {
-	cfg       *config.Config
-	db        *sql.DB
-	wsHub     *websocket.Hub
-	client    *http.Client
-	botEngine *BotEngine
+	cfg        *config.Config
+	db         *sql.DB
+	wsHub      *websocket.Hub
+	client     *http.Client
+	botEngine  *BotEngine
+	glpiFlow   *GLPIFlowEngine
 }
 
 func NewEvolutionService(cfg *config.Config, db *sql.DB, wsHub *websocket.Hub) *EvolutionService {
@@ -694,7 +695,9 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	})
 
 	// Trigger bot if applicable (only for contact messages)
-	if s.botEngine != nil {
+	if s.glpiFlow != nil && s.glpiFlow.HasActiveFlow(conversationID) {
+		go s.glpiFlow.HandleGLPIMessage(instance.CompanyID, conversationID, contactID, instanceName, phone, content)
+	} else if s.botEngine != nil {
 		go s.botEngine.TriggerBot(instance.CompanyID, conversationID, contactID, "", content, instanceName, phone)
 	}
 }
