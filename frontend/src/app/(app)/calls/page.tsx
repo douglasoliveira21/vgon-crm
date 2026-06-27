@@ -215,7 +215,7 @@ export default function CallsPage() {
           can_access_recordings: true,
         }).catch(() => {})
       }
-      toast.success('ConfiguraÃ§Ã£o salva!')
+      toast.success('Configuração salva!')
       setShowConfig(false)
       if (sipConfig.auto_register) doRegister()
     } catch { toast.error('Erro ao salvar') }
@@ -276,7 +276,7 @@ export default function CallsPage() {
 
   const handleMakeCall = (number?: string) => {
     const n = number || phoneNumber
-    if (!n.trim()) { toast.error('Digite um nÃºmero'); return }
+    if (!n.trim()) { toast.error('Digite um número'); return }
     if (sip.status !== 'online') { doRegister(); return }
     sip.makeCall(n)
     setPhoneNumber(n)
@@ -309,7 +309,7 @@ export default function CallsPage() {
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-gray-900">Telefonia</h1>
           <span className={`badge ${sip.status === 'online' ? 'badge-green' : sip.status === 'registering' ? 'badge-yellow' : sip.status === 'error' ? 'badge-red' : 'badge-gray'}`}>
-            {sip.status === 'online' ? 'ðŸŸ¢ Online' : sip.status === 'registering' ? 'ðŸŸ¡ Registrando' : sip.status === 'error' ? 'ðŸ”´ Erro' : 'âšª Offline'}
+            {sip.status === 'online' ? 'Online' : sip.status === 'registering' ? 'Registrando' : sip.status === 'error' ? 'Erro' : 'Offline'}
           </span>
         </div>
         <div className="flex gap-2">
@@ -321,14 +321,14 @@ export default function CallsPage() {
 
       {/* Tabs */}
       <div className="flex gap-2 mb-6 overflow-x-auto">
-        <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'dashboard' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>ðŸ“Š Dashboard</button>
+        <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'dashboard' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>Dashboard</button>
         <button onClick={() => setActiveTab('softphone')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'softphone' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>Softphone</button>
         <button onClick={() => setActiveTab('trunks')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'trunks' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>Operadoras SIP</button>
         <button onClick={() => setActiveTab('extensions')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'extensions' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>Ramais</button>
-        <button onClick={() => setActiveTab('history')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'history' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>ðŸ“‹ HistÃ³rico</button>
-        <button onClick={() => setActiveTab('queues')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'queues' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>ðŸ‘¥ Filas</button>
-        <button onClick={() => router.push('/calls/recordings')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap text-gray-500 hover:bg-gray-100`}>ðŸŽ™ï¸ GravaÃ§Ãµes</button>
-        <button onClick={() => router.push('/calls/ivr')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap text-gray-500 hover:bg-gray-100`}>ðŸ“ž URA</button>
+        <button onClick={() => setActiveTab('history')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'history' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>Histórico</button>
+        <button onClick={() => setActiveTab('queues')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${activeTab === 'queues' ? 'bg-primary-100 text-primary-700' : 'text-gray-500 hover:bg-gray-100'}`}>Filas</button>
+        <button onClick={() => router.push('/calls/recordings')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap text-gray-500 hover:bg-gray-100`}>Gravações</button>
+        <button onClick={() => router.push('/calls/ivr')} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap text-gray-500 hover:bg-gray-100`}>URA</button>
       </div>
 
       {/* Dashboard */}
@@ -340,21 +340,21 @@ export default function CallsPage() {
               <Server size={20} className={serverStatus?.ari ? 'text-green-500' : 'text-red-500'} />
               <div>
                 <p className="text-xs text-gray-500">Servidor ARI</p>
-                <p className="text-sm font-medium">{serverStatus?.ari ? 'ðŸŸ¢ Conectado' : 'ðŸ”´ Desconectado'}</p>
+                <p className="text-sm font-medium">{serverStatus?.ari ? 'Conectado' : 'Desconectado'}</p>
               </div>
             </div>
             <div className="card p-4 flex items-center gap-3">
               <Activity size={20} className={serverStatus?.ami ? 'text-green-500' : 'text-red-500'} />
               <div>
                 <p className="text-xs text-gray-500">AMI</p>
-                <p className="text-sm font-medium">{serverStatus?.ami ? 'ðŸŸ¢ Conectado' : 'ðŸ”´ Desconectado'}</p>
+                <p className="text-sm font-medium">{serverStatus?.ami ? 'Conectado' : 'Desconectado'}</p>
               </div>
             </div>
             <div className="card p-4 flex items-center gap-3">
               <Wifi size={20} className={sip.status === 'online' ? 'text-green-500' : 'text-red-500'} />
               <div>
                 <p className="text-xs text-gray-500">WebRTC</p>
-                <p className="text-sm font-medium">{sip.status === 'online' ? 'ðŸŸ¢ Conectado' : sip.status === 'registering' ? 'ðŸŸ¡ Registrando' : 'ðŸ”´ Desconectado'}</p>
+                <p className="text-sm font-medium">{sip.status === 'online' ? 'Conectado' : sip.status === 'registering' ? 'Registrando' : 'Desconectado'}</p>
               </div>
             </div>
             <div className="card p-4 flex items-center gap-3">
@@ -386,7 +386,7 @@ export default function CallsPage() {
             <div className="card p-4 text-center">
               <Clock size={24} className="text-purple-500 mx-auto mb-2" />
               <p className="text-2xl font-bold">{dashboardStats?.avg_duration ? fmt(dashboardStats.avg_duration) : '0:00'}</p>
-              <p className="text-xs text-gray-500">Tempo mÃ©dio</p>
+              <p className="text-xs text-gray-500">Tempo médio</p>
             </div>
             <div className="card p-4 text-center">
               <BarChart3 size={24} className="text-orange-500 mx-auto mb-2" />
@@ -397,7 +397,7 @@ export default function CallsPage() {
 
           {/* Quick Actions */}
           <div className="card p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Atalhos RÃ¡pidos</h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Atalhos Rápidos</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <button onClick={() => setShowConfig(true)} className="p-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-center transition-colors">
                 <Settings size={20} className="text-gray-600 mx-auto mb-1" />
@@ -413,7 +413,7 @@ export default function CallsPage() {
               </button>
               <button onClick={() => setActiveTab('history')} className="p-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-center transition-colors">
                 <Clock size={20} className="text-purple-600 mx-auto mb-1" />
-                <p className="text-xs text-gray-700 font-medium">HistÃ³rico</p>
+                <p className="text-xs text-gray-700 font-medium">Histórico</p>
               </button>
               <button onClick={() => setActiveTab('queues')} className="p-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-center transition-colors">
                 <ListMusic size={20} className="text-orange-600 mx-auto mb-1" />
@@ -421,7 +421,7 @@ export default function CallsPage() {
               </button>
               <button onClick={() => testServerConnection()} className="p-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-center transition-colors">
                 <Activity size={20} className="text-cyan-600 mx-auto mb-1" />
-                <p className="text-xs text-gray-700 font-medium">Testar ConexÃ£o</p>
+                <p className="text-xs text-gray-700 font-medium">Testar Conexão</p>
               </button>
               <button onClick={doRegister} className="p-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-center transition-colors">
                 <Wifi size={20} className="text-indigo-600 mx-auto mb-1" />
@@ -459,7 +459,7 @@ export default function CallsPage() {
               </div>
             )}
             {!loadingContact && !incomingContact && (
-              <p className="text-xs text-gray-400 mt-2">Contato nÃ£o encontrado no CRM</p>
+              <p className="text-xs text-gray-400 mt-2">Contato não encontrado no CRM</p>
             )}
 
             <div className="flex gap-3 justify-center mt-6">
@@ -519,7 +519,7 @@ export default function CallsPage() {
                 <h3 className="text-center text-sm font-medium text-gray-500 mb-4">DISCADOR</h3>
                 <div className="relative mb-4">
                   <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input type="text" value={phoneNumber} onChange={(e) => searchContact(e.target.value)} placeholder="NÃºmero ou contato..." className="input pl-9 text-center text-lg font-mono" onKeyDown={(e) => { if (e.key === 'Enter') handleMakeCall() }} />
+                  <input type="text" value={phoneNumber} onChange={(e) => searchContact(e.target.value)} placeholder="Número ou contato..." className="input pl-9 text-center text-lg font-mono" onKeyDown={(e) => { if (e.key === 'Enter') handleMakeCall() }} />
                   {contactResults.length > 0 && (
                     <div className="absolute w-full mt-1 bg-white border rounded-lg shadow-lg z-10">
                       {contactResults.map((c, i) => (
@@ -544,8 +544,8 @@ export default function CallsPage() {
           <div className="space-y-4">
             <div className="card p-4">
               <p className="text-xs text-gray-400">Seu ramal</p>
-              <p className="text-lg font-bold text-gray-900">{sipConfig.extension_number || 'NÃ£o configurado'}</p>
-              <p className="text-xs text-gray-500">{sipConfig.webrtc_domain || 'Sem dominio WebRTC'}</p>
+              <p className="text-lg font-bold text-gray-900">{sipConfig.extension_number || 'Não configurado'}</p>
+              <p className="text-xs text-gray-500">{sipConfig.webrtc_domain || 'Sem domínio WebRTC'}</p>
             </div>
             <div className="card p-4">
               <h4 className="text-sm font-semibold text-gray-900 mb-3">Recentes</h4>
@@ -603,7 +603,7 @@ export default function CallsPage() {
       {/* History */}
       {activeTab === 'history' && (
         <div className="card p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">HistÃ³rico</h3>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Histórico</h3>
           {callHistory.length === 0 ? (
             <div className="text-center py-12"><Clock size={40} className="text-gray-300 mx-auto mb-4" /><p className="text-gray-500">Nenhuma chamada</p></div>
           ) : (
@@ -636,7 +636,7 @@ export default function CallsPage() {
             <div className="text-center py-8 text-gray-400">
               <Phone size={32} className="mx-auto mb-3 opacity-50" />
               <p>Nenhum ramal cadastrado</p>
-              <p className="text-xs mt-1">Configure os ramais na aba de configuraÃ§Ãµes do servidor</p>
+              <p className="text-xs mt-1">Configure os ramais na aba de configurações do servidor</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -653,7 +653,7 @@ export default function CallsPage() {
                     <span className={`badge text-xs ${ext.status === 'online' ? 'badge-green' : 'badge-gray'}`}>
                       {ext.status === 'online' ? 'Online' : 'Offline'}
                     </span>
-                    {ext.can_call_external && <span className="text-xs text-gray-400">Ext. âœ“</span>}
+                    {ext.can_call_external && <span className="text-xs text-gray-400">Ext. OK</span>}
                   </div>
                 </div>
               ))}
@@ -680,7 +680,7 @@ export default function CallsPage() {
                 <div key={q.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div>
                     <p className="text-sm font-medium text-gray-900">{q.name}</p>
-                    <p className="text-xs text-gray-500">EstratÃ©gia: {q.strategy}</p>
+                    <p className="text-xs text-gray-500">Estratégia: {q.strategy}</p>
                   </div>
                 </div>
               ))}
@@ -698,15 +698,15 @@ export default function CallsPage() {
               <button onClick={() => setShowTrunkConfig(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
             </div>
             <p className="text-sm text-gray-500 mb-4">
-              Estes dados sao da operadora/trunk. O ramal apenas escolhe uma operadora de saida.
+              Estes dados são da operadora/trunk. O ramal apenas escolhe uma operadora de saída.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Nome</label><input type="text" value={trunkConfig.name} onChange={e => setTrunkConfig({...trunkConfig, name: e.target.value})} className="input" placeholder="Vono, Vivo, Algar..." /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Servidor SIP</label><input type="text" value={trunkConfig.sip_server} onChange={e => setTrunkConfig({...trunkConfig, sip_server: e.target.value})} className="input" placeholder="sip.operadora.com.br" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Porta</label><input type="number" value={trunkConfig.sip_port} onChange={e => setTrunkConfig({...trunkConfig, sip_port: e.target.value})} className="input" placeholder="5060" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Transporte</label><select value={trunkConfig.transport} onChange={e => setTrunkConfig({...trunkConfig, transport: e.target.value})} className="input"><option value="UDP">UDP</option><option value="TCP">TCP</option><option value="TLS">TLS</option></select></div>
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">Dominio SIP</label><input type="text" value={trunkConfig.sip_domain} onChange={e => setTrunkConfig({...trunkConfig, sip_domain: e.target.value})} className="input" placeholder="operadora.com.br" /></div>
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">Usuario</label><input type="text" value={trunkConfig.username} onChange={e => setTrunkConfig({...trunkConfig, username: e.target.value})} className="input" /></div>
+              <div><label className="block text-xs font-medium text-gray-700 mb-1">Domínio SIP</label><input type="text" value={trunkConfig.sip_domain} onChange={e => setTrunkConfig({...trunkConfig, sip_domain: e.target.value})} className="input" placeholder="operadora.com.br" /></div>
+              <div><label className="block text-xs font-medium text-gray-700 mb-1">Usuário</label><input type="text" value={trunkConfig.username} onChange={e => setTrunkConfig({...trunkConfig, username: e.target.value})} className="input" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Senha</label><input type="password" value={trunkConfig.password} onChange={e => setTrunkConfig({...trunkConfig, password: e.target.value})} className="input" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">CallerID</label><input type="text" value={trunkConfig.caller_id} onChange={e => setTrunkConfig({...trunkConfig, caller_id: e.target.value})} className="input" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Realm opcional</label><input type="text" value={trunkConfig.realm} onChange={e => setTrunkConfig({...trunkConfig, realm: e.target.value})} className="input" /></div>
@@ -714,7 +714,7 @@ export default function CallsPage() {
               <div><label className="block text-xs font-medium text-gray-700 mb-1">DTMF</label><select value={trunkConfig.dtmf} onChange={e => setTrunkConfig({...trunkConfig, dtmf: e.target.value})} className="input"><option value="rfc4733">RFC4733</option><option value="inband">Inband</option><option value="info">SIP INFO</option></select></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Tempo de Registro</label><input type="number" value={trunkConfig.register_expires} onChange={e => setTrunkConfig({...trunkConfig, register_expires: e.target.value})} className="input" placeholder="300" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Keep Alive</label><input type="number" value={trunkConfig.keep_alive} onChange={e => setTrunkConfig({...trunkConfig, keep_alive: e.target.value})} className="input" placeholder="60" /></div>
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">Descricao</label><input type="text" value={trunkConfig.description} onChange={e => setTrunkConfig({...trunkConfig, description: e.target.value})} className="input" /></div>
+              <div><label className="block text-xs font-medium text-gray-700 mb-1">Descrição</label><input type="text" value={trunkConfig.description} onChange={e => setTrunkConfig({...trunkConfig, description: e.target.value})} className="input" /></div>
             </div>
             <div className="mt-4">
               <label className="block text-xs font-medium text-gray-700 mb-2">Codecs</label>
@@ -758,18 +758,18 @@ export default function CallsPage() {
               Informe somente o ramal que vai registrar no Asterisk. A operadora/tronco VoIP fica na aba Operadoras SIP.
             </p>
             <div className="space-y-3">
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">Nome</label><input type="text" value={sipConfig.display_name} onChange={e => setSipConfig({...sipConfig, display_name: e.target.value})} className="input" placeholder="JoÃ£o Silva" /></div>
+              <div><label className="block text-xs font-medium text-gray-700 mb-1">Nome</label><input type="text" value={sipConfig.display_name} onChange={e => setSipConfig({...sipConfig, display_name: e.target.value})} className="input" placeholder="João Silva" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Ramal</label><input type="text" value={sipConfig.extension_number} onChange={e => setSipConfig({...sipConfig, extension_number: e.target.value})} className="input" placeholder="1001" /></div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-xs font-medium text-gray-700 mb-1">UsuÃ¡rio SIP</label><input type="text" value={sipConfig.sip_user} onChange={e => setSipConfig({...sipConfig, sip_user: e.target.value})} className="input" placeholder="1001" /></div>
+                <div><label className="block text-xs font-medium text-gray-700 mb-1">Usuário SIP</label><input type="text" value={sipConfig.sip_user} onChange={e => setSipConfig({...sipConfig, sip_user: e.target.value})} className="input" placeholder="1001" /></div>
                 <div><label className="block text-xs font-medium text-gray-700 mb-1">Senha</label><input type="password" value={sipConfig.sip_password} onChange={e => setSipConfig({...sipConfig, sip_password: e.target.value})} className="input" /></div>
               </div>
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">DomÃ­nio WebRTC do Asterisk</label><input type="text" value={sipConfig.webrtc_domain} onChange={e => setSipConfig({...sipConfig, webrtc_domain: e.target.value})} className="input" placeholder="voip.vgon.com.br" /></div>
+              <div><label className="block text-xs font-medium text-gray-700 mb-1">Domínio WebRTC do Asterisk</label><input type="text" value={sipConfig.webrtc_domain} onChange={e => setSipConfig({...sipConfig, webrtc_domain: e.target.value})} className="input" placeholder="voip.vgon.com.br" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Operadora de saída</label><select value={sipConfig.outbound_trunk_id} onChange={e => setSipConfig({...sipConfig, outbound_trunk_id: e.target.value})} className="input"><option value="">Nenhuma operadora</option>{trunks.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">WebSocket WSS</label><input type="text" value={sipConfig.webrtc_ws_url} onChange={e => setSipConfig({...sipConfig, webrtc_ws_url: e.target.value})} className="input" placeholder="wss://voip.vgon.com.br:8089/ws" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">STUN</label><input type="text" value={sipConfig.stun_server} onChange={e => setSipConfig({...sipConfig, stun_server: e.target.value})} className="input" /></div>
               <label className="flex items-center gap-2"><input type="checkbox" checked={sipConfig.auto_register} onChange={e => setSipConfig({...sipConfig, auto_register: e.target.checked})} className="rounded" /><span className="text-sm text-gray-700">Registrar ao salvar</span></label>
-              <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">O CRM Ã© somente o discador do atendente. Ele registra o ramal no Asterisk via WSS; quem escolhe a operadora e a rota da ligaÃ§Ã£o Ã© o Asterisk.</div>
+              <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">O CRM é somente o discador do atendente. Ele registra o ramal no Asterisk via WSS; quem escolhe a operadora e a rota da ligação é o Asterisk.</div>
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowConfig(false)} className="btn-secondary flex-1">Cancelar</button>
