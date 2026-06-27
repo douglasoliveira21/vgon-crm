@@ -364,7 +364,7 @@ export default function CallsPage() {
               <Wifi size={20} className={sip.status === 'online' ? 'text-green-500' : 'text-red-500'} />
               <div>
                 <p className="text-xs text-gray-500">WebRTC</p>
-                <p className="text-sm font-medium">{sip.status === 'online' ? 'Conectado' : sip.status === 'registering' ? 'Registrando' : 'Desconectado'}</p>
+                <p className="text-sm font-medium">{sip.status === 'online' ? 'Conectado' : sip.status === 'registering' ? 'Registrando' : sip.status === 'error' ? 'Erro' : 'Desconectado'}</p>
               </div>
             </div>
             <div className="card p-4 flex items-center gap-3">
@@ -375,6 +375,11 @@ export default function CallsPage() {
               </div>
             </div>
           </div>
+          {sip.status === 'error' && sip.errorMessage && (
+            <div className="p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-700">
+              Falha no registro WebRTC: {sip.errorMessage}
+            </div>
+          )}
 
           {/* Stats */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">

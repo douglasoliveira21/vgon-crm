@@ -18,6 +18,7 @@ interface SIPConfig {
 
 interface UseSIPReturn {
   status: SIPStatus
+  errorMessage: string
   callStatus: CallStatus
   callDuration: number
   isMuted: boolean
@@ -37,6 +38,7 @@ interface UseSIPReturn {
 
 export function useSIP(): UseSIPReturn {
   const [status, setStatus] = useState<SIPStatus>('offline')
+  const [errorMessage, setErrorMessage] = useState('')
   const [callStatus, setCallStatus] = useState<CallStatus>('idle')
   const [callDuration, setCallDuration] = useState(0)
   const [isMuted, setIsMuted] = useState(false)
@@ -118,20 +120,36 @@ export function useSIP(): UseSIPReturn {
       const SIP = await import('sip.js')
 
       setStatus('registering')
+      setErrorMessage('')
       configRef.current = config
 
       const wsServer = config.websocketUrl || `${config.transport === 'WSS' ? 'wss' : 'ws'}://${config.server}:${config.port}/ws`
       const uri = SIP.UserAgent.makeURI(`sip:${config.user}@${config.domain}`)
 
       if (!uri) {
+        setErrorMessage('URI SIP inválida')
+        setStatus('error')
+        return
+      }
+
+      if (!wsServer.startsWith('ws://') && !wsServer.startsWith('wss://')) {
+        setErrorMessage('WebSocket inválido. Use ws:// ou wss://')
         setStatus('error')
         return
       }
 
       const transportOptions = {
         server: wsServer,
-        traceSip: false,
+        traceSip: true,
       }
+
+      if (uaRef.current?.registerer) {
+        await uaRef.current.registerer.unregister().catch(() => {})
+      }
+      if (uaRef.current?.ua) {
+        await uaRef.current.ua.stop().catch(() => {})
+      }
+      uaRef.current = null
 
       const ua = new SIP.UserAgent({
         uri,
@@ -186,6 +204,7 @@ export function useSIP(): UseSIPReturn {
       registerer.stateChange.addListener((state: any) => {
         switch (state) {
           case SIP.RegistererState.Registered:
+            setErrorMessage('')
             setStatus('online')
             break
           case SIP.RegistererState.Unregistered:
@@ -199,8 +218,9 @@ export function useSIP(): UseSIPReturn {
       await registerer.register()
       uaRef.current = { ua, registerer }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('SIP Registration failed:', error)
+      setErrorMessage(error?.message || 'Falha ao registrar ramal WebRTC')
       setStatus('error')
     }
   }, [])
@@ -214,6 +234,7 @@ export function useSIP(): UseSIPReturn {
         await uaRef.current.ua.stop()
       }
       uaRef.current = null
+      setErrorMessage('')
       setStatus('offline')
     } catch {
       setStatus('offline')
@@ -348,6 +369,7 @@ export function useSIP(): UseSIPReturn {
 
   return {
     status,
+    errorMessage,
     callStatus,
     callDuration,
     isMuted,
