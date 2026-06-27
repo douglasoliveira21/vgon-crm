@@ -6,4 +6,4 @@ CREATE TABLE IF NOT EXISTS glpi_flow_states (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_glpi_flow_states_updated ON glpi_flow_states(updated_at);
+CREATE INDEX IF NOT EXISTS idx_glpi_flow_states_updated ON glpi_flow_states(updated_at);

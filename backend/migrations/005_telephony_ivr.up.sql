@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS telephony_ivr (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     welcome_message TEXT NOT NULL DEFAULT 'Bem-vindo. Escolha uma opção.',
@@ -15,4 +15,4 @@ CREATE TABLE IF NOT EXISTS telephony_ivr (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE INDEX idx_telephony_ivr_company ON telephony_ivr(company_id);
+CREATE INDEX IF NOT EXISTS idx_telephony_ivr_company ON telephony_ivr(company_id);
