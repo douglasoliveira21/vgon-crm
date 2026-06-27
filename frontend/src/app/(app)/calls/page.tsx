@@ -649,10 +649,12 @@ export default function CallsPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Configurar Ramal SIP</h3>
+              <h3 className="text-lg font-semibold text-gray-900">Configurar Discador WebRTC</h3>
               <button onClick={() => setShowConfig(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
             </div>
-            <p className="text-sm text-gray-500 mb-4">Informe os dados do seu ramal. O servidor é o endereço do seu PABX (Asterisk, FreeSWITCH, 3CX, Vono, etc).</p>
+            <p className="text-sm text-gray-500 mb-4">
+              Informe somente o ramal que vai registrar no Asterisk. A operadora/tronco VoIP fica configurada no Asterisk, não no CRM.
+            </p>
             <div className="space-y-3">
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Nome</label><input type="text" value={sipConfig.display_name} onChange={e => setSipConfig({...sipConfig, display_name: e.target.value})} className="input" placeholder="João Silva" /></div>
               <div className="grid grid-cols-2 gap-3">
@@ -660,19 +662,19 @@ export default function CallsPage() {
                 <div><label className="block text-xs font-medium text-gray-700 mb-1">Transporte</label><select value={sipConfig.transport} onChange={e => setSipConfig({...sipConfig, transport: e.target.value})} className="input"><option value="WSS">WSS</option><option value="WS">WS</option><option value="UDP">UDP</option><option value="TCP">TCP</option><option value="TLS">TLS</option></select></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-xs font-medium text-gray-700 mb-1">Servidor SIP</label><input type="text" value={sipConfig.sip_server} onChange={e => setSipConfig({...sipConfig, sip_server: e.target.value})} className="input" placeholder="vono3.me" /></div>
-                <div><label className="block text-xs font-medium text-gray-700 mb-1">Porta WSS</label><input type="text" value={sipConfig.sip_port} onChange={e => setSipConfig({...sipConfig, sip_port: e.target.value})} className="input" placeholder="8089" /></div>
+                <div><label className="block text-xs font-medium text-gray-700 mb-1">Servidor Asterisk</label><input type="text" value={sipConfig.sip_server} onChange={e => setSipConfig({...sipConfig, sip_server: e.target.value})} className="input" placeholder="voip.vgon.com.br" /></div>
+                <div><label className="block text-xs font-medium text-gray-700 mb-1">Porta SIP UDP</label><input type="text" value={sipConfig.sip_port} onChange={e => setSipConfig({...sipConfig, sip_port: e.target.value})} className="input" placeholder="5060" /></div>
               </div>
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">Domínio</label><input type="text" value={sipConfig.sip_domain} onChange={e => setSipConfig({...sipConfig, sip_domain: e.target.value})} className="input" placeholder="vono3.me" /></div>
+              <div><label className="block text-xs font-medium text-gray-700 mb-1">Domínio do ramal no Asterisk</label><input type="text" value={sipConfig.sip_domain} onChange={e => setSipConfig({...sipConfig, sip_domain: e.target.value})} className="input" placeholder="voip.vgon.com.br" /></div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-xs font-medium text-gray-700 mb-1">Usuário SIP</label><input type="text" value={sipConfig.sip_user} onChange={e => setSipConfig({...sipConfig, sip_user: e.target.value})} className="input" placeholder="1001" /></div>
                 <div><label className="block text-xs font-medium text-gray-700 mb-1">Senha</label><input type="password" value={sipConfig.sip_password} onChange={e => setSipConfig({...sipConfig, sip_password: e.target.value})} className="input" /></div>
               </div>
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">DomÃ­nio WebRTC</label><input type="text" value={sipConfig.webrtc_domain} onChange={e => setSipConfig({...sipConfig, webrtc_domain: e.target.value})} className="input" placeholder="voip.vgon.com.br" /></div>
+              <div><label className="block text-xs font-medium text-gray-700 mb-1">Domínio WebRTC do Asterisk</label><input type="text" value={sipConfig.webrtc_domain} onChange={e => setSipConfig({...sipConfig, webrtc_domain: e.target.value})} className="input" placeholder="voip.vgon.com.br" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">WebSocket WSS</label><input type="text" value={sipConfig.webrtc_ws_url} onChange={e => setSipConfig({...sipConfig, webrtc_ws_url: e.target.value})} className="input" placeholder="wss://voip.vgon.com.br:8089/ws" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">STUN</label><input type="text" value={sipConfig.stun_server} onChange={e => setSipConfig({...sipConfig, stun_server: e.target.value})} className="input" /></div>
               <div className="border-t border-gray-100 pt-3">
-                <p className="text-xs font-semibold text-gray-500 mb-2">ARI/AMI ficam apenas no backend</p>
+                <p className="text-xs font-semibold text-gray-500 mb-2">Avançado: eventos e gravações do Asterisk</p>
                 <div className="grid grid-cols-2 gap-3">
                   <div><label className="block text-xs font-medium text-gray-700 mb-1">ARI URL</label><input type="text" value={sipConfig.ari_url} onChange={e => setSipConfig({...sipConfig, ari_url: e.target.value})} className="input" /></div>
                   <div><label className="block text-xs font-medium text-gray-700 mb-1">ARI UsuÃ¡rio</label><input type="text" value={sipConfig.ari_user} onChange={e => setSipConfig({...sipConfig, ari_user: e.target.value})} className="input" /></div>
@@ -688,7 +690,7 @@ export default function CallsPage() {
                 </div>
               </div>
               <label className="flex items-center gap-2"><input type="checkbox" checked={sipConfig.auto_register} onChange={e => setSipConfig({...sipConfig, auto_register: e.target.checked})} className="rounded" /><span className="text-sm text-gray-700">Registrar ao salvar</span></label>
-              <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">💡 Para WebRTC use WSS (porta 8089 no Asterisk). Para Vono use vono3.me. O STUN ajuda com NAT.</div>
+              <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">O CRM é somente o discador do atendente. Ele registra o ramal no Asterisk via WSS; quem escolhe a operadora e a rota da ligação é o Asterisk.</div>
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setShowConfig(false)} className="btn-secondary flex-1">Cancelar</button>
