@@ -344,31 +344,45 @@ func CreateExtension(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to encrypt extension password"})
 		}
 
-		id := uuid.New().String()
-		_, err = svc.DB.Exec(`
-			INSERT INTO phone_extensions (
-				id, company_id, user_id, queue_id, group_name, outbound_trunk_id, display_name,
-				extension_number, extension_password, sip_username, webrtc_domain, webrtc_ws_url,
-				stun_server, can_call_external, can_receive_calls, can_transfer, can_access_recordings
-			)
-			VALUES ($1, $2, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, $5, NULLIF($6, '')::uuid, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-			ON CONFLICT (company_id, extension_number) DO UPDATE SET
-				user_id = EXCLUDED.user_id,
-				queue_id = EXCLUDED.queue_id,
-				group_name = EXCLUDED.group_name,
-				outbound_trunk_id = EXCLUDED.outbound_trunk_id,
-				display_name = EXCLUDED.display_name,
-				extension_password = EXCLUDED.extension_password,
-				sip_username = EXCLUDED.sip_username,
-				webrtc_domain = EXCLUDED.webrtc_domain,
-				webrtc_ws_url = EXCLUDED.webrtc_ws_url,
-				stun_server = EXCLUDED.stun_server,
-				can_call_external = EXCLUDED.can_call_external,
-				can_receive_calls = EXCLUDED.can_receive_calls,
-				can_transfer = EXCLUDED.can_transfer,
-				can_access_recordings = EXCLUDED.can_access_recordings,
-				updated_at = NOW()
-		`, id, companyID, body.UserID, body.QueueID, body.GroupName, body.OutboundTrunkID, body.DisplayName, body.ExtensionNumber, extensionPassword, body.SIPUsername, body.WebRTCDomain, body.WebRTCWSURL, body.StunServer, body.CanCallExternal, body.CanReceiveCalls, body.CanTransfer, body.CanAccessRec)
+		id := ""
+		err = svc.DB.QueryRow(`
+			SELECT id
+			FROM phone_extensions
+			WHERE company_id = $1 AND extension_number = $2
+			ORDER BY created_at
+			LIMIT 1
+		`, companyID, body.ExtensionNumber).Scan(&id)
+		if err == nil {
+			_, err = svc.DB.Exec(`
+				UPDATE phone_extensions
+				SET user_id = NULLIF($1, '')::uuid,
+					queue_id = NULLIF($2, '')::uuid,
+					group_name = $3,
+					outbound_trunk_id = NULLIF($4, '')::uuid,
+					display_name = $5,
+					extension_password = $6,
+					sip_username = $7,
+					webrtc_domain = $8,
+					webrtc_ws_url = $9,
+					stun_server = $10,
+					can_call_external = $11,
+					can_receive_calls = $12,
+					can_transfer = $13,
+					can_access_recordings = $14,
+					updated_at = NOW()
+				WHERE id = $15 AND company_id = $16
+			`, body.UserID, body.QueueID, body.GroupName, body.OutboundTrunkID, body.DisplayName, extensionPassword, body.SIPUsername, body.WebRTCDomain, body.WebRTCWSURL, body.StunServer, body.CanCallExternal, body.CanReceiveCalls, body.CanTransfer, body.CanAccessRec, id, companyID)
+		} else {
+			id = uuid.New().String()
+			_, err = svc.DB.Exec(`
+				INSERT INTO phone_extensions (
+					id, company_id, user_id, queue_id, group_name, outbound_trunk_id, display_name,
+					extension_number, extension_password, sip_username, webrtc_domain, webrtc_ws_url,
+					stun_server, can_call_external, can_receive_calls, can_transfer, can_access_recordings
+				)
+				VALUES ($1, $2, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, $5, NULLIF($6, '')::uuid, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+			`, id, companyID, body.UserID, body.QueueID, body.GroupName, body.OutboundTrunkID, body.DisplayName, body.ExtensionNumber, extensionPassword, body.SIPUsername, body.WebRTCDomain, body.WebRTCWSURL, body.StunServer, body.CanCallExternal, body.CanReceiveCalls, body.CanTransfer, body.CanAccessRec)
+		}
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
