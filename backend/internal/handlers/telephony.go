@@ -320,6 +320,12 @@ func CreateExtension(svc *services.Container) fiber.Handler {
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
 		}
+		if body.ExtensionNumber == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Extension number is required"})
+		}
+		if body.ExtensionPassword == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Extension password is required"})
+		}
 		if body.SIPUsername == "" {
 			body.SIPUsername = body.ExtensionNumber
 		}

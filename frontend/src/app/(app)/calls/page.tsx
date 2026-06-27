@@ -199,26 +199,36 @@ export default function CallsPage() {
 
   const saveConfig = async () => {
     try {
-      if (sipConfig.extension_number && sipConfig.sip_password) {
-        await api.post('/telephony/extensions', {
-          display_name: sipConfig.display_name || sipConfig.extension_number,
-          extension_number: sipConfig.extension_number,
-          extension_password: sipConfig.sip_password,
-          sip_username: sipConfig.sip_user || sipConfig.extension_number,
-          webrtc_domain: sipConfig.webrtc_domain,
-          webrtc_ws_url: sipConfig.webrtc_ws_url,
-          stun_server: sipConfig.stun_server,
-          outbound_trunk_id: sipConfig.outbound_trunk_id,
-          can_call_external: true,
-          can_receive_calls: true,
-          can_transfer: true,
-          can_access_recordings: true,
-        }).catch(() => {})
+      if (!sipConfig.extension_number.trim()) {
+        toast.error('Informe o número do ramal')
+        return
       }
+      if (!sipConfig.sip_password.trim()) {
+        toast.error('Informe a senha do ramal')
+        return
+      }
+
+      await api.post('/telephony/extensions', {
+        display_name: sipConfig.display_name || sipConfig.extension_number,
+        extension_number: sipConfig.extension_number,
+        extension_password: sipConfig.sip_password,
+        sip_username: sipConfig.sip_user || sipConfig.extension_number,
+        webrtc_domain: sipConfig.webrtc_domain,
+        webrtc_ws_url: sipConfig.webrtc_ws_url,
+        stun_server: sipConfig.stun_server,
+        outbound_trunk_id: sipConfig.outbound_trunk_id,
+        can_call_external: true,
+        can_receive_calls: true,
+        can_transfer: true,
+        can_access_recordings: true,
+      })
+      await fetchExtensions()
       toast.success('Configuração salva!')
       setShowConfig(false)
       if (sipConfig.auto_register) doRegister()
-    } catch { toast.error('Erro ao salvar') }
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao salvar ramal')
+    }
   }
 
   const saveTrunk = async () => {
