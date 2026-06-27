@@ -37,6 +37,7 @@ import {
 export default function CallsPage() {
   const sip = useSIP()
   const router = useRouter()
+  const [mounted, setMounted] = useState(false)
   const [activeTab, setActiveTab] = useState('dashboard')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [showConfig, setShowConfig] = useState(false)
@@ -112,6 +113,7 @@ export default function CallsPage() {
   }, [sip.isIncoming, sip.incomingNumber])
 
   useEffect(() => {
+    setMounted(true)
     loadConfig()
     fetchTrunks()
     fetchExtensions()
@@ -311,6 +313,17 @@ export default function CallsPage() {
   const fmt = (s: number) => `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`
   const dialPad = ['1','2','3','4','5','6','7','8','9','*','0','#']
   const isInCall = sip.callStatus !== 'idle'
+
+  if (!mounted) {
+    return (
+      <div className="p-6 max-w-5xl mx-auto">
+        <div className="flex items-center gap-3 mb-6">
+          <h1 className="text-2xl font-bold text-gray-900">Telefonia</h1>
+          <span className="badge badge-gray">Carregando</span>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-6 max-w-5xl mx-auto">

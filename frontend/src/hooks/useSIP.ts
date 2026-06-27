@@ -51,6 +51,7 @@ export function useSIP(): UseSIPReturn {
   const sessionRef = useRef<any>(null)
   const configRef = useRef<SIPConfig | null>(null)
   const activeCallIdRef = useRef<string | null>(null)
+  const registerRejectedRef = useRef(false)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -121,6 +122,7 @@ export function useSIP(): UseSIPReturn {
 
       setStatus('registering')
       setErrorMessage('')
+      registerRejectedRef.current = false
       configRef.current = config
 
       const wsServer = config.websocketUrl || `${config.transport === 'WSS' ? 'wss' : 'ws'}://${config.server}:${config.port}/ws`
@@ -208,14 +210,26 @@ export function useSIP(): UseSIPReturn {
             setStatus('online')
             break
           case SIP.RegistererState.Unregistered:
-            setStatus('offline')
+            if (!registerRejectedRef.current) {
+              setStatus('offline')
+            }
             break
           default:
             break
         }
       })
 
-      await registerer.register()
+      await registerer.register({
+        requestDelegate: {
+          onReject: (response: any) => {
+            registerRejectedRef.current = true
+            const statusCode = response?.message?.statusCode || 'desconhecido'
+            const reasonPhrase = response?.message?.reasonPhrase || 'Registro rejeitado'
+            setErrorMessage(`Asterisk rejeitou o registro SIP: ${statusCode} ${reasonPhrase}`)
+            setStatus('error')
+          },
+        },
+      })
       uaRef.current = { ua, registerer }
 
     } catch (error: any) {
