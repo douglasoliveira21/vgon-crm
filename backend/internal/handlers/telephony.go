@@ -297,26 +297,43 @@ func GetExtensions(svc *services.Container) fiber.Handler {
 	}
 }
 
+type extensionBody struct {
+	UserID            string `json:"user_id"`
+	QueueID           string `json:"queue_id"`
+	GroupName         string `json:"group_name"`
+	OutboundTrunkID   string `json:"outbound_trunk_id"`
+	DisplayName       string `json:"display_name"`
+	ExtensionNumber   string `json:"extension_number"`
+	ExtensionPassword string `json:"extension_password"`
+	SIPUsername       string `json:"sip_username"`
+	WebRTCDomain      string `json:"webrtc_domain"`
+	WebRTCWSURL       string `json:"webrtc_ws_url"`
+	StunServer        string `json:"stun_server"`
+	CanCallExternal   bool   `json:"can_call_external"`
+	CanReceiveCalls   bool   `json:"can_receive_calls"`
+	CanTransfer       bool   `json:"can_transfer"`
+	CanAccessRec      bool   `json:"can_access_recordings"`
+}
+
+func normalizeExtensionBody(body *extensionBody) {
+	if body.SIPUsername == "" {
+		body.SIPUsername = body.ExtensionNumber
+	}
+	if body.WebRTCDomain == "" {
+		body.WebRTCDomain = "voip.vgon.com.br"
+	}
+	if body.WebRTCWSURL == "" {
+		body.WebRTCWSURL = "wss://voip.vgon.com.br:8089/ws"
+	}
+	if body.StunServer == "" {
+		body.StunServer = "stun:stun.l.google.com:19302"
+	}
+}
+
 func CreateExtension(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
-		var body struct {
-			UserID            string `json:"user_id"`
-			QueueID           string `json:"queue_id"`
-			GroupName         string `json:"group_name"`
-			OutboundTrunkID   string `json:"outbound_trunk_id"`
-			DisplayName       string `json:"display_name"`
-			ExtensionNumber   string `json:"extension_number"`
-			ExtensionPassword string `json:"extension_password"`
-			SIPUsername       string `json:"sip_username"`
-			WebRTCDomain      string `json:"webrtc_domain"`
-			WebRTCWSURL       string `json:"webrtc_ws_url"`
-			StunServer        string `json:"stun_server"`
-			CanCallExternal   bool   `json:"can_call_external"`
-			CanReceiveCalls   bool   `json:"can_receive_calls"`
-			CanTransfer       bool   `json:"can_transfer"`
-			CanAccessRec      bool   `json:"can_access_recordings"`
-		}
+		var body extensionBody
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
 		}
@@ -326,18 +343,7 @@ func CreateExtension(svc *services.Container) fiber.Handler {
 		if body.ExtensionPassword == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Extension password is required"})
 		}
-		if body.SIPUsername == "" {
-			body.SIPUsername = body.ExtensionNumber
-		}
-		if body.WebRTCDomain == "" {
-			body.WebRTCDomain = "voip.vgon.com.br"
-		}
-		if body.WebRTCWSURL == "" {
-			body.WebRTCWSURL = "wss://voip.vgon.com.br:8089/ws"
-		}
-		if body.StunServer == "" {
-			body.StunServer = "stun:stun.l.google.com:19302"
-		}
+		normalizeExtensionBody(&body)
 
 		extensionPassword, err := services.EncryptSecret(body.ExtensionPassword, svc.Config.JWTSecret)
 		if err != nil {
@@ -387,6 +393,62 @@ func CreateExtension(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"id": id})
+	}
+}
+
+func UpdateExtension(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		id := c.Params("id")
+		var body extensionBody
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+		if body.ExtensionNumber == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Extension number is required"})
+		}
+		normalizeExtensionBody(&body)
+
+		extensionPassword := ""
+		if body.ExtensionPassword != "" {
+			var err error
+			extensionPassword, err = services.EncryptSecret(body.ExtensionPassword, svc.Config.JWTSecret)
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to encrypt extension password"})
+			}
+		} else {
+			if err := svc.DB.QueryRow("SELECT extension_password FROM phone_extensions WHERE id = $1 AND company_id = $2", id, companyID).Scan(&extensionPassword); err != nil {
+				return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Extension not found"})
+			}
+		}
+
+		res, err := svc.DB.Exec(`
+			UPDATE phone_extensions
+			SET user_id = NULLIF($1, '')::uuid,
+				queue_id = NULLIF($2, '')::uuid,
+				group_name = $3,
+				outbound_trunk_id = NULLIF($4, '')::uuid,
+				display_name = $5,
+				extension_number = $6,
+				extension_password = $7,
+				sip_username = $8,
+				webrtc_domain = $9,
+				webrtc_ws_url = $10,
+				stun_server = $11,
+				can_call_external = $12,
+				can_receive_calls = $13,
+				can_transfer = $14,
+				can_access_recordings = $15,
+				updated_at = NOW()
+			WHERE id = $16 AND company_id = $17
+		`, body.UserID, body.QueueID, body.GroupName, body.OutboundTrunkID, body.DisplayName, body.ExtensionNumber, extensionPassword, body.SIPUsername, body.WebRTCDomain, body.WebRTCWSURL, body.StunServer, body.CanCallExternal, body.CanReceiveCalls, body.CanTransfer, body.CanAccessRec, id, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		if rows, _ := res.RowsAffected(); rows == 0 {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Extension not found"})
+		}
+		return c.JSON(fiber.Map{"id": id})
 	}
 }
 

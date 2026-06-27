@@ -44,8 +44,8 @@ export default function CallsPage() {
   const [showDTMF, setShowDTMF] = useState(false)
   const [contactResults, setContactResults] = useState<Array<{name: string; phone: string}>>([])
   const [callHistory, setCallHistory] = useState<Array<{id: string; direction: string; number: string; name?: string; duration: number; status: string; date: string}>>([])
-  const [extensions, setExtensions] = useState<Array<{id: string; extension_number: string; display_name: string; status: string; can_call_external: boolean; outbound_trunk_id?: string; outbound_trunk_name?: string}>>([])
-  const [trunks, setTrunks] = useState<Array<{id: string; name: string; sip_server: string; sip_port: number; transport: string; caller_id?: string; is_active: boolean}>>([])
+  const [extensions, setExtensions] = useState<Array<{id: string; extension_number: string; display_name: string; status: string; can_call_external: boolean; outbound_trunk_id?: string; outbound_trunk_name?: string; sip_username?: string; webrtc_domain?: string; webrtc_ws_url?: string; stun_server?: string}>>([])
+  const [trunks, setTrunks] = useState<Array<{id: string; name: string; description?: string; sip_server: string; sip_port: number; transport: string; sip_domain?: string; username?: string; caller_id?: string; realm?: string; outbound_proxy?: string; codecs?: string | string[]; nat?: boolean; keep_alive?: number; dtmf?: string; register_expires?: number; is_active: boolean}>>([])
   const [queues, setQueues] = useState<Array<{id: string; name: string; strategy: string}>>([])
   const [serverStatus, setServerStatus] = useState<{ari: boolean; ami: boolean; webrtc: boolean} | null>(null)
   const [dashboardStats, setDashboardStats] = useState<any>(null)
@@ -63,6 +63,8 @@ export default function CallsPage() {
     auto_register: true,
   })
   const [showTrunkConfig, setShowTrunkConfig] = useState(false)
+  const [editingExtensionId, setEditingExtensionId] = useState('')
+  const [editingTrunkId, setEditingTrunkId] = useState('')
   const [trunkConfig, setTrunkConfig] = useState({
     name: '',
     description: '',
@@ -81,6 +83,39 @@ export default function CallsPage() {
     dtmf: 'rfc4733',
     register_expires: '300',
     is_active: true,
+  })
+
+  const defaultTrunkConfig = () => ({
+    name: '',
+    description: '',
+    sip_server: '',
+    sip_port: '5060',
+    transport: 'UDP',
+    sip_domain: '',
+    username: '',
+    password: '',
+    caller_id: '',
+    realm: '',
+    outbound_proxy: '',
+    codecs: ['ulaw', 'alaw'],
+    nat: true,
+    keep_alive: '60',
+    dtmf: 'rfc4733',
+    register_expires: '300',
+    is_active: true,
+  })
+
+  const defaultSipConfig = () => ({
+    display_name: '',
+    extension_number: '',
+    webrtc_domain: 'voip.vgon.com.br',
+    webrtc_ws_url: 'wss://voip.vgon.com.br:8089/ws',
+    sip_user: '',
+    sip_password: '',
+    outbound_trunk_id: '',
+    transport: 'WSS',
+    stun_server: 'stun:stun.l.google.com:19302',
+    auto_register: true,
   })
 
   // Incoming call CRM data
@@ -199,18 +234,83 @@ export default function CallsPage() {
     }
   }
 
+  const openNewExtension = () => {
+    setEditingExtensionId('')
+    setSipConfig(defaultSipConfig())
+    setShowConfig(true)
+  }
+
+  const editExtension = (ext: typeof extensions[number]) => {
+    setEditingExtensionId(ext.id)
+    setSipConfig({
+      ...defaultSipConfig(),
+      display_name: ext.display_name || '',
+      extension_number: ext.extension_number || '',
+      sip_user: ext.sip_username || ext.extension_number || '',
+      sip_password: '',
+      outbound_trunk_id: ext.outbound_trunk_id || '',
+      webrtc_domain: ext.webrtc_domain || 'voip.vgon.com.br',
+      webrtc_ws_url: ext.webrtc_ws_url || 'wss://voip.vgon.com.br:8089/ws',
+      stun_server: ext.stun_server || 'stun:stun.l.google.com:19302',
+      auto_register: false,
+    })
+    setShowConfig(true)
+  }
+
+  const parseCodecs = (codecs: string | string[] | undefined) => {
+    if (Array.isArray(codecs)) return codecs
+    if (!codecs) return ['ulaw', 'alaw']
+    try {
+      const parsed = JSON.parse(codecs)
+      return Array.isArray(parsed) ? parsed : ['ulaw', 'alaw']
+    } catch {
+      return codecs.split(',').map(codec => codec.trim()).filter(Boolean)
+    }
+  }
+
+  const openNewTrunk = () => {
+    setEditingTrunkId('')
+    setTrunkConfig(defaultTrunkConfig())
+    setShowTrunkConfig(true)
+  }
+
+  const editTrunk = (trunk: typeof trunks[number]) => {
+    setEditingTrunkId(trunk.id)
+    setTrunkConfig({
+      ...defaultTrunkConfig(),
+      name: trunk.name || '',
+      description: trunk.description || '',
+      sip_server: trunk.sip_server || '',
+      sip_port: String(trunk.sip_port || 5060),
+      transport: trunk.transport || 'UDP',
+      sip_domain: trunk.sip_domain || '',
+      username: trunk.username || '',
+      password: '',
+      caller_id: trunk.caller_id || '',
+      realm: trunk.realm || '',
+      outbound_proxy: trunk.outbound_proxy || '',
+      codecs: parseCodecs(trunk.codecs),
+      nat: trunk.nat ?? true,
+      keep_alive: String(trunk.keep_alive || 60),
+      dtmf: trunk.dtmf || 'rfc4733',
+      register_expires: String(trunk.register_expires || 300),
+      is_active: trunk.is_active,
+    })
+    setShowTrunkConfig(true)
+  }
+
   const saveConfig = async () => {
     try {
       if (!sipConfig.extension_number.trim()) {
         toast.error('Informe o número do ramal')
         return
       }
-      if (!sipConfig.sip_password.trim()) {
+      if (!editingExtensionId && !sipConfig.sip_password.trim()) {
         toast.error('Informe a senha do ramal')
         return
       }
 
-      await api.post('/telephony/extensions', {
+      const payload = {
         display_name: sipConfig.display_name || sipConfig.extension_number,
         extension_number: sipConfig.extension_number,
         extension_password: sipConfig.sip_password,
@@ -223,10 +323,16 @@ export default function CallsPage() {
         can_receive_calls: true,
         can_transfer: true,
         can_access_recordings: true,
-      })
+      }
+      if (editingExtensionId) {
+        await api.put(`/telephony/extensions/${editingExtensionId}`, payload)
+      } else {
+        await api.post('/telephony/extensions', payload)
+      }
       await fetchExtensions()
-      toast.success('Configuração salva!')
+      toast.success(editingExtensionId ? 'Ramal atualizado!' : 'Configuração salva!')
       setShowConfig(false)
+      setEditingExtensionId('')
       if (sipConfig.auto_register) doRegister()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Erro ao salvar ramal')
@@ -235,33 +341,21 @@ export default function CallsPage() {
 
   const saveTrunk = async () => {
     try {
-      await api.post('/telephony/trunks', {
+      const payload = {
         ...trunkConfig,
         sip_port: parseInt(trunkConfig.sip_port) || 5060,
         keep_alive: parseInt(trunkConfig.keep_alive) || 60,
         register_expires: parseInt(trunkConfig.register_expires) || 300,
-      })
-      toast.success('Operadora SIP salva!')
+      }
+      if (editingTrunkId) {
+        await api.put(`/telephony/trunks/${editingTrunkId}`, payload)
+      } else {
+        await api.post('/telephony/trunks', payload)
+      }
+      toast.success(editingTrunkId ? 'Operadora SIP atualizada!' : 'Operadora SIP salva!')
       setShowTrunkConfig(false)
-      setTrunkConfig({
-        name: '',
-        description: '',
-        sip_server: '',
-        sip_port: '5060',
-        transport: 'UDP',
-        sip_domain: '',
-        username: '',
-        password: '',
-        caller_id: '',
-        realm: '',
-        outbound_proxy: '',
-        codecs: ['ulaw', 'alaw'],
-        nat: true,
-        keep_alive: '60',
-        dtmf: 'rfc4733',
-        register_expires: '300',
-        is_active: true,
-      })
+      setEditingTrunkId('')
+      setTrunkConfig(defaultTrunkConfig())
       fetchTrunks()
     } catch { toast.error('Erro ao salvar operadora') }
   }
@@ -338,7 +432,7 @@ export default function CallsPage() {
         <div className="flex gap-2">
           {sip.status === 'offline' && <button onClick={doRegister} className="btn-primary text-sm"><Wifi size={16} /> Conectar</button>}
           {sip.status === 'online' && <button onClick={() => sip.unregister()} className="btn-secondary text-sm"><WifiOff size={16} /> Desconectar</button>}
-          <button onClick={() => setShowConfig(true)} className="btn-secondary text-sm"><Settings size={16} /> Ramal</button>
+          <button onClick={openNewExtension} className="btn-secondary text-sm"><Settings size={16} /> Ramal</button>
         </div>
       </div>
 
@@ -427,7 +521,7 @@ export default function CallsPage() {
           <div className="card p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Atalhos Rápidos</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <button onClick={() => setShowConfig(true)} className="p-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-center transition-colors">
+                <button onClick={openNewExtension} className="p-3 bg-gray-50 hover:bg-gray-100 rounded-xl text-center transition-colors">
                 <Settings size={20} className="text-gray-600 mx-auto mb-1" />
                 <p className="text-xs text-gray-700 font-medium">Configurar Servidor</p>
               </button>
@@ -603,7 +697,7 @@ export default function CallsPage() {
               <h3 className="text-lg font-semibold text-gray-900">Operadoras SIP</h3>
               <p className="text-sm text-gray-500">Cadastre trunks PJSIP. Ramais apenas escolhem qual operadora usar para saída.</p>
             </div>
-            <button onClick={() => setShowTrunkConfig(true)} className="btn-primary text-sm">+ Nova Operadora</button>
+            <button onClick={openNewTrunk} className="btn-primary text-sm">+ Nova Operadora</button>
           </div>
           {trunks.length === 0 ? (
             <div className="text-center py-10 text-gray-400">
@@ -618,9 +712,12 @@ export default function CallsPage() {
                     <p className="text-sm font-medium text-gray-900">{trunk.name}</p>
                     <p className="text-xs text-gray-500">{trunk.transport} {trunk.sip_server}:{trunk.sip_port}</p>
                   </div>
-                  <span className={`badge text-xs ${trunk.is_active ? 'badge-green' : 'badge-gray'}`}>
-                    {trunk.is_active ? 'Ativa' : 'Inativa'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`badge text-xs ${trunk.is_active ? 'badge-green' : 'badge-gray'}`}>
+                      {trunk.is_active ? 'Ativa' : 'Inativa'}
+                    </span>
+                    <button onClick={() => editTrunk(trunk)} className="text-xs text-primary-600 hover:underline">Editar</button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -658,7 +755,7 @@ export default function CallsPage() {
         <div className="card p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Ramais</h3>
-            <button onClick={() => setShowConfig(true)} className="btn-primary text-sm">+ Novo Ramal</button>
+            <button onClick={openNewExtension} className="btn-primary text-sm">+ Novo Ramal</button>
           </div>
           {extensions.length === 0 ? (
             <div className="text-center py-8 text-gray-400">
@@ -682,6 +779,7 @@ export default function CallsPage() {
                       {ext.status === 'online' ? 'Online' : 'Offline'}
                     </span>
                     {ext.can_call_external && <span className="text-xs text-gray-400">Ext. OK</span>}
+                    <button onClick={() => editExtension(ext)} className="text-xs text-primary-600 hover:underline">Editar</button>
                   </div>
                 </div>
               ))}
@@ -722,8 +820,8 @@ export default function CallsPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Cadastrar Operadora SIP</h3>
-              <button onClick={() => setShowTrunkConfig(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+              <h3 className="text-lg font-semibold text-gray-900">{editingTrunkId ? 'Editar Operadora SIP' : 'Cadastrar Operadora SIP'}</h3>
+              <button onClick={() => { setShowTrunkConfig(false); setEditingTrunkId('') }} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
             </div>
             <p className="text-sm text-gray-500 mb-4">
               Estes dados são da operadora/trunk. O ramal apenas escolhe uma operadora de saída.
@@ -735,7 +833,7 @@ export default function CallsPage() {
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Transporte</label><select value={trunkConfig.transport} onChange={e => setTrunkConfig({...trunkConfig, transport: e.target.value})} className="input"><option value="UDP">UDP</option><option value="TCP">TCP</option><option value="TLS">TLS</option></select></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Domínio SIP</label><input type="text" value={trunkConfig.sip_domain} onChange={e => setTrunkConfig({...trunkConfig, sip_domain: e.target.value})} className="input" placeholder="operadora.com.br" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Usuário</label><input type="text" value={trunkConfig.username} onChange={e => setTrunkConfig({...trunkConfig, username: e.target.value})} className="input" /></div>
-              <div><label className="block text-xs font-medium text-gray-700 mb-1">Senha</label><input type="password" value={trunkConfig.password} onChange={e => setTrunkConfig({...trunkConfig, password: e.target.value})} className="input" /></div>
+              <div><label className="block text-xs font-medium text-gray-700 mb-1">Senha {editingTrunkId && <span className="text-gray-400">(deixe em branco para manter)</span>}</label><input type="password" value={trunkConfig.password} onChange={e => setTrunkConfig({...trunkConfig, password: e.target.value})} className="input" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">CallerID</label><input type="text" value={trunkConfig.caller_id} onChange={e => setTrunkConfig({...trunkConfig, caller_id: e.target.value})} className="input" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Realm opcional</label><input type="text" value={trunkConfig.realm} onChange={e => setTrunkConfig({...trunkConfig, realm: e.target.value})} className="input" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Proxy Outbound opcional</label><input type="text" value={trunkConfig.outbound_proxy} onChange={e => setTrunkConfig({...trunkConfig, outbound_proxy: e.target.value})} className="input" /></div>
@@ -767,8 +865,8 @@ export default function CallsPage() {
               <label className="flex items-center gap-2"><input type="checkbox" checked={trunkConfig.is_active} onChange={e => setTrunkConfig({...trunkConfig, is_active: e.target.checked})} /><span className="text-sm text-gray-700">Ativa</span></label>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowTrunkConfig(false)} className="btn-secondary flex-1">Cancelar</button>
-              <button onClick={saveTrunk} className="btn-primary flex-1">Salvar Operadora</button>
+              <button onClick={() => { setShowTrunkConfig(false); setEditingTrunkId('') }} className="btn-secondary flex-1">Cancelar</button>
+              <button onClick={saveTrunk} className="btn-primary flex-1">{editingTrunkId ? 'Atualizar Operadora' : 'Salvar Operadora'}</button>
             </div>
           </div>
         </div>
@@ -779,8 +877,8 @@ export default function CallsPage() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Configurar Discador WebRTC</h3>
-              <button onClick={() => setShowConfig(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+              <h3 className="text-lg font-semibold text-gray-900">{editingExtensionId ? 'Editar Ramal WebRTC' : 'Configurar Discador WebRTC'}</h3>
+              <button onClick={() => { setShowConfig(false); setEditingExtensionId('') }} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
             </div>
             <p className="text-sm text-gray-500 mb-4">
               Informe somente o ramal que vai registrar no Asterisk. A operadora/tronco VoIP fica na aba Operadoras SIP.
@@ -790,7 +888,7 @@ export default function CallsPage() {
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Ramal</label><input type="text" value={sipConfig.extension_number} onChange={e => setSipConfig({...sipConfig, extension_number: e.target.value})} className="input" placeholder="1001" /></div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-xs font-medium text-gray-700 mb-1">Usuário SIP</label><input type="text" value={sipConfig.sip_user} onChange={e => setSipConfig({...sipConfig, sip_user: e.target.value})} className="input" placeholder="1001" /></div>
-                <div><label className="block text-xs font-medium text-gray-700 mb-1">Senha</label><input type="password" value={sipConfig.sip_password} onChange={e => setSipConfig({...sipConfig, sip_password: e.target.value})} className="input" /></div>
+                <div><label className="block text-xs font-medium text-gray-700 mb-1">Senha {editingExtensionId && <span className="text-gray-400">(deixe em branco para manter)</span>}</label><input type="password" value={sipConfig.sip_password} onChange={e => setSipConfig({...sipConfig, sip_password: e.target.value})} className="input" /></div>
               </div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Domínio WebRTC do Asterisk</label><input type="text" value={sipConfig.webrtc_domain} onChange={e => setSipConfig({...sipConfig, webrtc_domain: e.target.value})} className="input" placeholder="voip.vgon.com.br" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">Operadora de saída</label><select value={sipConfig.outbound_trunk_id} onChange={e => setSipConfig({...sipConfig, outbound_trunk_id: e.target.value})} className="input"><option value="">Nenhuma operadora</option>{trunks.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
@@ -800,8 +898,8 @@ export default function CallsPage() {
               <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">O CRM é somente o discador do atendente. Ele registra o ramal no Asterisk via WSS; quem escolhe a operadora e a rota da ligação é o Asterisk.</div>
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowConfig(false)} className="btn-secondary flex-1">Cancelar</button>
-              <button onClick={saveConfig} className="btn-primary flex-1">Salvar e Registrar</button>
+              <button onClick={() => { setShowConfig(false); setEditingExtensionId('') }} className="btn-secondary flex-1">Cancelar</button>
+              <button onClick={saveConfig} className="btn-primary flex-1">{editingExtensionId ? 'Atualizar Ramal' : 'Salvar e Registrar'}</button>
             </div>
           </div>
         </div>
