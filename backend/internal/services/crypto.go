@@ -72,3 +72,17 @@ func DecryptSecret(value, seed string) string {
 	}
 	return string(plaintext)
 }
+
+func StringsJSON(values []string) string {
+	if len(values) == 0 {
+		return "[]"
+	}
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			parts = append(parts, `"`+strings.ReplaceAll(value, `"`, `\"`)+`"`)
+		}
+	}
+	return "[" + strings.Join(parts, ",") + "]"
+}

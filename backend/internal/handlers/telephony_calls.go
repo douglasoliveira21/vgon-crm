@@ -57,45 +57,35 @@ func GetWebRTCConfig(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 		userID := c.Locals("user_id").(string)
 
-		var providerID, sipHost, sipDomain, webRTCDomain, webRTCWSURL, transport, stunServer string
-		var sipPort int
+		var extensionID, extensionNumber, extensionPassword, displayName, sipUsername, webRTCDomain, webRTCWSURL, stunServer string
 		err := svc.DB.QueryRow(`
-			SELECT id, sip_host, sip_port, sip_domain, COALESCE(webrtc_domain, sip_domain, sip_host),
-			       COALESCE(webrtc_ws_url, 'wss://voip.vgon.com.br:8089/ws'), transport, COALESCE(stun_server, '')
-			FROM telephony_providers
-			WHERE company_id = $1 AND is_active = true
-			LIMIT 1
-		`, companyID).Scan(&providerID, &sipHost, &sipPort, &sipDomain, &webRTCDomain, &webRTCWSURL, &transport, &stunServer)
-		if err != nil {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Telephony provider not configured"})
-		}
-
-		var extensionID, extensionNumber, extensionPassword, displayName string
-		err = svc.DB.QueryRow(`
-			SELECT id, extension_number, extension_password, display_name
+			SELECT id, extension_number, extension_password, display_name,
+			       COALESCE(NULLIF(sip_username, ''), extension_number),
+			       COALESCE(webrtc_domain, 'voip.vgon.com.br'),
+			       COALESCE(webrtc_ws_url, 'wss://voip.vgon.com.br:8089/ws'),
+			       COALESCE(stun_server, 'stun:stun.l.google.com:19302')
 			FROM phone_extensions
 			WHERE company_id = $1 AND (user_id = $2 OR user_id IS NULL)
 			ORDER BY CASE WHEN user_id = $2 THEN 0 ELSE 1 END, extension_number
 			LIMIT 1
-		`, companyID, userID).Scan(&extensionID, &extensionNumber, &extensionPassword, &displayName)
+		`, companyID, userID).Scan(&extensionID, &extensionNumber, &extensionPassword, &displayName, &sipUsername, &webRTCDomain, &webRTCWSURL, &stunServer)
 		if err != nil {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "No WebRTC extension configured for this user"})
 		}
 
 		return c.JSON(fiber.Map{
-			"provider_id":      providerID,
 			"extension_id":     extensionID,
 			"extension_number": extensionNumber,
 			"display_name":     displayName,
-			"sip_uri":          fmt.Sprintf("sip:%s@%s", extensionNumber, webRTCDomain),
-			"sip_host":         sipHost,
-			"sip_port":         sipPort,
-			"sip_domain":       sipDomain,
+			"sip_uri":          fmt.Sprintf("sip:%s@%s", sipUsername, webRTCDomain),
+			"sip_host":         webRTCDomain,
+			"sip_port":         5060,
+			"sip_domain":       webRTCDomain,
 			"webrtc_domain":    webRTCDomain,
 			"webrtc_ws_url":    webRTCWSURL,
-			"transport":        transport,
+			"transport":        "WSS",
 			"stun_server":      stunServer,
-			"username":         extensionNumber,
+			"username":         sipUsername,
 			"password":         services.DecryptSecret(extensionPassword, svc.Config.JWTSecret),
 		})
 	}

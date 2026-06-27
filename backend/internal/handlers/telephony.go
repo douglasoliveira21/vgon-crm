@@ -6,6 +6,154 @@ import (
 	"github.com/google/uuid"
 )
 
+type sipTrunkBody struct {
+	Name            string   `json:"name"`
+	Description     string   `json:"description"`
+	SIPServer       string   `json:"sip_server"`
+	SIPPort         int      `json:"sip_port"`
+	Transport       string   `json:"transport"`
+	SIPDomain       string   `json:"sip_domain"`
+	Username        string   `json:"username"`
+	Password        string   `json:"password"`
+	CallerID        string   `json:"caller_id"`
+	Realm           string   `json:"realm"`
+	OutboundProxy   string   `json:"outbound_proxy"`
+	Codecs          []string `json:"codecs"`
+	NAT             bool     `json:"nat"`
+	KeepAlive       int      `json:"keep_alive"`
+	DTMF            string   `json:"dtmf"`
+	RegisterExpires int      `json:"register_expires"`
+	IsActive        bool     `json:"is_active"`
+}
+
+func GetSIPTrunks(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		rows, err := svc.DB.Query(`
+			SELECT id, name, COALESCE(description, ''), sip_server, sip_port, transport,
+			       COALESCE(sip_domain, ''), username, caller_id, COALESCE(realm, ''),
+			       COALESCE(outbound_proxy, ''), codecs, nat, keep_alive, dtmf,
+			       register_expires, is_active, created_at
+			FROM sip_trunks
+			WHERE company_id = $1
+			ORDER BY name
+		`, companyID)
+		if err != nil {
+			return c.JSON(fiber.Map{"trunks": []interface{}{}})
+		}
+		defer rows.Close()
+
+		trunks := []map[string]interface{}{}
+		for rows.Next() {
+			var id, name, description, server, transport, domain, username, callerID, realm, proxy, dtmf string
+			var codecs []byte
+			var port, keepAlive, registerExpires int
+			var nat, active bool
+			var createdAt interface{}
+			rows.Scan(&id, &name, &description, &server, &port, &transport, &domain, &username, &callerID, &realm, &proxy, &codecs, &nat, &keepAlive, &dtmf, &registerExpires, &active, &createdAt)
+			trunks = append(trunks, map[string]interface{}{
+				"id": id, "name": name, "description": description, "sip_server": server,
+				"sip_port": port, "transport": transport, "sip_domain": domain,
+				"username": username, "caller_id": callerID, "realm": realm,
+				"outbound_proxy": proxy, "codecs": string(codecs), "nat": nat,
+				"keep_alive": keepAlive, "dtmf": dtmf, "register_expires": registerExpires,
+				"is_active": active, "created_at": createdAt,
+			})
+		}
+		return c.JSON(fiber.Map{"trunks": trunks})
+	}
+}
+
+func CreateSIPTrunk(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		return saveSIPTrunk(c, svc, "")
+	}
+}
+
+func UpdateSIPTrunk(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		return saveSIPTrunk(c, svc, c.Params("id"))
+	}
+}
+
+func DeleteSIPTrunk(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		id := c.Params("id")
+		_, err := svc.DB.Exec("DELETE FROM sip_trunks WHERE id = $1 AND company_id = $2", id, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(fiber.Map{"message": "Trunk deleted"})
+	}
+}
+
+func saveSIPTrunk(c *fiber.Ctx, svc *services.Container, id string) error {
+	companyID := c.Locals("company_id").(string)
+	var body sipTrunkBody
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+	}
+	if body.Name == "" || body.SIPServer == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Name and SIP server are required"})
+	}
+	if body.SIPPort == 0 {
+		body.SIPPort = 5060
+	}
+	if body.Transport == "" {
+		body.Transport = "UDP"
+	}
+	if body.DTMF == "" {
+		body.DTMF = "rfc4733"
+	}
+	if body.KeepAlive == 0 {
+		body.KeepAlive = 60
+	}
+	if body.RegisterExpires == 0 {
+		body.RegisterExpires = 300
+	}
+	if len(body.Codecs) == 0 {
+		body.Codecs = []string{"ulaw", "alaw"}
+	}
+	configPassword := body.Password
+	encryptedPassword, err := services.EncryptSecret(body.Password, svc.Config.JWTSecret)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to encrypt trunk password"})
+	}
+	if id != "" && body.Password == "" {
+		var currentPassword string
+		_ = svc.DB.QueryRow("SELECT password FROM sip_trunks WHERE id = $1 AND company_id = $2", id, companyID).Scan(&currentPassword)
+		encryptedPassword = currentPassword
+		configPassword = services.DecryptSecret(currentPassword, svc.Config.JWTSecret)
+	}
+
+	pjsipConfig := svc.Asterisk.GeneratePJSIPTrunkConfig(id, body.Name, body.SIPServer, body.SIPPort, body.Transport, body.SIPDomain, body.Username, configPassword, body.CallerID, body.Realm, body.OutboundProxy, body.Codecs, body.NAT, body.KeepAlive, body.DTMF, body.RegisterExpires)
+	codecsJSON := services.StringsJSON(body.Codecs)
+
+	if id == "" {
+		id = uuid.New().String()
+		pjsipConfig = svc.Asterisk.GeneratePJSIPTrunkConfig(id, body.Name, body.SIPServer, body.SIPPort, body.Transport, body.SIPDomain, body.Username, configPassword, body.CallerID, body.Realm, body.OutboundProxy, body.Codecs, body.NAT, body.KeepAlive, body.DTMF, body.RegisterExpires)
+		_, err = svc.DB.Exec(`
+			INSERT INTO sip_trunks (id, company_id, name, description, sip_server, sip_port, transport, sip_domain,
+				username, password, caller_id, realm, outbound_proxy, codecs, nat, keep_alive, dtmf, register_expires, pjsip_config, is_active)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15, $16, $17, $18, $19, $20)
+		`, id, companyID, body.Name, body.Description, body.SIPServer, body.SIPPort, body.Transport, body.SIPDomain, body.Username, encryptedPassword, body.CallerID, body.Realm, body.OutboundProxy, codecsJSON, body.NAT, body.KeepAlive, body.DTMF, body.RegisterExpires, pjsipConfig, body.IsActive)
+	} else {
+		_, err = svc.DB.Exec(`
+			UPDATE sip_trunks
+			SET name=$1, description=$2, sip_server=$3, sip_port=$4, transport=$5, sip_domain=$6,
+			    username=$7, password=$8, caller_id=$9, realm=$10, outbound_proxy=$11, codecs=$12::jsonb,
+			    nat=$13, keep_alive=$14, dtmf=$15, register_expires=$16, pjsip_config=$17, is_active=$18, updated_at=NOW()
+			WHERE id=$19 AND company_id=$20
+		`, body.Name, body.Description, body.SIPServer, body.SIPPort, body.Transport, body.SIPDomain, body.Username, encryptedPassword, body.CallerID, body.Realm, body.OutboundProxy, codecsJSON, body.NAT, body.KeepAlive, body.DTMF, body.RegisterExpires, pjsipConfig, body.IsActive, id, companyID)
+	}
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	_ = svc.Asterisk.ReloadPJSIP(companyID)
+	return c.JSON(fiber.Map{"id": id, "pjsip_config": pjsipConfig})
+}
+
 func SaveTelephonyProvider(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
@@ -116,8 +264,14 @@ func GetExtensions(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
 		rows, err := svc.DB.Query(`
-			SELECT id, COALESCE(user_id::text, ''), extension_number, display_name, status, can_call_external, can_receive_calls, can_transfer, can_access_recordings
-			FROM phone_extensions WHERE company_id = $1 ORDER BY extension_number
+			SELECT pe.id, COALESCE(pe.user_id::text, ''), pe.extension_number, pe.display_name, pe.status,
+			       pe.can_call_external, pe.can_receive_calls, pe.can_transfer, pe.can_access_recordings,
+			       COALESCE(pe.outbound_trunk_id::text, ''), COALESCE(st.name, ''),
+			       COALESCE(pe.webrtc_domain, ''), COALESCE(pe.webrtc_ws_url, ''), COALESCE(pe.stun_server, ''),
+			       COALESCE(pe.sip_username, pe.extension_number), COALESCE(pe.group_name, ''), COALESCE(pe.queue_id::text, '')
+			FROM phone_extensions pe
+			LEFT JOIN sip_trunks st ON st.id = pe.outbound_trunk_id
+			WHERE pe.company_id = $1 ORDER BY pe.extension_number
 		`, companyID)
 		if err != nil {
 			return c.JSON(fiber.Map{"extensions": []interface{}{}})
@@ -126,13 +280,17 @@ func GetExtensions(svc *services.Container) fiber.Handler {
 
 		var extensions []map[string]interface{}
 		for rows.Next() {
-			var id, userID, number, name, status string
+			var id, userID, number, name, status, trunkID, trunkName, webrtcDomain, webrtcWSURL, stunServer, sipUsername, groupName, queueID string
 			var canCallExt, canReceive, canTransfer, canAccessRec bool
-			rows.Scan(&id, &userID, &number, &name, &status, &canCallExt, &canReceive, &canTransfer, &canAccessRec)
+			rows.Scan(&id, &userID, &number, &name, &status, &canCallExt, &canReceive, &canTransfer, &canAccessRec, &trunkID, &trunkName, &webrtcDomain, &webrtcWSURL, &stunServer, &sipUsername, &groupName, &queueID)
 			extensions = append(extensions, map[string]interface{}{
 				"id": id, "user_id": userID, "extension_number": number, "display_name": name,
 				"status": status, "can_call_external": canCallExt, "can_receive_calls": canReceive,
 				"can_transfer": canTransfer, "can_access_recordings": canAccessRec,
+				"outbound_trunk_id": trunkID, "outbound_trunk_name": trunkName,
+				"webrtc_domain": webrtcDomain, "webrtc_ws_url": webrtcWSURL,
+				"stun_server": stunServer, "sip_username": sipUsername,
+				"group_name": groupName, "queue_id": queueID,
 			})
 		}
 		return c.JSON(fiber.Map{"extensions": extensions})
@@ -144,9 +302,16 @@ func CreateExtension(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 		var body struct {
 			UserID            string `json:"user_id"`
+			QueueID           string `json:"queue_id"`
+			GroupName         string `json:"group_name"`
+			OutboundTrunkID   string `json:"outbound_trunk_id"`
 			DisplayName       string `json:"display_name"`
 			ExtensionNumber   string `json:"extension_number"`
 			ExtensionPassword string `json:"extension_password"`
+			SIPUsername       string `json:"sip_username"`
+			WebRTCDomain      string `json:"webrtc_domain"`
+			WebRTCWSURL       string `json:"webrtc_ws_url"`
+			StunServer        string `json:"stun_server"`
 			CanCallExternal   bool   `json:"can_call_external"`
 			CanReceiveCalls   bool   `json:"can_receive_calls"`
 			CanTransfer       bool   `json:"can_transfer"`
@@ -154,6 +319,18 @@ func CreateExtension(svc *services.Container) fiber.Handler {
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+		if body.SIPUsername == "" {
+			body.SIPUsername = body.ExtensionNumber
+		}
+		if body.WebRTCDomain == "" {
+			body.WebRTCDomain = "voip.vgon.com.br"
+		}
+		if body.WebRTCWSURL == "" {
+			body.WebRTCWSURL = "wss://voip.vgon.com.br:8089/ws"
+		}
+		if body.StunServer == "" {
+			body.StunServer = "stun:stun.l.google.com:19302"
 		}
 
 		extensionPassword, err := services.EncryptSecret(body.ExtensionPassword, svc.Config.JWTSecret)
@@ -163,9 +340,29 @@ func CreateExtension(svc *services.Container) fiber.Handler {
 
 		id := uuid.New().String()
 		_, err = svc.DB.Exec(`
-			INSERT INTO phone_extensions (id, company_id, user_id, display_name, extension_number, extension_password, can_call_external, can_receive_calls, can_transfer, can_access_recordings)
-			VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, $6, $7, $8, $9, $10)
-		`, id, companyID, body.UserID, body.DisplayName, body.ExtensionNumber, extensionPassword, body.CanCallExternal, body.CanReceiveCalls, body.CanTransfer, body.CanAccessRec)
+			INSERT INTO phone_extensions (
+				id, company_id, user_id, queue_id, group_name, outbound_trunk_id, display_name,
+				extension_number, extension_password, sip_username, webrtc_domain, webrtc_ws_url,
+				stun_server, can_call_external, can_receive_calls, can_transfer, can_access_recordings
+			)
+			VALUES ($1, $2, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, $5, NULLIF($6, '')::uuid, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+			ON CONFLICT (company_id, extension_number) DO UPDATE SET
+				user_id = EXCLUDED.user_id,
+				queue_id = EXCLUDED.queue_id,
+				group_name = EXCLUDED.group_name,
+				outbound_trunk_id = EXCLUDED.outbound_trunk_id,
+				display_name = EXCLUDED.display_name,
+				extension_password = EXCLUDED.extension_password,
+				sip_username = EXCLUDED.sip_username,
+				webrtc_domain = EXCLUDED.webrtc_domain,
+				webrtc_ws_url = EXCLUDED.webrtc_ws_url,
+				stun_server = EXCLUDED.stun_server,
+				can_call_external = EXCLUDED.can_call_external,
+				can_receive_calls = EXCLUDED.can_receive_calls,
+				can_transfer = EXCLUDED.can_transfer,
+				can_access_recordings = EXCLUDED.can_access_recordings,
+				updated_at = NOW()
+		`, id, companyID, body.UserID, body.QueueID, body.GroupName, body.OutboundTrunkID, body.DisplayName, body.ExtensionNumber, extensionPassword, body.SIPUsername, body.WebRTCDomain, body.WebRTCWSURL, body.StunServer, body.CanCallExternal, body.CanReceiveCalls, body.CanTransfer, body.CanAccessRec)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
