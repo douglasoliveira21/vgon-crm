@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/evocrm/backend/internal/services"
@@ -48,6 +49,187 @@ func TelephonyCall(svc *services.Container) fiber.Handler {
 			"status":     "initiated",
 		})
 	}
+}
+
+// GET /api/telephony/webrtc/config - Browser-safe WebRTC registration config
+func GetWebRTCConfig(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
+
+		var providerID, sipHost, sipDomain, webRTCDomain, webRTCWSURL, transport, stunServer string
+		var sipPort int
+		err := svc.DB.QueryRow(`
+			SELECT id, sip_host, sip_port, sip_domain, COALESCE(webrtc_domain, sip_domain, sip_host),
+			       COALESCE(webrtc_ws_url, 'wss://voip.vgon.com.br:8089/ws'), transport, COALESCE(stun_server, '')
+			FROM telephony_providers
+			WHERE company_id = $1 AND is_active = true
+			LIMIT 1
+		`, companyID).Scan(&providerID, &sipHost, &sipPort, &sipDomain, &webRTCDomain, &webRTCWSURL, &transport, &stunServer)
+		if err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Telephony provider not configured"})
+		}
+
+		var extensionID, extensionNumber, extensionPassword, displayName string
+		err = svc.DB.QueryRow(`
+			SELECT id, extension_number, extension_password, display_name
+			FROM phone_extensions
+			WHERE company_id = $1 AND (user_id = $2 OR user_id IS NULL)
+			ORDER BY CASE WHEN user_id = $2 THEN 0 ELSE 1 END, extension_number
+			LIMIT 1
+		`, companyID, userID).Scan(&extensionID, &extensionNumber, &extensionPassword, &displayName)
+		if err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "No WebRTC extension configured for this user"})
+		}
+
+		return c.JSON(fiber.Map{
+			"provider_id":      providerID,
+			"extension_id":     extensionID,
+			"extension_number": extensionNumber,
+			"display_name":     displayName,
+			"sip_uri":          fmt.Sprintf("sip:%s@%s", extensionNumber, webRTCDomain),
+			"sip_host":         sipHost,
+			"sip_port":         sipPort,
+			"sip_domain":       sipDomain,
+			"webrtc_domain":    webRTCDomain,
+			"webrtc_ws_url":    webRTCWSURL,
+			"transport":        transport,
+			"stun_server":      stunServer,
+			"username":         extensionNumber,
+			"password":         services.DecryptSecret(extensionPassword, svc.Config.JWTSecret),
+		})
+	}
+}
+
+// POST /api/telephony/calls/log-start - Save SIP.js call start in call_records
+func StartWebRTCCallLog(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
+
+		var body struct {
+			CallID       string `json:"call_id"`
+			ChannelID    string `json:"channel_id"`
+			Extension    string `json:"extension"`
+			FromNumber   string `json:"from_number"`
+			ToNumber     string `json:"to_number"`
+			Direction    string `json:"direction"`
+			Status       string `json:"status"`
+			RecordingURL string `json:"recording_url"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+		if body.Direction == "" {
+			body.Direction = "outbound"
+		}
+		if body.Status == "" {
+			body.Status = "initiated"
+		}
+		if body.CallID == "" {
+			body.CallID = uuid.New().String()
+		}
+
+		contactID := findContactByPhone(svc, companyID, firstNonEmpty(body.FromNumber, body.ToNumber))
+		extensionID := findExtensionID(svc, companyID, body.Extension)
+
+		_, err := svc.DB.Exec(`
+			INSERT INTO call_records (id, company_id, extension_id, user_id, contact_id, channel_id, call_direction, call_status, from_number, to_number, started_at, recording_url)
+			VALUES ($1, $2, NULLIF($3, '')::uuid, $4, NULLIF($5, '')::uuid, $6, $7, $8, $9, $10, NOW(), NULLIF($11, ''))
+			ON CONFLICT (id) DO UPDATE SET call_status = EXCLUDED.call_status, channel_id = EXCLUDED.channel_id, updated_at = NOW()
+		`, body.CallID, companyID, extensionID, userID, contactID, body.ChannelID, body.Direction, body.Status, body.FromNumber, body.ToNumber, body.RecordingURL)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		svc.WSHub.BroadcastToCompany(companyID, "call_event", fiber.Map{
+			"call_id": body.CallID, "direction": body.Direction, "status": body.Status,
+			"from_number": body.FromNumber, "to_number": body.ToNumber,
+		})
+		return c.JSON(fiber.Map{"call_id": body.CallID})
+	}
+}
+
+// POST /api/telephony/calls/log-end - Save SIP.js call completion in call_records
+func EndWebRTCCallLog(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+
+		var body struct {
+			CallID       string `json:"call_id"`
+			Status       string `json:"status"`
+			Duration     int    `json:"duration"`
+			RecordingURL string `json:"recording_url"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+		if body.CallID == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "call_id is required"})
+		}
+		if body.Status == "" {
+			body.Status = "completed"
+		}
+
+		_, err := svc.DB.Exec(`
+			UPDATE call_records
+			SET call_status = $1,
+			    ended_at = NOW(),
+			    duration_seconds = CASE WHEN $2 > 0 THEN $2 ELSE EXTRACT(EPOCH FROM (NOW() - started_at))::int END,
+			    recording_url = COALESCE(NULLIF($3, ''), recording_url),
+			    updated_at = NOW()
+			WHERE id = $4 AND company_id = $5
+		`, body.Status, body.Duration, body.RecordingURL, body.CallID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		svc.WSHub.BroadcastToCompany(companyID, "call_event", fiber.Map{
+			"call_id": body.CallID, "status": body.Status, "duration": body.Duration,
+		})
+		return c.JSON(fiber.Map{"status": body.Status})
+	}
+}
+
+func findExtensionID(svc *services.Container, companyID, extension string) string {
+	if extension == "" {
+		return ""
+	}
+	var id string
+	_ = svc.DB.QueryRow("SELECT id FROM phone_extensions WHERE company_id = $1 AND extension_number = $2 LIMIT 1", companyID, extension).Scan(&id)
+	return id
+}
+
+func findContactByPhone(svc *services.Container, companyID, phone string) string {
+	normalized := onlyDialable(phone)
+	if normalized == "" {
+		return ""
+	}
+	var id string
+	_ = svc.DB.QueryRow(`
+		SELECT id FROM contacts
+		WHERE company_id = $1 AND regexp_replace(COALESCE(phone, ''), '[^0-9+]', '', 'g') ILIKE $2
+		LIMIT 1
+	`, companyID, "%"+normalized+"%").Scan(&id)
+	return id
+}
+
+func onlyDialable(value string) string {
+	return strings.Map(func(r rune) rune {
+		if (r >= '0' && r <= '9') || r == '+' {
+			return r
+		}
+		return -1
+	}, value)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // POST /api/telephony/hangup - End a call
@@ -236,17 +418,21 @@ func PlayRecording(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Recording not found"})
 		}
 
-		// Try to serve the file from disk
-		// File path pattern: /app/storage/voip-recordings/{company_id}/{year}/{month}/{day}/{call_id}.wav
-		filePath := fmt.Sprintf("/app/storage/voip-recordings/%s", *recordingURL)
+		recordingRef := strings.TrimSpace(*recordingURL)
+		if strings.HasPrefix(recordingRef, "http://") || strings.HasPrefix(recordingRef, "https://") {
+			return c.Redirect(recordingRef, fiber.StatusTemporaryRedirect)
+		}
+
+		// Try to serve only from the CRM-mounted recordings storage. Do not expose
+		// Asterisk physical paths such as /var/spool/asterisk/monitor to clients.
+		filePath := filepath.Join("/app/storage/voip-recordings", filepath.Clean("/"+recordingRef))
 		if _, err := os.Stat(filePath); err == nil {
 			c.Set("Content-Type", "audio/wav")
 			c.Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s.wav\"", id))
 			return c.SendFile(filePath)
 		}
 
-		// If not a local file, redirect to the URL
-		return c.Redirect(*recordingURL, fiber.StatusTemporaryRedirect)
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Recording file is not available in CRM storage"})
 	}
 }
 
@@ -264,7 +450,7 @@ func DeleteRecording(svc *services.Container) fiber.Handler {
 
 		// Try to delete file from disk
 		if recordingURL != nil {
-			filePath := fmt.Sprintf("/app/storage/voip-recordings/%s", *recordingURL)
+			filePath := filepath.Join("/app/storage/voip-recordings", filepath.Clean("/"+*recordingURL))
 			if _, err := os.Stat(filePath); err == nil {
 				os.Remove(filePath)
 				// Also try to remove empty parent directories

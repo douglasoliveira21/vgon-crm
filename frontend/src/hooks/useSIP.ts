@@ -1,12 +1,14 @@
 import { useState, useRef, useCallback } from 'react'
+import api from '@/lib/api'
 
 export type SIPStatus = 'offline' | 'registering' | 'online' | 'error'
-export type CallStatus = 'idle' | 'calling' | 'ringing' | 'in_call' | 'on_hold'
+export type CallStatus = 'idle' | 'calling' | 'ringing' | 'in_call' | 'on_hold' | 'failed'
 
 interface SIPConfig {
   server: string
   port: string
   domain: string
+  websocketUrl?: string
   user: string
   password: string
   displayName: string
@@ -45,6 +47,8 @@ export function useSIP(): UseSIPReturn {
 
   const uaRef = useRef<any>(null)
   const sessionRef = useRef<any>(null)
+  const configRef = useRef<SIPConfig | null>(null)
+  const activeCallIdRef = useRef<string | null>(null)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
@@ -79,14 +83,44 @@ export function useSIP(): UseSIPReturn {
     }
   }
 
+  const logCallStart = async (payload: {
+    call_id?: string
+    direction: 'inbound' | 'outbound'
+    status: string
+    from_number: string
+    to_number: string
+    channel_id?: string
+  }) => {
+    try {
+      const response = await api.post('/telephony/calls/log-start', {
+        ...payload,
+        extension: configRef.current?.user || '',
+      })
+      activeCallIdRef.current = response.data.call_id
+    } catch {}
+  }
+
+  const logCallEnd = async (status: string) => {
+    if (!activeCallIdRef.current) return
+    try {
+      await api.post('/telephony/calls/log-end', {
+        call_id: activeCallIdRef.current,
+        status,
+        duration: callDuration,
+      })
+    } catch {}
+    activeCallIdRef.current = null
+  }
+
   const register = useCallback(async (config: SIPConfig) => {
     try {
       // Dynamically import sip.js (only in browser)
       const SIP = await import('sip.js')
 
       setStatus('registering')
+      configRef.current = config
 
-      const wsServer = `${config.transport === 'WSS' ? 'wss' : 'ws'}://${config.server}:${config.port}/ws`
+      const wsServer = config.websocketUrl || `${config.transport === 'WSS' ? 'wss' : 'ws'}://${config.server}:${config.port}/ws`
       const uri = SIP.UserAgent.makeURI(`sip:${config.user}@${config.domain}`)
 
       if (!uri) {
@@ -121,11 +155,26 @@ export function useSIP(): UseSIPReturn {
           const from = invitation.remoteIdentity?.uri?.user || 'Desconhecido'
           setIncomingNumber(from)
           setIsIncoming(true)
+          setCallStatus('ringing')
+          logCallStart({
+            direction: 'inbound',
+            status: 'ringing',
+            from_number: from,
+            to_number: config.user,
+            channel_id: invitation.id,
+          })
 
           invitation.stateChange.addListener((state: any) => {
+            if (state === SIP.SessionState.Established) {
+              setCallStatus('in_call')
+              startTimer()
+              setupRemoteAudio(invitation)
+            }
             if (state === SIP.SessionState.Terminated) {
+              logCallEnd(callDuration > 0 ? 'completed' : 'missed')
               setCallStatus('idle')
               setIsIncoming(false)
+              setRemoteNumber('')
               stopTimer()
             }
           })
@@ -176,6 +225,7 @@ export function useSIP(): UseSIPReturn {
 
     try {
       const SIP = await import('sip.js')
+      await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
       const target = SIP.UserAgent.makeURI(`sip:${number}@${uaRef.current.ua.configuration.uri.host}`)
       if (!target) return
 
@@ -188,6 +238,13 @@ export function useSIP(): UseSIPReturn {
       sessionRef.current = inviter
       setRemoteNumber(number)
       setCallStatus('calling')
+      await logCallStart({
+        direction: 'outbound',
+        status: 'calling',
+        from_number: configRef.current?.user || '',
+        to_number: number,
+        channel_id: inviter.id,
+      })
 
       inviter.stateChange.addListener((state: any) => {
         switch (state) {
@@ -200,6 +257,7 @@ export function useSIP(): UseSIPReturn {
             setupRemoteAudio(inviter)
             break
           case SIP.SessionState.Terminated:
+            logCallEnd(callDuration > 0 ? 'completed' : 'ended')
             setCallStatus('idle')
             setRemoteNumber('')
             stopTimer()
@@ -210,7 +268,9 @@ export function useSIP(): UseSIPReturn {
       await inviter.invite()
     } catch (error) {
       console.error('Call failed:', error)
-      setCallStatus('idle')
+      logCallEnd('failed')
+      setCallStatus('failed')
+      setTimeout(() => setCallStatus('idle'), 1500)
     }
   }, [status])
 
@@ -223,10 +283,7 @@ export function useSIP(): UseSIPReturn {
         },
       })
       setIsIncoming(false)
-      setCallStatus('in_call')
       setRemoteNumber(incomingNumber)
-      startTimer()
-      setupRemoteAudio(sessionRef.current)
     } catch (error) {
       console.error('Answer failed:', error)
     }
@@ -238,10 +295,13 @@ export function useSIP(): UseSIPReturn {
       // Depending on session state, use bye or cancel
       if (sessionRef.current.state === 'Established') {
         sessionRef.current.bye()
+      } else if (sessionRef.current.reject) {
+        sessionRef.current.reject()
       } else {
         sessionRef.current.cancel()
       }
     } catch {}
+    logCallEnd(callDuration > 0 ? 'ended' : 'declined')
     sessionRef.current = null
     setCallStatus('idle')
     setRemoteNumber('')

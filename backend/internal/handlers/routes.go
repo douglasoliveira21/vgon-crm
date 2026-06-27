@@ -204,6 +204,9 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	telephony.Post("/hold", TelephonyHold(svc))
 	telephony.Post("/unhold", TelephonyUnhold(svc))
 	telephony.Get("/status", TelephonyStatus(svc))
+	telephony.Get("/webrtc/config", GetWebRTCConfig(svc))
+	telephony.Post("/calls/log-start", StartWebRTCCallLog(svc))
+	telephony.Post("/calls/log-end", EndWebRTCCallLog(svc))
 
 	// Call history
 	protected.Get("/calls/history", GetCallHistory(svc))

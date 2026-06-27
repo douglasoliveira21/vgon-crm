@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"database/sql"
@@ -32,6 +33,7 @@ type AsteriskConfig struct {
 	User     string
 	Password string
 	AppName  string
+	ARIURL   string
 }
 
 func NewAsteriskService(db *sql.DB, wsHub *websocket.Hub, cfg *config.Config) *AsteriskService {
@@ -45,26 +47,30 @@ func NewAsteriskService(db *sql.DB, wsHub *websocket.Hub, cfg *config.Config) *A
 
 // GetAsteriskConfig retrieves Asterisk config for a company
 func (s *AsteriskService) GetAsteriskConfig(companyID string) (*AsteriskConfig, error) {
-	var host, user, password string
+	var host, user, password, ariURL string
 	var port int
 
 	err := s.db.QueryRow(`
-		SELECT sip_host, sip_port, sip_user, sip_password
+		SELECT sip_host, sip_port, COALESCE(NULLIF(ari_user, ''), sip_user), COALESCE(NULLIF(ari_password, ''), sip_password), COALESCE(ari_url, '')
 		FROM telephony_providers
 		WHERE company_id = $1 AND is_active = true
 		LIMIT 1
-	`, companyID).Scan(&host, &port, &user, &password)
+	`, companyID).Scan(&host, &port, &user, &password, &ariURL)
 
 	if err != nil {
 		return nil, fmt.Errorf("no telephony provider configured: %w", err)
+	}
+	if ariURL == "" {
+		ariURL = fmt.Sprintf("http://%s:8088/ari", host)
 	}
 
 	return &AsteriskConfig{
 		Host:     host,
 		Port:     port,
 		User:     user,
-		Password: password,
+		Password: DecryptSecret(password, s.cfg.JWTSecret),
 		AppName:  "evocrm",
+		ARIURL:   ariURL,
 	}, nil
 }
 
@@ -78,7 +84,7 @@ func (s *AsteriskService) ARIRequest(cfg *AsteriskConfig, method, path string, b
 }
 
 func (s *AsteriskService) ariRequest(cfg *AsteriskConfig, method, path string, body interface{}) ([]byte, error) {
-	url := fmt.Sprintf("http://%s:%d/ari%s", cfg.Host, 8088, path) // ARI default port 8088
+	url := strings.TrimRight(cfg.ARIURL, "/") + path
 
 	var reqBody io.Reader
 	if body != nil {

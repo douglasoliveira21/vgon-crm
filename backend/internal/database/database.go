@@ -26,12 +26,11 @@ func Connect(databaseURL string) (*sql.DB, error) {
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(5)
 
-	log.Println("✅ Database connected successfully")
+	log.Println("Database connected successfully")
 	return db, nil
 }
 
 func RunMigrations(db *sql.DB) error {
-	// Create migrations table if not exists
 	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version VARCHAR(255) PRIMARY KEY,
@@ -42,15 +41,22 @@ func RunMigrations(db *sql.DB) error {
 		return fmt.Errorf("failed to create migrations table: %w", err)
 	}
 
-	// Check if tables already exist (e.g., created via Supabase MCP)
+	// Older deployments may already have the baseline schema. Mark only the
+	// baseline migration so incremental migrations still run normally.
 	var tableCount int
 	db.QueryRow("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'companies'").Scan(&tableCount)
 	if tableCount > 0 {
-		log.Println("✅ Database tables already exist, skipping migrations")
-		return nil
+		_, err := db.Exec(`
+			INSERT INTO schema_migrations (version)
+			VALUES ('001_initial_schema')
+			ON CONFLICT (version) DO NOTHING
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to mark baseline migration: %w", err)
+		}
+		log.Println("Baseline database tables already exist; continuing incremental migrations")
 	}
 
-	// Read migration files
 	migrationsDir := "migrations"
 	entries, err := os.ReadDir(migrationsDir)
 	if err != nil {
@@ -58,7 +64,6 @@ func RunMigrations(db *sql.DB) error {
 		return nil
 	}
 
-	// Sort migration files
 	var files []string
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".up.sql") {
@@ -70,7 +75,6 @@ func RunMigrations(db *sql.DB) error {
 	for _, file := range files {
 		version := strings.TrimSuffix(file, ".up.sql")
 
-		// Check if already applied
 		var count int
 		err := db.QueryRow("SELECT COUNT(*) FROM schema_migrations WHERE version = $1", version).Scan(&count)
 		if err != nil {
@@ -80,7 +84,6 @@ func RunMigrations(db *sql.DB) error {
 			continue
 		}
 
-		// Read and execute migration
 		content, err := os.ReadFile(filepath.Join(migrationsDir, file))
 		if err != nil {
 			return fmt.Errorf("failed to read migration %s: %w", file, err)
@@ -105,7 +108,7 @@ func RunMigrations(db *sql.DB) error {
 			return fmt.Errorf("failed to commit migration %s: %w", file, err)
 		}
 
-		log.Printf("✅ Migration applied: %s", file)
+		log.Printf("Migration applied: %s", file)
 	}
 
 	return nil

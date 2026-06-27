@@ -51,13 +51,22 @@ export default function CallsPage() {
   const [sipConfig, setSipConfig] = useState({
     display_name: '',
     extension_number: '',
-    sip_server: '',
-    sip_domain: '',
-    sip_port: '8089',
+    sip_server: 'voip.vgon.com.br',
+    sip_domain: 'voip.vgon.com.br',
+    sip_port: '5060',
+    webrtc_domain: 'voip.vgon.com.br',
+    webrtc_ws_url: 'wss://voip.vgon.com.br:8089/ws',
     sip_user: '',
     sip_password: '',
     transport: 'WSS',
     stun_server: 'stun:stun.l.google.com:19302',
+    ari_url: 'http://voip.vgon.com.br:8088/ari',
+    ari_user: '',
+    ari_password: '',
+    ami_host: '85.239.248.224',
+    ami_port: '5038',
+    ami_user: '',
+    ami_password: '',
     auto_register: true,
   })
 
@@ -108,12 +117,37 @@ export default function CallsPage() {
           ...prev,
           display_name: p.name || '',
           extension_number: p.caller_id || '',
-          sip_server: p.sip_host || '',
-          sip_domain: p.sip_domain || p.sip_host || '',
-          sip_port: String(p.sip_port || '8089'),
+          sip_server: p.sip_host || 'voip.vgon.com.br',
+          sip_domain: p.sip_domain || p.sip_host || 'voip.vgon.com.br',
+          sip_port: String(p.sip_port || '5060'),
+          webrtc_domain: p.webrtc_domain || p.sip_domain || 'voip.vgon.com.br',
+          webrtc_ws_url: p.webrtc_ws_url || 'wss://voip.vgon.com.br:8089/ws',
           sip_user: p.sip_user || '',
           transport: p.transport || 'WSS',
           stun_server: p.stun_server || 'stun:stun.l.google.com:19302',
+          ari_url: p.ari_url || 'http://voip.vgon.com.br:8088/ari',
+          ari_user: p.ari_user || '',
+          ami_host: p.ami_host || '85.239.248.224',
+          ami_port: String(p.ami_port || '5038'),
+          ami_user: p.ami_user || '',
+        }))
+      }
+      const webrtcRes = await api.get('/telephony/webrtc/config').catch(() => null)
+      if (webrtcRes?.data) {
+        const cfg = webrtcRes.data
+        setSipConfig(prev => ({
+          ...prev,
+          display_name: cfg.display_name || prev.display_name,
+          extension_number: cfg.extension_number || prev.extension_number,
+          sip_user: cfg.username || prev.sip_user,
+          sip_password: cfg.password || prev.sip_password,
+          sip_server: cfg.sip_host || prev.sip_server,
+          sip_domain: cfg.sip_domain || prev.sip_domain,
+          sip_port: String(cfg.sip_port || prev.sip_port),
+          webrtc_domain: cfg.webrtc_domain || prev.webrtc_domain,
+          webrtc_ws_url: cfg.webrtc_ws_url || prev.webrtc_ws_url,
+          transport: cfg.transport || prev.transport,
+          stun_server: cfg.stun_server || prev.stun_server,
         }))
       }
     } catch {}
@@ -172,17 +206,37 @@ export default function CallsPage() {
     try {
       await api.post('/telephony/provider', {
         name: sipConfig.display_name,
-        provider_type: 'sip',
+        provider_type: 'asterisk',
         sip_host: sipConfig.sip_server,
-        sip_port: parseInt(sipConfig.sip_port) || 8089,
+        sip_port: parseInt(sipConfig.sip_port) || 5060,
         sip_user: sipConfig.sip_user,
-        sip_password: sipConfig.sip_password,
         sip_domain: sipConfig.sip_domain,
+        webrtc_domain: sipConfig.webrtc_domain,
+        webrtc_ws_url: sipConfig.webrtc_ws_url,
         transport: sipConfig.transport,
         caller_id: sipConfig.extension_number,
         stun_server: sipConfig.stun_server,
-        recording_enabled: false,
+        ari_url: sipConfig.ari_url,
+        ari_user: sipConfig.ari_user,
+        ari_password: sipConfig.ari_password,
+        ami_host: sipConfig.ami_host,
+        ami_port: parseInt(sipConfig.ami_port) || 5038,
+        ami_user: sipConfig.ami_user,
+        ami_password: sipConfig.ami_password,
+        recording_path: '/var/spool/asterisk/monitor',
+        recording_enabled: true,
       })
+      if (sipConfig.extension_number && sipConfig.sip_password) {
+        await api.post('/telephony/extensions', {
+          display_name: sipConfig.display_name || sipConfig.extension_number,
+          extension_number: sipConfig.extension_number,
+          extension_password: sipConfig.sip_password,
+          can_call_external: true,
+          can_receive_calls: true,
+          can_transfer: true,
+          can_access_recordings: true,
+        }).catch(() => {})
+      }
       toast.success('Configuração salva!')
       setShowConfig(false)
       if (sipConfig.auto_register) doRegister()
@@ -190,7 +244,8 @@ export default function CallsPage() {
   }
 
   const doRegister = () => {
-    if (!sipConfig.sip_server || !sipConfig.sip_user) {
+    const sipUser = sipConfig.sip_user || sipConfig.extension_number
+    if (!sipConfig.webrtc_ws_url || !sipUser) {
       toast.error('Configure o ramal primeiro')
       setShowConfig(true)
       return
@@ -198,10 +253,11 @@ export default function CallsPage() {
     sip.register({
       server: sipConfig.sip_server,
       port: sipConfig.sip_port,
-      domain: sipConfig.sip_domain || sipConfig.sip_server,
-      user: sipConfig.sip_user,
+      domain: sipConfig.webrtc_domain || sipConfig.sip_domain || sipConfig.sip_server,
+      websocketUrl: sipConfig.webrtc_ws_url,
+      user: sipUser,
       password: sipConfig.sip_password,
-      displayName: sipConfig.display_name || sipConfig.sip_user,
+      displayName: sipConfig.display_name || sipUser,
       transport: sipConfig.transport,
       stunServer: sipConfig.stun_server,
     })
@@ -612,7 +668,25 @@ export default function CallsPage() {
                 <div><label className="block text-xs font-medium text-gray-700 mb-1">Usuário SIP</label><input type="text" value={sipConfig.sip_user} onChange={e => setSipConfig({...sipConfig, sip_user: e.target.value})} className="input" placeholder="1001" /></div>
                 <div><label className="block text-xs font-medium text-gray-700 mb-1">Senha</label><input type="password" value={sipConfig.sip_password} onChange={e => setSipConfig({...sipConfig, sip_password: e.target.value})} className="input" /></div>
               </div>
+              <div><label className="block text-xs font-medium text-gray-700 mb-1">DomÃ­nio WebRTC</label><input type="text" value={sipConfig.webrtc_domain} onChange={e => setSipConfig({...sipConfig, webrtc_domain: e.target.value})} className="input" placeholder="voip.vgon.com.br" /></div>
+              <div><label className="block text-xs font-medium text-gray-700 mb-1">WebSocket WSS</label><input type="text" value={sipConfig.webrtc_ws_url} onChange={e => setSipConfig({...sipConfig, webrtc_ws_url: e.target.value})} className="input" placeholder="wss://voip.vgon.com.br:8089/ws" /></div>
               <div><label className="block text-xs font-medium text-gray-700 mb-1">STUN</label><input type="text" value={sipConfig.stun_server} onChange={e => setSipConfig({...sipConfig, stun_server: e.target.value})} className="input" /></div>
+              <div className="border-t border-gray-100 pt-3">
+                <p className="text-xs font-semibold text-gray-500 mb-2">ARI/AMI ficam apenas no backend</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="block text-xs font-medium text-gray-700 mb-1">ARI URL</label><input type="text" value={sipConfig.ari_url} onChange={e => setSipConfig({...sipConfig, ari_url: e.target.value})} className="input" /></div>
+                  <div><label className="block text-xs font-medium text-gray-700 mb-1">ARI UsuÃ¡rio</label><input type="text" value={sipConfig.ari_user} onChange={e => setSipConfig({...sipConfig, ari_user: e.target.value})} className="input" /></div>
+                </div>
+                <div className="mt-3"><label className="block text-xs font-medium text-gray-700 mb-1">ARI Senha</label><input type="password" value={sipConfig.ari_password} onChange={e => setSipConfig({...sipConfig, ari_password: e.target.value})} className="input" /></div>
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <div><label className="block text-xs font-medium text-gray-700 mb-1">AMI Host</label><input type="text" value={sipConfig.ami_host} onChange={e => setSipConfig({...sipConfig, ami_host: e.target.value})} className="input" /></div>
+                  <div><label className="block text-xs font-medium text-gray-700 mb-1">AMI Porta</label><input type="text" value={sipConfig.ami_port} onChange={e => setSipConfig({...sipConfig, ami_port: e.target.value})} className="input" /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  <div><label className="block text-xs font-medium text-gray-700 mb-1">AMI UsuÃ¡rio</label><input type="text" value={sipConfig.ami_user} onChange={e => setSipConfig({...sipConfig, ami_user: e.target.value})} className="input" /></div>
+                  <div><label className="block text-xs font-medium text-gray-700 mb-1">AMI Senha</label><input type="password" value={sipConfig.ami_password} onChange={e => setSipConfig({...sipConfig, ami_password: e.target.value})} className="input" /></div>
+                </div>
+              </div>
               <label className="flex items-center gap-2"><input type="checkbox" checked={sipConfig.auto_register} onChange={e => setSipConfig({...sipConfig, auto_register: e.target.checked})} className="rounded" /><span className="text-sm text-gray-700">Registrar ao salvar</span></label>
               <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">💡 Para WebRTC use WSS (porta 8089 no Asterisk). Para Vono use vono3.me. O STUN ajuda com NAT.</div>
             </div>
