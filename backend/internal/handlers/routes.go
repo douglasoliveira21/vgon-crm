@@ -40,6 +40,9 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	// Widget Public Routes
 	// ============================================
 	api.Get("/widget/:id/config", GetWidgetPublicConfig(svc))
+	api.Post("/widget/:id/message", SendWidgetMessage(svc))
+	api.Get("/widget/:id/messages", GetWidgetMessages(svc))
+	app.Get("/widget/:id/embed.js", GetWidgetEmbedScript(svc))
 	api.Get("/oauth/email/:provider/callback", EmailOAuthCallback(svc))
 
 	// ============================================

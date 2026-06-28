@@ -1203,23 +1203,23 @@ export default function ConversationsPage() {
                     </div>
                   )}
 
-                  {msg.message_type === 'image' && msg.media_url && (
+                  {(msg.message_type === 'image' || msg.message_type === 'gif' || msg.message_type === 'sticker') && msg.media_url && (
                     <div className="mb-2">
                       {msg.media_url.startsWith('/uploads/') ? (
                         <img
                           src={`${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`}
-                          alt="Imagem"
+                          alt={msg.message_type === 'gif' ? 'GIF' : msg.message_type === 'sticker' ? 'Figurinha' : 'Imagem'}
                           className="max-w-full rounded-lg max-h-60 object-cover cursor-pointer"
                           onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`, '_blank')}
                         />
                       ) : msg.media_url === 'sent' ? (
                         <div className="flex items-center gap-2 text-xs opacity-70">
-                          <Camera size={16} /> Imagem enviada
+                          <Camera size={16} /> {msg.message_type === 'gif' ? 'GIF enviado' : msg.message_type === 'sticker' ? 'Figurinha enviada' : 'Imagem enviada'}
                         </div>
                       ) : (
                         <img
                           src={`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`}
-                          alt="Imagem"
+                          alt={msg.message_type === 'gif' ? 'GIF' : msg.message_type === 'sticker' ? 'Figurinha' : 'Imagem'}
                           className="max-w-full rounded-lg max-h-60 object-cover cursor-pointer"
                           onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`, '_blank')}
                           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}

@@ -83,6 +83,8 @@ func getMimeType(messageType string) string {
 		return "audio/ogg"
 	case "image":
 		return "image/jpeg"
+	case "gif", "sticker":
+		return "image/gif"
 	case "video":
 		return "video/mp4"
 	case "document":

@@ -1227,20 +1227,235 @@ func GetWidgetPublicConfig(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		widgetID := c.Params("id")
 
-		var name, color, greeting, position string
+		var companyID, name, color, greeting, position string
 		var channelsDisplayed json.RawMessage
 		err := svc.DB.QueryRow(`
-			SELECT name, primary_color, greeting_message, position, channels_displayed
+			SELECT company_id, name, primary_color, greeting_message, position, channels_displayed
 			FROM widgets WHERE id = $1 AND is_active = true
-		`, widgetID).Scan(&name, &color, &greeting, &position, &channelsDisplayed)
+		`, widgetID).Scan(&companyID, &name, &color, &greeting, &position, &channelsDisplayed)
 		if err != nil {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Widget not found"})
 		}
 
 		return c.JSON(fiber.Map{
-			"name": name, "primary_color": color, "greeting_message": greeting,
+			"id": widgetID, "company_id": companyID, "name": name, "primary_color": color, "greeting_message": greeting,
 			"position": position, "channels_displayed": channelsDisplayed,
 		})
+	}
+}
+
+func SendWidgetMessage(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		widgetID := c.Params("id")
+		var body struct {
+			VisitorID string `json:"visitor_id"`
+			Name      string `json:"name"`
+			Email     string `json:"email"`
+			Phone     string `json:"phone"`
+			Message   string `json:"message"`
+			PageURL   string `json:"page_url"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+		body.Message = strings.TrimSpace(body.Message)
+		if body.Message == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Mensagem é obrigatória"})
+		}
+		if body.VisitorID == "" {
+			body.VisitorID = uuid.New().String()
+		}
+
+		var companyID string
+		err := svc.DB.QueryRow("SELECT company_id FROM widgets WHERE id = $1 AND is_active = true", widgetID).Scan(&companyID)
+		if err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Widget not found"})
+		}
+
+		channelID, err := ensureWebchatChannel(svc.DB, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		contactID, err := getOrCreateWidgetContact(svc.DB, companyID, body.VisitorID, body.Name, body.Email, body.Phone)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		conversationID, err := getOrCreateWidgetConversation(svc.DB, companyID, channelID, contactID, body.PageURL)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		messageID := uuid.New().String()
+		_, err = svc.DB.Exec(`
+			INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, status)
+			VALUES ($1, $2, $3, 'contact', $4, $5, 'text', 'delivered')
+		`, messageID, conversationID, companyID, contactID, body.Message)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		_, _ = svc.DB.Exec(`
+			UPDATE conversations
+			SET last_message_at = NOW(), last_message_preview = $1, unread_count = unread_count + 1, updated_at = NOW()
+			WHERE id = $2
+		`, body.Message, conversationID)
+
+		svc.WSHub.BroadcastToCompany(companyID, "new_message", fiber.Map{
+			"id": messageID, "conversation_id": conversationID, "sender_type": "contact",
+			"sender_id": contactID, "content": body.Message, "message_type": "text",
+			"status": "delivered", "created_at": time.Now(),
+		})
+		return c.JSON(fiber.Map{"conversation_id": conversationID, "visitor_id": body.VisitorID, "message_id": messageID})
+	}
+}
+
+func GetWidgetMessages(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		widgetID := c.Params("id")
+		conversationID := c.Query("conversation_id")
+		if conversationID == "" {
+			return c.JSON(fiber.Map{"messages": []fiber.Map{}})
+		}
+		var companyID string
+		err := svc.DB.QueryRow("SELECT company_id FROM widgets WHERE id = $1 AND is_active = true", widgetID).Scan(&companyID)
+		if err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Widget not found"})
+		}
+		rows, err := svc.DB.Query(`
+			SELECT id, sender_type, COALESCE(content, ''), message_type, created_at
+			FROM messages
+			WHERE conversation_id = $1 AND company_id = $2 AND is_private = false
+			ORDER BY created_at ASC
+			LIMIT 100
+		`, conversationID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		defer rows.Close()
+		messages := []fiber.Map{}
+		for rows.Next() {
+			var id, senderType, content, msgType string
+			var createdAt time.Time
+			if err := rows.Scan(&id, &senderType, &content, &msgType, &createdAt); err == nil {
+				messages = append(messages, fiber.Map{
+					"id": id, "sender_type": senderType, "content": content,
+					"message_type": msgType, "created_at": createdAt,
+				})
+			}
+		}
+		return c.JSON(fiber.Map{"messages": messages})
+	}
+}
+
+func ensureWebchatChannel(db *sql.DB, companyID string) (string, error) {
+	var channelID string
+	err := db.QueryRow("SELECT id FROM channels WHERE company_id = $1 AND type = 'webchat' AND is_active = true ORDER BY created_at LIMIT 1", companyID).Scan(&channelID)
+	if err == nil {
+		return channelID, nil
+	}
+	channelID = uuid.New().String()
+	_, err = db.Exec(`
+		INSERT INTO channels (id, company_id, name, type, status, is_active)
+		VALUES ($1, $2, 'Widget do site', 'webchat', 'connected', true)
+	`, channelID, companyID)
+	return channelID, err
+}
+
+func getOrCreateWidgetContact(db *sql.DB, companyID, visitorID, name, email, phone string) (string, error) {
+	var contactID string
+	phone = strings.TrimSpace(phone)
+	email = strings.TrimSpace(email)
+	name = strings.TrimSpace(name)
+	if phone != "" {
+		if err := db.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2 LIMIT 1", companyID, phone).Scan(&contactID); err == nil {
+			_, _ = db.Exec("UPDATE contacts SET name = COALESCE(NULLIF($1, ''), name), email = COALESCE(NULLIF($2, ''), email), updated_at = NOW() WHERE id = $3", name, email, contactID)
+			return contactID, nil
+		}
+	}
+	contactID = uuid.New().String()
+	if name == "" {
+		name = "Visitante do site"
+	}
+	customFields, _ := json.Marshal(fiber.Map{"visitor_id": visitorID})
+	_, err := db.Exec(`
+		INSERT INTO contacts (id, company_id, name, phone, email, origin, custom_fields)
+		VALUES ($1, $2, $3, NULLIF($4, ''), NULLIF($5, ''), 'widget', $6::jsonb)
+	`, contactID, companyID, name, phone, email, customFields)
+	return contactID, err
+}
+
+func getOrCreateWidgetConversation(db *sql.DB, companyID, channelID, contactID, pageURL string) (string, error) {
+	var conversationID string
+	err := db.QueryRow(`
+		SELECT id FROM conversations
+		WHERE company_id = $1 AND contact_id = $2 AND channel_id = $3 AND status IN ('open', 'in_progress', 'pending')
+		ORDER BY created_at DESC LIMIT 1
+	`, companyID, contactID, channelID).Scan(&conversationID)
+	if err == nil {
+		return conversationID, nil
+	}
+	conversationID = uuid.New().String()
+	metadata, _ := json.Marshal(fiber.Map{"page_url": pageURL})
+	_, err = db.Exec(`
+		INSERT INTO conversations (id, company_id, contact_id, channel_id, status, priority, metadata, last_message_at)
+		VALUES ($1, $2, $3, $4, 'open', 'normal', $5, NOW())
+	`, conversationID, companyID, contactID, channelID, metadata)
+	return conversationID, err
+}
+
+func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		widgetID := c.Params("id")
+		apiBase := c.Protocol() + "://" + c.Hostname()
+		script := fmt.Sprintf(`(function(){
+  if (window.__vgonWidgetLoaded) return; window.__vgonWidgetLoaded = true;
+  var widgetId = %q, apiBase = %q;
+  var visitorId = localStorage.getItem("vgon_widget_visitor_id") || (Date.now()+"-"+Math.random().toString(16).slice(2));
+  var conversationId = localStorage.getItem("vgon_widget_conversation_id") || "";
+  var seen = {};
+  localStorage.setItem("vgon_widget_visitor_id", visitorId);
+  function css(el, styles){ for(var k in styles){ el.style[k]=styles[k]; } }
+  function escapeHtml(s){ return String(s||"").replace(/[<>&]/g,function(x){return {"<":"&lt;",">":"&gt;","&":"&amp;"}[x]}); }
+  function appendMsg(log, text, own, color, id){
+    if(id && seen[id]) return; if(id) seen[id]=true;
+    log.innerHTML += '<div style="text-align:'+(own?'right':'left')+';margin:8px 0"><span style="display:inline-block;max-width:82%%;background:'+(own?color:'#e5e7eb')+';color:'+(own?'white':'#111827')+';padding:8px 10px;border-radius:12px">'+escapeHtml(text)+'</span></div>';
+    log.scrollTop = log.scrollHeight;
+  }
+  fetch(apiBase + "/api/widget/" + widgetId + "/config").then(function(r){ return r.json(); }).then(function(cfg){
+    var color = cfg.primary_color || "#3B82F6";
+    var side = cfg.position === "bottom-left" ? "left" : "right";
+    var bubble = document.createElement("button");
+    bubble.type = "button"; bubble.innerHTML = "💬";
+    css(bubble,{position:"fixed",bottom:"22px",[side]:"22px",width:"58px",height:"58px",borderRadius:"50%%",border:"0",background:color,color:"#fff",fontSize:"24px",boxShadow:"0 12px 30px rgba(0,0,0,.25)",zIndex:"2147483647",cursor:"pointer"});
+    var panel = document.createElement("div");
+    css(panel,{position:"fixed",bottom:"92px",[side]:"22px",width:"340px",maxWidth:"calc(100vw - 32px)",background:"#fff",borderRadius:"14px",boxShadow:"0 18px 50px rgba(0,0,0,.22)",overflow:"hidden",zIndex:"2147483647",fontFamily:"Arial,sans-serif",display:"none"});
+    panel.innerHTML = '<div style="background:'+color+';color:white;padding:16px;font-weight:700">'+(cfg.greeting_message || "Olá! Como podemos ajudar?")+'</div><div id="vgon-log" style="height:240px;overflow:auto;padding:14px;background:#f8fafc;font-size:14px"></div><form id="vgon-form" style="padding:12px;border-top:1px solid #e5e7eb"><input id="vgon-name" placeholder="Seu nome" style="width:100%%;box-sizing:border-box;margin-bottom:8px;padding:10px;border:1px solid #d1d5db;border-radius:8px"><input id="vgon-email" placeholder="Seu e-mail ou telefone" style="width:100%%;box-sizing:border-box;margin-bottom:8px;padding:10px;border:1px solid #d1d5db;border-radius:8px"><div style="display:flex;gap:8px"><input id="vgon-message" placeholder="Digite sua mensagem" required style="flex:1;padding:10px;border:1px solid #d1d5db;border-radius:8px"><button style="background:'+color+';color:white;border:0;border-radius:8px;padding:0 14px;cursor:pointer">Enviar</button></div></form>';
+    document.body.appendChild(panel); document.body.appendChild(bubble);
+    bubble.onclick = function(){ panel.style.display = panel.style.display === "none" ? "block" : "none"; };
+    function poll(){
+      if(!conversationId) return;
+      fetch(apiBase + "/api/widget/" + widgetId + "/messages?conversation_id=" + encodeURIComponent(conversationId)).then(function(r){ return r.json(); }).then(function(data){
+        var log = panel.querySelector("#vgon-log");
+        (data.messages || []).forEach(function(m){ appendMsg(log, m.content, m.sender_type === "contact", color, m.id); });
+      }).catch(function(){});
+    }
+    setInterval(poll, 3500); poll();
+    panel.querySelector("#vgon-form").onsubmit = function(e){
+      e.preventDefault();
+      var msg = panel.querySelector("#vgon-message").value.trim(); if(!msg) return;
+      var log = panel.querySelector("#vgon-log");
+      var contact = panel.querySelector("#vgon-email").value.trim();
+      var tempId = "temp-" + Date.now(); appendMsg(log, msg, true, color, tempId);
+      fetch(apiBase + "/api/widget/" + widgetId + "/message",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({visitor_id:visitorId,name:panel.querySelector("#vgon-name").value,email:contact.indexOf("@")>=0?contact:"",phone:contact.indexOf("@")>=0?"":contact,message:msg,page_url:location.href})}).then(function(r){ return r.json(); }).then(function(data){
+        if(data.conversation_id){ conversationId = data.conversation_id; localStorage.setItem("vgon_widget_conversation_id", conversationId); }
+        if(data.message_id){ seen[data.message_id]=true; }
+        panel.querySelector("#vgon-message").value="";
+        poll();
+      }).catch(function(){ alert("Não foi possível enviar a mensagem."); });
+    };
+  });
+})();`, widgetID, apiBase)
+		c.Type("js")
+		return c.SendString(script)
 	}
 }
 

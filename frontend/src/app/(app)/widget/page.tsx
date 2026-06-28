@@ -10,11 +10,21 @@ export default function WidgetPage() {
   const [loading, setLoading] = useState(true)
   const [showPreview, setShowPreview] = useState(false)
   const [previewColor, setPreviewColor] = useState('#3B82F6')
+  const [position, setPosition] = useState('bottom-right')
+  const [saving, setSaving] = useState(false)
+  const activeWidget = widgets[0]
   const [previewMessage, setPreviewMessage] = useState('Olá! Como podemos ajudar?')
 
   useEffect(() => {
     fetchWidgets()
   }, [])
+
+  useEffect(() => {
+    if (!activeWidget) return
+    setPreviewColor(activeWidget.primary_color || '#3B82F6')
+    setPreviewMessage(activeWidget.greeting_message || 'Olá! Como podemos ajudar?')
+    setPosition(activeWidget.position || 'bottom-right')
+  }, [activeWidget?.id])
 
   const fetchWidgets = async () => {
     try {
@@ -31,6 +41,47 @@ export default function WidgetPage() {
     return `<script src="${process.env.NEXT_PUBLIC_API_URL}/widget/${widgetId}/embed.js"></script>`
   }
 
+  const createWidget = async () => {
+    setSaving(true)
+    try {
+      await api.post('/widgets', {
+        name: 'Chat do site',
+        primary_color: previewColor,
+        greeting_message: previewMessage,
+        position,
+      })
+      toast.success('Widget criado')
+      fetchWidgets()
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao criar widget')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const saveWidget = async () => {
+    if (!activeWidget) {
+      await createWidget()
+      return
+    }
+    setSaving(true)
+    try {
+      await api.put(`/widgets/${activeWidget.id}`, {
+        name: activeWidget.name || 'Chat do site',
+        primary_color: previewColor,
+        greeting_message: previewMessage,
+        position,
+        is_active: true,
+      })
+      toast.success('Widget salvo')
+      fetchWidgets()
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao salvar widget')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-8">
@@ -38,7 +89,7 @@ export default function WidgetPage() {
           <h1 className="text-2xl font-bold text-gray-900">Widget para Site</h1>
           <p className="text-gray-500 mt-1">Configure o chat widget para seu website</p>
         </div>
-        <button className="btn-primary">
+        <button onClick={createWidget} disabled={saving} className="btn-primary">
           <Plus size={18} />
           Novo widget
         </button>
@@ -80,7 +131,7 @@ export default function WidgetPage() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Posição</label>
-              <select className="input">
+              <select value={position} onChange={(e) => setPosition(e.target.value)} className="input">
                 <option value="bottom-right">Inferior direito</option>
                 <option value="bottom-left">Inferior esquerdo</option>
               </select>
@@ -97,8 +148,8 @@ export default function WidgetPage() {
             </div>
           </div>
 
-          <button className="btn-primary mt-6 w-full">
-            Salvar configurações
+          <button onClick={saveWidget} disabled={saving} className="btn-primary mt-6 w-full">
+            {saving ? 'Salvando...' : 'Salvar configurações'}
           </button>
         </div>
 
@@ -147,7 +198,7 @@ export default function WidgetPage() {
               Script de instalação
             </label>
             <pre className="bg-dark-900 text-green-400 p-3 rounded-lg text-xs overflow-x-auto">
-              {`<script src="https://seusite.com/widget/ID/embed.js"></script>`}
+              {activeWidget ? getInstallScript(activeWidget.id) : '<!-- Crie e salve um widget para gerar o script -->'}
             </pre>
             <p className="text-xs text-gray-400 mt-2">
               Cole este código antes do {'</body>'} no HTML do seu site.

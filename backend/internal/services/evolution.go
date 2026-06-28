@@ -1028,6 +1028,10 @@ func extractMessageContent(message map[string]interface{}) (msgType, content, me
 	if img, ok := message["imageMessage"].(map[string]interface{}); ok {
 		caption, _ := img["caption"].(string)
 		url, _ := img["url"].(string)
+		mimetype, _ := img["mimetype"].(string)
+		if strings.Contains(strings.ToLower(mimetype), "gif") {
+			return "gif", caption, url
+		}
 		return "image", caption, url
 	}
 
@@ -1039,6 +1043,9 @@ func extractMessageContent(message map[string]interface{}) (msgType, content, me
 	if video, ok := message["videoMessage"].(map[string]interface{}); ok {
 		caption, _ := video["caption"].(string)
 		url, _ := video["url"].(string)
+		if gifPlayback, _ := video["gifPlayback"].(bool); gifPlayback {
+			return "gif", caption, url
+		}
 		return "video", caption, url
 	}
 
@@ -1050,6 +1057,10 @@ func extractMessageContent(message map[string]interface{}) (msgType, content, me
 
 	if sticker, ok := message["stickerMessage"].(map[string]interface{}); ok {
 		url, _ := sticker["url"].(string)
+		mimetype, _ := sticker["mimetype"].(string)
+		if strings.Contains(strings.ToLower(mimetype), "gif") {
+			return "gif", "", url
+		}
 		return "sticker", "", url
 	}
 
