@@ -33,6 +33,7 @@ interface EmailChannel {
   type: string
   status: string
   settings?: {
+    provider?: string
     imap_host?: string
     imap_port?: number
     username?: string
@@ -43,6 +44,7 @@ interface EmailChannel {
 }
 
 const defaultEmailForm = {
+  provider: 'imap',
   name: '',
   imap_host: '',
   imap_port: 993,
@@ -66,6 +68,43 @@ export default function ChannelsPage() {
   const [qrCode, setQrCode] = useState<string | null>(null)
   const [qrInstanceId, setQrInstanceId] = useState<string | null>(null)
   const [emailForm, setEmailForm] = useState(defaultEmailForm)
+
+  const applyEmailProvider = (provider: 'gmail' | 'outlook' | 'imap') => {
+    const currentName = emailForm.name
+    if (provider === 'gmail') {
+      setEmailForm({
+        ...emailForm,
+        provider,
+        name: currentName || 'Gmail',
+        imap_host: 'imap.gmail.com',
+        imap_port: 993,
+        mailbox: 'INBOX',
+        use_tls: true,
+      })
+      return
+    }
+    if (provider === 'outlook') {
+      setEmailForm({
+        ...emailForm,
+        provider,
+        name: currentName || 'Outlook',
+        imap_host: 'outlook.office365.com',
+        imap_port: 993,
+        mailbox: 'INBOX',
+        use_tls: true,
+      })
+      return
+    }
+    setEmailForm({
+      ...emailForm,
+      provider,
+      name: currentName === 'Gmail' || currentName === 'Outlook' ? '' : currentName,
+      imap_host: '',
+      imap_port: 993,
+      mailbox: 'INBOX',
+      use_tls: true,
+    })
+  }
 
   useEffect(() => {
     fetchInstances()
@@ -382,6 +421,7 @@ export default function ChannelsPage() {
                   <h3 className="font-medium text-gray-900">{channel.name}</h3>
                   <div className="flex items-center gap-2 mt-1">
                     {getStatusBadge(channel.status)}
+                    {channel.settings?.provider && <span className="text-xs text-gray-400 uppercase">{channel.settings.provider}</span>}
                     <span className="text-xs text-gray-400">{channel.settings?.username}</span>
                     <span className="text-xs text-gray-400">{channel.settings?.imap_host}:{channel.settings?.imap_port}</span>
                   </div>
@@ -425,6 +465,32 @@ export default function ChannelsPage() {
 
             <form onSubmit={createEmailChannel} className="space-y-4">
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de conta</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => applyEmailProvider('gmail')}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium ${emailForm.provider === 'gmail' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    Gmail
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyEmailProvider('outlook')}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium ${emailForm.provider === 'outlook' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    Outlook
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyEmailProvider('imap')}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium ${emailForm.provider === 'imap' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    IMAP
+                  </button>
+                </div>
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Nome do canal</label>
                 <input className="input" value={emailForm.name} onChange={e => setEmailForm({ ...emailForm, name: e.target.value })} placeholder="ex: Suporte" required />
               </div>
@@ -461,7 +527,7 @@ export default function ChannelsPage() {
                 Usar TLS/SSL
               </label>
               <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
-                Para Gmail, Outlook e provedores com 2FA, use uma senha de aplicativo.
+                Gmail e Outlook normalmente exigem senha de aplicativo quando a conta tem verificacao em duas etapas.
               </div>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowEmailModal(false)} className="btn-secondary flex-1">Cancelar</button>

@@ -28,6 +28,7 @@ type EmailService struct {
 }
 
 type EmailChannelSettings struct {
+	Provider  string `json:"provider,omitempty"`
 	IMAPHost  string `json:"imap_host"`
 	IMAPPort  int    `json:"imap_port"`
 	Username  string `json:"username"`

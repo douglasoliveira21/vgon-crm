@@ -11,6 +11,7 @@ import (
 
 type emailChannelRequest struct {
 	Name      string `json:"name"`
+	Provider  string `json:"provider"`
 	IMAPHost  string `json:"imap_host"`
 	IMAPPort  int    `json:"imap_port"`
 	Username  string `json:"username"`
@@ -116,6 +117,7 @@ func SyncEmailChannel(svc *services.Container) fiber.Handler {
 
 func emailSettingsFromRequest(body emailChannelRequest, current *services.EmailChannelSettings) services.EmailChannelSettings {
 	settings := services.EmailChannelSettings{
+		Provider:  strings.TrimSpace(body.Provider),
 		IMAPHost:  strings.TrimSpace(body.IMAPHost),
 		IMAPPort:  body.IMAPPort,
 		Username:  strings.TrimSpace(body.Username),
@@ -126,6 +128,9 @@ func emailSettingsFromRequest(body emailChannelRequest, current *services.EmailC
 	}
 	if settings.Mailbox == "" {
 		settings.Mailbox = "INBOX"
+	}
+	if settings.Provider == "" {
+		settings.Provider = "imap"
 	}
 	if settings.IMAPPort == 0 {
 		if settings.UseTLS {
