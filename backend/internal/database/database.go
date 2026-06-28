@@ -99,7 +99,7 @@ func RunMigrations(db *sql.DB) error {
 			return fmt.Errorf("failed to execute migration %s: %w", file, err)
 		}
 
-		if _, err := tx.Exec("INSERT INTO schema_migrations (version) VALUES ($1)", version); err != nil {
+		if _, err := tx.Exec("INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING", version); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("failed to record migration %s: %w", file, err)
 		}

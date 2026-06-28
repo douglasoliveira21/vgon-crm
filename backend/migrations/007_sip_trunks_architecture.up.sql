@@ -38,7 +38,3 @@ ALTER TABLE phone_extensions ADD COLUMN IF NOT EXISTS sip_username VARCHAR(255) 
 UPDATE phone_extensions
 SET sip_username = extension_number
 WHERE COALESCE(sip_username, '') = '';
-
-INSERT INTO schema_migrations (version)
-VALUES ('007_sip_trunks_architecture')
-ON CONFLICT (version) DO NOTHING;

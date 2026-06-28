@@ -16,7 +16,3 @@ WHERE pe.id = de.id
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_phone_extensions_company_number_unique
 ON phone_extensions(company_id, extension_number);
-
-INSERT INTO schema_migrations (version)
-VALUES ('008_phone_extensions_unique_index')
-ON CONFLICT (version) DO NOTHING;

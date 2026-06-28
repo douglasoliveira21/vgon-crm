@@ -5,7 +5,3 @@ DROP TABLE IF EXISTS phone_extensions CASCADE;
 DROP TABLE IF EXISTS sip_trunks CASCADE;
 DROP TABLE IF EXISTS telephony_providers CASCADE;
 DROP TABLE IF EXISTS calls CASCADE;
-
-INSERT INTO schema_migrations (version)
-VALUES ('009_remove_telephony_module')
-ON CONFLICT DO NOTHING;
