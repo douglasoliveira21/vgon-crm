@@ -68,6 +68,41 @@ export default function Home() {
           </p>
         </div>
       </section>
+
+      <section className="mx-auto max-w-6xl px-6 py-12">
+        <div className="grid gap-8 lg:grid-cols-2">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-950">Como o crmvgon usa dados do Google</h2>
+            <p className="mt-4 leading-7 text-gray-600">
+              Quando um usuario conecta uma conta Gmail, o crmvgon solicita acesso somente para as
+              funcoes de atendimento por e-mail dentro do CRM: ler mensagens recebidas, organizar
+              essas mensagens em conversas e enviar respostas quando o proprio usuario decide
+              responder um cliente pelo sistema.
+            </p>
+            <p className="mt-4 leading-7 text-gray-600">
+              O crmvgon nao vende dados do Gmail, nao usa dados do Gmail para publicidade e nao usa
+              dados do Gmail para treinar modelos de inteligencia artificial. O acesso pode ser
+              revogado pelo usuario a qualquer momento na conta Google.
+            </p>
+          </div>
+
+          <div>
+            <h2 className="text-2xl font-bold text-gray-950">Acesso publico e documentos</h2>
+            <p className="mt-4 leading-7 text-gray-600">
+              Esta pagina inicial e publica e pode ser acessada sem login para explicar a finalidade
+              do aplicativo, suas funcionalidades principais e o motivo das permissoes solicitadas.
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Link href="/politica-de-privacidade" className="btn-secondary">
+                Ver Politica de Privacidade
+              </Link>
+              <Link href="/termos-de-servico" className="btn-secondary">
+                Ver Termos de Servico
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
   )
 }
