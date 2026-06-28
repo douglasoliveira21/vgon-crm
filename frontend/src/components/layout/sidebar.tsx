@@ -74,7 +74,7 @@ export default function Sidebar() {
         'border-dark-700 bg-dark-900 dark:border-gray-800 dark:bg-gray-950'
       )}
     >
-      <div className="flex h-[82px] items-center border-b border-dark-700 px-4 dark:border-gray-800">
+      <div className="flex h-[92px] items-center justify-center border-b border-dark-700 px-4 dark:border-gray-800">
         <img
           src="/favicon.png"
           alt="VGON Chat"
@@ -87,7 +87,7 @@ export default function Sidebar() {
           src="/logo-white.png"
           alt="VGON Chat"
           className={clsx(
-            'h-10 w-auto max-w-[180px] object-contain transition-all duration-200',
+            'h-14 w-auto max-w-[210px] object-contain transition-all duration-200',
             sidebarPinned ? 'block' : 'hidden group-hover/sidebar:block'
           )}
         />
