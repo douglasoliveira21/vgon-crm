@@ -250,8 +250,8 @@ function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCr
       })
       toast.success('Campanha criada!')
       onCreated()
-    } catch {
-      toast.error('Erro ao criar')
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao criar')
     } finally {
       setSaving(false)
     }

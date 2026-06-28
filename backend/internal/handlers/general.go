@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/evocrm/backend/internal/services"
 	"github.com/gofiber/fiber/v2"
@@ -621,9 +622,16 @@ func CreateCampaign(svc *services.Container) fiber.Handler {
 			MediaURL       string `json:"media_url"`
 			ScheduledAt    string `json:"scheduled_at"`
 			SendSpeed      int    `json:"send_speed"`
+			TotalContacts  int    `json:"total_contacts"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+		if strings.TrimSpace(body.Name) == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Nome da campanha é obrigatório"})
+		}
+		if strings.TrimSpace(body.MessageContent) == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Mensagem da campanha é obrigatória"})
 		}
 
 		if body.SendSpeed == 0 {
@@ -635,9 +643,9 @@ func CreateCampaign(svc *services.Container) fiber.Handler {
 
 		id := uuid.New().String()
 		_, err := svc.DB.Exec(`
-			INSERT INTO campaigns (id, company_id, channel_id, name, message_content, message_type, media_url, send_speed, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		`, id, companyID, body.ChannelID, body.Name, body.MessageContent, body.MessageType, body.MediaURL, body.SendSpeed, userID)
+			INSERT INTO campaigns (id, company_id, channel_id, name, message_content, message_type, media_url, send_speed, total_contacts, created_by)
+			VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, $6, NULLIF($7, ''), $8, $9, $10)
+		`, id, companyID, body.ChannelID, body.Name, body.MessageContent, body.MessageType, body.MediaURL, body.SendSpeed, body.TotalContacts, userID)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
