@@ -364,10 +364,18 @@ export default function FlowEditorPage() {
         }
         .dark .automation-builder .bg-blue-50,
         .dark .automation-builder .bg-green-50,
+        .dark .automation-builder .bg-teal-50,
+        .dark .automation-builder .bg-yellow-50,
         .dark .automation-builder .bg-purple-50,
         .dark .automation-builder .bg-orange-50,
         .dark .automation-builder .bg-red-50 {
           background-color: rgb(31 41 55) !important;
+        }
+        .dark .automation-builder .border-teal-500 {
+          border-color: rgb(20 184 166) !important;
+        }
+        .dark .automation-builder .border-yellow-500 {
+          border-color: rgb(234 179 8) !important;
         }
         .dark .automation-builder .text-gray-900 {
           color: rgb(249 250 251) !important;
@@ -389,6 +397,14 @@ export default function FlowEditorPage() {
         }
         .dark .automation-builder .text-purple-600 {
           color: rgb(192 132 252) !important;
+        }
+        .dark .automation-builder .text-teal-600,
+        .dark .automation-builder .text-teal-700 {
+          color: rgb(45 212 191) !important;
+        }
+        .dark .automation-builder .text-yellow-600,
+        .dark .automation-builder .text-yellow-700 {
+          color: rgb(250 204 21) !important;
         }
         .dark .automation-builder .text-orange-600,
         .dark .automation-builder .text-orange-700 {
@@ -425,6 +441,19 @@ export default function FlowEditorPage() {
         .dark .automation-builder textarea,
         .dark .automation-builder select {
           color: rgb(243 244 246);
+          background-color: rgb(31 41 55);
+          border-color: rgb(55 65 81);
+        }
+        .dark .automation-builder input::placeholder,
+        .dark .automation-builder textarea::placeholder {
+          color: rgb(107 114 128);
+        }
+        .dark .automation-builder button.border-teal-500 {
+          color: rgb(204 251 241);
+          background-color: rgb(19 78 74) !important;
+        }
+        .dark .automation-builder button.border-teal-500:hover {
+          background-color: rgb(17 94 89) !important;
         }
         .dark .automation-builder .react-flow__controls,
         .dark .automation-builder .react-flow__minimap {
@@ -709,29 +738,29 @@ function NodeConfigPanel({ node, onUpdate }: { node: Node; onUpdate: (config: Re
     return (
       <div className="space-y-3">
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Pergunta</label>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Pergunta</label>
           <textarea
             value={config.question || ''}
             onChange={(e) => onUpdate({ question: e.target.value })}
-            className="input text-sm resize-none"
+            className="input text-sm resize-none dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700 dark:placeholder-gray-500"
             rows={3}
             placeholder="Qual seu nome completo?"
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Salvar resposta em</label>
+          <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Salvar resposta em</label>
           <input
             type="text"
             value={config.save_as || ''}
             onChange={(e) => onUpdate({ save_as: e.target.value })}
-            className="input text-sm"
+            className="input text-sm dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700 dark:placeholder-gray-500"
             placeholder="nome_completo"
           />
-          <p className="text-xs text-gray-400 mt-1">Use depois como {'{{nome_completo}}'}</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Use depois como {'{{nome_completo}}'}</p>
         </div>
         {nodeType === 'ask_options' && (
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Opções</label>
+            <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Opções</label>
             {(config.options || ['']).map((opt: string, i: number) => (
               <input
                 key={i}
@@ -742,13 +771,13 @@ function NodeConfigPanel({ node, onUpdate }: { node: Node; onUpdate: (config: Re
                   newOpts[i] = e.target.value
                   onUpdate({ options: newOpts })
                 }}
-                className="input text-sm mb-1"
+                className="input text-sm mb-1 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700 dark:placeholder-gray-500"
                 placeholder={`Opção ${i + 1}`}
               />
             ))}
             <button
               onClick={() => onUpdate({ options: [...(config.options || ['']), ''] })}
-              className="text-xs text-primary-600"
+              className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
             >
               + Adicionar opção
             </button>
