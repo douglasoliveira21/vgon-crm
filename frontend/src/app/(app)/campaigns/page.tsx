@@ -9,7 +9,9 @@ interface Campaign {
   id: string
   name: string
   status: string
+  message_content?: string
   message_type: string
+  send_speed?: number
   total_contacts: number
   sent_count: number
   delivered_count: number
@@ -24,10 +26,17 @@ export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null)
 
   useEffect(() => {
     fetchCampaigns()
   }, [])
+
+  useEffect(() => {
+    if (!campaigns.some((campaign) => campaign.status === 'sending')) return
+    const interval = setInterval(fetchCampaigns, 5000)
+    return () => clearInterval(interval)
+  }, [campaigns])
 
   const fetchCampaigns = async () => {
     try {
@@ -42,13 +51,26 @@ export default function CampaignsPage() {
 
   const startCampaign = async (id: string) => {
     try {
-      await api.post(`/campaigns/${id}/start`)
+      const response = await api.post(`/campaigns/${id}/start`)
+      const nextStatus = response.data?.status || 'sending'
       setCampaigns((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, status: 'sending' } : c))
+        prev.map((c) => (c.id === id ? { ...c, status: nextStatus } : c))
       )
-      toast.success('Campanha iniciada')
-    } catch {
-      toast.error('Erro ao iniciar campanha')
+      toast.success(nextStatus === 'completed' ? 'Campanha concluída' : 'Campanha iniciada')
+      fetchCampaigns()
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao iniciar campanha')
+    }
+  }
+
+  const deleteCampaign = async (id: string) => {
+    if (!confirm('Excluir esta campanha?')) return
+    try {
+      await api.delete(`/campaigns/${id}`)
+      toast.success('Campanha excluída')
+      fetchCampaigns()
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao excluir campanha')
     }
   }
 
@@ -83,7 +105,7 @@ export default function CampaignsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Marketing em Massa</h1>
           <p className="text-gray-500 mt-1">Envie campanhas para seus contatos via WhatsApp</p>
         </div>
-        <button onClick={() => setShowForm(true)} className="btn-primary">
+        <button onClick={() => { setEditingCampaign(null); setShowForm(true) }} className="btn-primary">
           <Plus size={18} />
           Nova campanha
         </button>
@@ -145,6 +167,16 @@ export default function CampaignsPage() {
                     <Play size={14} /> Retomar
                   </button>
                 )}
+                {(campaign.status === 'draft' || campaign.status === 'paused') && (
+                  <button onClick={() => { setEditingCampaign(campaign); setShowForm(true) }} className="btn-secondary text-sm py-2">
+                    Editar
+                  </button>
+                )}
+                {campaign.status !== 'sending' && (
+                  <button onClick={() => deleteCampaign(campaign.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Excluir">
+                    <Trash2 size={16} />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -182,18 +214,20 @@ export default function CampaignsPage() {
       {/* Create Campaign Modal */}
       {showForm && (
         <CreateCampaignModal
-          onClose={() => setShowForm(false)}
-          onCreated={() => { setShowForm(false); fetchCampaigns() }}
+          campaign={editingCampaign}
+          onClose={() => { setShowForm(false); setEditingCampaign(null) }}
+          onCreated={() => { setShowForm(false); setEditingCampaign(null); fetchCampaigns() }}
         />
       )}
     </div>
   )
 }
 
-function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [name, setName] = useState('')
-  const [messageContent, setMessageContent] = useState('')
-  const [sendSpeed, setSendSpeed] = useState(30)
+function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campaign | null; onClose: () => void; onCreated: () => void }) {
+  const isEditing = Boolean(campaign)
+  const [name, setName] = useState(campaign?.name || '')
+  const [messageContent, setMessageContent] = useState(campaign?.message_content || '')
+  const [sendSpeed, setSendSpeed] = useState(campaign?.send_speed || 30)
   const [targetType, setTargetType] = useState('all') // all, tag, selected
   const [filterTag, setFilterTag] = useState('')
   const [contactSearch, setContactSearch] = useState('')
@@ -240,7 +274,7 @@ function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCr
     if (!messageContent.trim()) { toast.error('Mensagem é obrigatória'); return }
     setSaving(true)
     try {
-      await api.post('/campaigns', {
+      const payload = {
         name,
         message_content: messageContent,
         message_type: 'text',
@@ -248,8 +282,14 @@ function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCr
         filter_tag: targetType === 'tag' ? filterTag : undefined,
         contact_ids: targetType === 'selected' ? selectedContacts.map((contact) => contact.id) : undefined,
         total_contacts: targetType === 'all' ? allContacts.length : selectedContacts.length,
-      })
-      toast.success('Campanha criada!')
+      }
+      if (campaign) {
+        await api.put(`/campaigns/${campaign.id}`, payload)
+        toast.success('Campanha atualizada!')
+      } else {
+        await api.post('/campaigns', payload)
+        toast.success('Campanha criada!')
+      }
       onCreated()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Erro ao criar')
@@ -262,7 +302,7 @@ function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCr
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">Nova campanha</h3>
+          <h3 className="text-lg font-semibold text-gray-900">{isEditing ? 'Editar campanha' : 'Nova campanha'}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
         </div>
 
@@ -293,6 +333,7 @@ function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCr
           </div>
 
           {/* Target audience */}
+          {!isEditing && (
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Enviar para</label>
             <div className="space-y-2">
@@ -319,9 +360,10 @@ function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCr
               </label>
             </div>
           </div>
+          )}
 
           {/* Tag filter */}
-          {targetType === 'tag' && (
+          {!isEditing && targetType === 'tag' && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Selecionar tag</label>
               <select
@@ -338,7 +380,7 @@ function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCr
           )}
 
           {/* Contact selection */}
-          {targetType === 'selected' && (
+          {!isEditing && targetType === 'selected' && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Buscar contatos ({selectedContacts.length} selecionados)
@@ -411,7 +453,7 @@ function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCr
         <div className="flex gap-3 mt-6">
           <button onClick={onClose} className="btn-secondary flex-1">Cancelar</button>
           <button onClick={handleCreate} disabled={saving} className="btn-primary flex-1">
-            {saving ? 'Criando...' : 'Criar campanha'}
+            {saving ? (isEditing ? 'Salvando...' : 'Criando...') : (isEditing ? 'Salvar campanha' : 'Criar campanha')}
           </button>
         </div>
       </div>

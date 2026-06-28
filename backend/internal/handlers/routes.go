@@ -150,6 +150,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	campaigns.Get("/", GetCampaigns(svc))
 	campaigns.Post("/", CreateCampaign(svc))
 	campaigns.Put("/:id", UpdateCampaign(svc))
+	campaigns.Delete("/:id", DeleteCampaign(svc))
 	campaigns.Post("/:id/start", StartCampaign(svc))
 	campaigns.Post("/:id/pause", PauseCampaign(svc))
 

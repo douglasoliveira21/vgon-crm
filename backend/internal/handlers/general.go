@@ -585,7 +585,7 @@ func GetCampaigns(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 
 		rows, err := svc.DB.Query(`
-			SELECT id, name, status, message_type, total_contacts, sent_count, delivered_count,
+			SELECT id, name, status, message_content, message_type, send_speed, total_contacts, sent_count, delivered_count,
 				   read_count, replied_count, failed_count, scheduled_at, created_at
 			FROM campaigns WHERE company_id = $1 ORDER BY created_at DESC
 		`, companyID)
@@ -596,12 +596,12 @@ func GetCampaigns(svc *services.Container) fiber.Handler {
 
 		var campaigns []map[string]interface{}
 		for rows.Next() {
-			var id, name, status, msgType string
-			var total, sent, delivered, read, replied, failed int
+			var id, name, status, msgContent, msgType string
+			var total, sent, delivered, read, replied, failed, sendSpeed int
 			var scheduledAt, createdAt *string
-			rows.Scan(&id, &name, &status, &msgType, &total, &sent, &delivered, &read, &replied, &failed, &scheduledAt, &createdAt)
+			rows.Scan(&id, &name, &status, &msgContent, &msgType, &sendSpeed, &total, &sent, &delivered, &read, &replied, &failed, &scheduledAt, &createdAt)
 			campaigns = append(campaigns, map[string]interface{}{
-				"id": id, "name": name, "status": status, "message_type": msgType,
+				"id": id, "name": name, "status": status, "message_content": msgContent, "message_type": msgType, "send_speed": sendSpeed,
 				"total_contacts": total, "sent_count": sent, "delivered_count": delivered,
 				"read_count": read, "replied_count": replied, "failed_count": failed,
 				"scheduled_at": scheduledAt, "created_at": createdAt,
@@ -685,13 +685,52 @@ func UpdateCampaign(svc *services.Container) fiber.Handler {
 		var body struct {
 			Name           string `json:"name"`
 			MessageContent string `json:"message_content"`
+			SendSpeed      int    `json:"send_speed"`
 		}
-		c.BodyParser(&body)
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+		if strings.TrimSpace(body.Name) == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Nome da campanha é obrigatório"})
+		}
+		if strings.TrimSpace(body.MessageContent) == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Mensagem da campanha é obrigatória"})
+		}
+		if body.SendSpeed <= 0 {
+			body.SendSpeed = 30
+		}
 
-		svc.DB.Exec("UPDATE campaigns SET name = $1, message_content = $2, updated_at = NOW() WHERE id = $3 AND company_id = $4",
-			body.Name, body.MessageContent, campaignID, companyID)
+		res, err := svc.DB.Exec(`
+			UPDATE campaigns
+			SET name = $1, message_content = $2, send_speed = $3, updated_at = NOW()
+			WHERE id = $4 AND company_id = $5 AND status IN ('draft', 'paused')
+		`, body.Name, body.MessageContent, body.SendSpeed, campaignID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		affected, _ := res.RowsAffected()
+		if affected == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Só é possível editar campanhas em rascunho ou pausadas"})
+		}
 
 		return c.JSON(fiber.Map{"message": "Campaign updated"})
+	}
+}
+
+func DeleteCampaign(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		campaignID := c.Params("id")
+
+		res, err := svc.DB.Exec("DELETE FROM campaigns WHERE id = $1 AND company_id = $2", campaignID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		affected, _ := res.RowsAffected()
+		if affected == 0 {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Campanha não encontrada"})
+		}
+		return c.JSON(fiber.Map{"message": "Campaign deleted"})
 	}
 }
 
@@ -702,6 +741,9 @@ func StartCampaign(svc *services.Container) fiber.Handler {
 
 		instanceName, err := prepareCampaignForSending(svc.DB, campaignID, companyID)
 		if err != nil {
+			if strings.Contains(err.Error(), "sem destinatários pendentes") {
+				return c.JSON(fiber.Map{"message": "Campaign completed", "status": "completed"})
+			}
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
 
@@ -798,6 +840,11 @@ func prepareCampaignForSending(db *sql.DB, campaignID, companyID string) (string
 		  AND cc.status IN ('pending', 'failed')
 	`, campaignID, companyID).Scan(&pending)
 	if pending == 0 {
+		_, _ = db.Exec(`
+			UPDATE campaigns
+			SET status = 'completed', completed_at = COALESCE(completed_at, NOW()), updated_at = NOW()
+			WHERE id = $1 AND company_id = $2
+		`, campaignID, companyID)
 		return "", fmt.Errorf("campanha sem destinatários pendentes")
 	}
 	return instanceName.String, nil
@@ -867,10 +914,14 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 		time.Sleep(delay)
 	}
 
+	finalizeCampaignIfDone(svc.DB, campaignID)
+}
+
+func finalizeCampaignIfDone(db *sql.DB, campaignID string) {
 	var remaining int
-	_ = svc.DB.QueryRow("SELECT COUNT(*) FROM campaign_contacts WHERE campaign_id = $1 AND status = 'pending'", campaignID).Scan(&remaining)
+	_ = db.QueryRow("SELECT COUNT(*) FROM campaign_contacts WHERE campaign_id = $1 AND status IN ('pending', 'failed')", campaignID).Scan(&remaining)
 	if remaining == 0 {
-		_, _ = svc.DB.Exec("UPDATE campaigns SET status = 'completed', completed_at = NOW(), updated_at = NOW() WHERE id = $1 AND status = 'sending'", campaignID)
+		_, _ = db.Exec("UPDATE campaigns SET status = 'completed', completed_at = COALESCE(completed_at, NOW()), updated_at = NOW() WHERE id = $1 AND status = 'sending'", campaignID)
 	}
 }
 
