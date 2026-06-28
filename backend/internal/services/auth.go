@@ -47,13 +47,15 @@ func (s *AuthService) Login(req *LoginRequest) (*AuthResponse, error) {
 
 	err := s.db.QueryRow(`
 		SELECT u.id, u.company_id, u.name, u.email, u.password_hash, u.avatar_url, 
-			   u.is_active, u.is_online, COALESCE(u.is_super_admin, false), r.slug, r.name
+			   u.is_active, u.is_online, COALESCE(u.availability_status, 'offline'),
+			   COALESCE(u.is_super_admin, false), r.slug, r.name
 		FROM users u
 		LEFT JOIN roles r ON u.role_id = r.id
 		WHERE u.email = $1 AND u.is_active = true
 	`, strings.ToLower(req.Email)).Scan(
 		&user.ID, &user.CompanyID, &user.Name, &user.Email, &user.PasswordHash,
-		&user.AvatarURL, &user.IsActive, &user.IsOnline, &user.IsSuperAdmin, &roleSlug, &user.RoleName,
+		&user.AvatarURL, &user.IsActive, &user.IsOnline, &user.AvailabilityStatus,
+		&user.IsSuperAdmin, &roleSlug, &user.RoleName,
 	)
 
 	if err != nil {
@@ -89,8 +91,10 @@ func (s *AuthService) Login(req *LoginRequest) (*AuthResponse, error) {
 		return nil, fmt.Errorf("failed to save refresh token: %w", err)
 	}
 
-	// Update last seen
-	s.db.Exec("UPDATE users SET is_online = true, last_seen_at = NOW() WHERE id = $1", user.ID)
+	// Update presence
+	user.IsOnline = true
+	user.AvailabilityStatus = "online"
+	s.db.Exec("UPDATE users SET is_online = true, availability_status = 'online', last_seen_at = NOW() WHERE id = $1", user.ID)
 
 	return &AuthResponse{
 		AccessToken:  accessToken,
@@ -219,13 +223,15 @@ func (s *AuthService) GetUserByID(userID string) (*models.User, error) {
 	var user models.User
 	err := s.db.QueryRow(`
 		SELECT u.id, u.company_id, u.name, u.email, u.avatar_url, u.phone,
-			   u.is_active, u.is_online, COALESCE(u.is_super_admin, false), r.slug, r.name
+			   u.is_active, u.is_online, COALESCE(u.availability_status, 'offline'),
+			   COALESCE(u.is_super_admin, false), r.slug, r.name
 		FROM users u
 		LEFT JOIN roles r ON u.role_id = r.id
 		WHERE u.id = $1
 	`, userID).Scan(
 		&user.ID, &user.CompanyID, &user.Name, &user.Email, &user.AvatarURL,
-		&user.Phone, &user.IsActive, &user.IsOnline, &user.IsSuperAdmin, &user.RoleSlug, &user.RoleName,
+		&user.Phone, &user.IsActive, &user.IsOnline, &user.AvailabilityStatus,
+		&user.IsSuperAdmin, &user.RoleSlug, &user.RoleName,
 	)
 	if err != nil {
 		return nil, err

@@ -10,7 +10,9 @@ interface User {
   role_slug: string
   role_name: string
   avatar_url?: string
+  phone?: string
   is_online: boolean
+  availability_status?: 'online' | 'offline' | 'busy'
   is_super_admin?: boolean
 }
 
@@ -20,6 +22,10 @@ interface AuthState {
   isLoading: boolean
   login: (email: string, password: string) => Promise<void>
   register: (companyName: string, name: string, email: string, password: string) => Promise<void>
+  updateUser: (user: User) => void
+  updateProfile: (data: { name: string; phone?: string }) => Promise<void>
+  updateStatus: (status: 'online' | 'offline' | 'busy') => Promise<void>
+  uploadAvatar: (file: File) => Promise<void>
   logout: () => void
   checkAuth: () => void
 }
@@ -70,7 +76,29 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
+  updateUser: (user: User) => set({ user }),
+
+  updateProfile: async (data) => {
+    const response = await api.put('/me', data)
+    set({ user: response.data })
+  },
+
+  updateStatus: async (status) => {
+    const response = await api.put('/me/status', { status })
+    set({ user: response.data })
+  },
+
+  uploadAvatar: async (file) => {
+    const formData = new FormData()
+    formData.append('avatar', file)
+    const response = await api.post('/me/avatar', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    set({ user: response.data })
+  },
+
   logout: () => {
+    api.put('/me/status', { status: 'offline' }).catch(() => {})
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
     wsService.disconnect()

@@ -26,22 +26,23 @@ type Company struct {
 
 // User represents a system user
 type User struct {
-	ID           string     `json:"id"`
-	CompanyID    string     `json:"company_id"`
-	RoleID       *string    `json:"role_id,omitempty"`
-	Name         string     `json:"name"`
-	Email        string     `json:"email"`
-	PasswordHash string     `json:"-"`
-	AvatarURL    *string    `json:"avatar_url,omitempty"`
-	Phone        *string    `json:"phone,omitempty"`
-	IsActive     bool       `json:"is_active"`
-	IsOnline     bool       `json:"is_online"`
-	IsSuperAdmin bool       `json:"is_super_admin"`
-	LastSeenAt   *time.Time `json:"last_seen_at,omitempty"`
-	RoleName     string     `json:"role_name,omitempty"`
-	RoleSlug     string     `json:"role_slug,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID                 string     `json:"id"`
+	CompanyID          string     `json:"company_id"`
+	RoleID             *string    `json:"role_id,omitempty"`
+	Name               string     `json:"name"`
+	Email              string     `json:"email"`
+	PasswordHash       string     `json:"-"`
+	AvatarURL          *string    `json:"avatar_url,omitempty"`
+	Phone              *string    `json:"phone,omitempty"`
+	IsActive           bool       `json:"is_active"`
+	IsOnline           bool       `json:"is_online"`
+	AvailabilityStatus string     `json:"availability_status"`
+	IsSuperAdmin       bool       `json:"is_super_admin"`
+	LastSeenAt         *time.Time `json:"last_seen_at,omitempty"`
+	RoleName           string     `json:"role_name,omitempty"`
+	RoleSlug           string     `json:"role_slug,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 // Role represents a user role with permissions
@@ -156,24 +157,25 @@ type Conversation struct {
 
 // Message represents a chat message
 type Message struct {
-	ID             string          `json:"id"`
-	ConversationID string          `json:"conversation_id"`
-	CompanyID      string          `json:"company_id"`
-	SenderType     string          `json:"sender_type"` // contact, user, system, bot
-	SenderID       *string         `json:"sender_id,omitempty"`
-	Content        *string         `json:"content,omitempty"`
-	MessageType    string          `json:"message_type"` // text, image, audio, video, document
-	MediaURL       *string         `json:"media_url,omitempty"`
-	MediaMimeType  *string         `json:"media_mime_type,omitempty"`
-	MediaFilename  *string         `json:"media_filename,omitempty"`
-	ExternalID     *string         `json:"external_id,omitempty"`
-	Status         string          `json:"status"`
-	IsPrivate      bool            `json:"is_private"`
-	Metadata       json.RawMessage `json:"metadata,omitempty"`
-	SenderName     *string         `json:"sender_name,omitempty"`
-	ReplyToContent *string         `json:"reply_to_content,omitempty"`
-	ReplyToSender  *string         `json:"reply_to_sender,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
+	ID              string          `json:"id"`
+	ConversationID  string          `json:"conversation_id"`
+	CompanyID       string          `json:"company_id"`
+	SenderType      string          `json:"sender_type"` // contact, user, system, bot
+	SenderID        *string         `json:"sender_id,omitempty"`
+	Content         *string         `json:"content,omitempty"`
+	MessageType     string          `json:"message_type"` // text, image, audio, video, document
+	MediaURL        *string         `json:"media_url,omitempty"`
+	MediaMimeType   *string         `json:"media_mime_type,omitempty"`
+	MediaFilename   *string         `json:"media_filename,omitempty"`
+	ExternalID      *string         `json:"external_id,omitempty"`
+	Status          string          `json:"status"`
+	IsPrivate       bool            `json:"is_private"`
+	Metadata        json.RawMessage `json:"metadata,omitempty"`
+	SenderName      *string         `json:"sender_name,omitempty"`
+	SenderAvatarURL *string         `json:"sender_avatar_url,omitempty"`
+	ReplyToContent  *string         `json:"reply_to_content,omitempty"`
+	ReplyToSender   *string         `json:"reply_to_sender,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
 }
 
 // Funnel represents a sales funnel

@@ -10,7 +10,7 @@ import (
 func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) {
 	// Health check
 	app.Get("/health", func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{"status": "ok", "service": "EvoCRM Pro"})
+		return c.JSON(fiber.Map{"status": "ok", "service": "crmvgon"})
 	})
 
 	// Static files - uploads
@@ -52,6 +52,9 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 
 	// User profile
 	protected.Get("/me", GetCurrentUser(svc))
+	protected.Put("/me", UpdateCurrentUser(svc))
+	protected.Put("/me/status", UpdateCurrentUserStatus(svc))
+	protected.Post("/me/avatar", UploadCurrentUserAvatar(svc))
 
 	// WhatsApp Instances
 	whatsapp := protected.Group("/whatsapp")

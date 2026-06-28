@@ -40,6 +40,7 @@ func (s *MessageService) GetConversationMessages(conversationID, companyID strin
 			   m.content, m.message_type, m.media_url, m.media_mime_type, m.media_filename,
 			   m.external_id, m.status, m.is_private, m.metadata, m.created_at,
 			   COALESCE(u.name, c.name, 'Unknown') as sender_name,
+			   COALESCE(u.avatar_url, c.avatar_url) as sender_avatar_url,
 			   m.reply_to_content, m.reply_to_sender
 		FROM messages m
 		LEFT JOIN users u ON m.sender_type = 'user' AND m.sender_id = u.id
@@ -60,7 +61,7 @@ func (s *MessageService) GetConversationMessages(conversationID, companyID strin
 			&msg.ID, &msg.ConversationID, &msg.CompanyID, &msg.SenderType, &msg.SenderID,
 			&msg.Content, &msg.MessageType, &msg.MediaURL, &msg.MediaMimeType, &msg.MediaFilename,
 			&msg.ExternalID, &msg.Status, &msg.IsPrivate, &msg.Metadata, &msg.CreatedAt,
-			&msg.SenderName, &msg.ReplyToContent, &msg.ReplyToSender,
+			&msg.SenderName, &msg.SenderAvatarURL, &msg.ReplyToContent, &msg.ReplyToSender,
 		)
 		if err != nil {
 			continue

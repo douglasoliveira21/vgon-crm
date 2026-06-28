@@ -1142,7 +1142,8 @@ func GetUsers(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 
 		rows, _ := svc.DB.Query(`
-			SELECT u.id, u.name, u.email, u.avatar_url, u.is_active, u.is_online, r.name as role_name
+			SELECT u.id, u.name, u.email, u.avatar_url, u.is_active, u.is_online,
+			       COALESCE(u.availability_status, 'offline'), r.name as role_name
 			FROM users u
 			LEFT JOIN roles r ON u.role_id = r.id
 			WHERE u.company_id = $1 ORDER BY u.name
@@ -1152,13 +1153,13 @@ func GetUsers(svc *services.Container) fiber.Handler {
 		if rows != nil {
 			defer rows.Close()
 			for rows.Next() {
-				var id, name, email string
+				var id, name, email, availabilityStatus string
 				var avatarURL, roleName *string
 				var isActive, isOnline bool
-				rows.Scan(&id, &name, &email, &avatarURL, &isActive, &isOnline, &roleName)
+				rows.Scan(&id, &name, &email, &avatarURL, &isActive, &isOnline, &availabilityStatus, &roleName)
 				users = append(users, map[string]interface{}{
 					"id": id, "name": name, "email": email, "avatar_url": avatarURL,
-					"is_active": isActive, "is_online": isOnline, "role_name": roleName,
+					"is_active": isActive, "is_online": isOnline, "availability_status": availabilityStatus, "role_name": roleName,
 				})
 			}
 		}

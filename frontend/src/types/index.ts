@@ -1,4 +1,4 @@
-// EvoCRM Pro - TypeScript Types
+// crmvgon - TypeScript Types
 
 export interface User {
   id: string

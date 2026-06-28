@@ -63,6 +63,7 @@ interface Message {
   status: string
   is_private: boolean
   sender_name?: string
+  sender_avatar_url?: string
   reply_to_content?: string
   reply_to_sender?: string
   created_at: string
@@ -73,7 +74,9 @@ interface UserItem {
   name: string
   email: string
   role_name?: string
+  avatar_url?: string
   is_online: boolean
+  availability_status?: 'online' | 'offline' | 'busy'
 }
 
 interface TeamItem {
@@ -706,6 +709,11 @@ export default function ConversationsPage() {
     return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   }
 
+  const resolveAvatar = (url?: string) => {
+    if (!url) return ''
+    return url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${url}` : url
+  }
+
   const formatRecordingTime = (seconds: number) => {
     const m = Math.floor(seconds / 60)
     const s = seconds % 60
@@ -1075,11 +1083,26 @@ export default function ConversationsPage() {
               <div
                 key={msg.id}
                 className={clsx(
-                  'message-enter flex',
+                  'message-enter flex items-end gap-2',
                   msg.sender_type === 'user' ? 'justify-end' : 'justify-start'
                 )}
                 onContextMenu={(e) => handleMessageContextMenu(e, msg)}
               >
+                {msg.sender_type !== 'user' && (
+                  <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gray-200">
+                    {msg.sender_avatar_url || selectedConv?.contact_avatar_url ? (
+                      <img
+                        src={resolveAvatar(msg.sender_avatar_url || selectedConv?.contact_avatar_url)}
+                        alt={msg.sender_name || selectedConv?.contact_name || 'Contato'}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-gray-600">
+                        {(msg.sender_name || selectedConv?.contact_name || 'C').charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div
                   className={clsx(
                     'max-w-[70%] rounded-2xl px-4 py-2.5 shadow-sm',
@@ -1215,6 +1238,21 @@ export default function ConversationsPage() {
                     {msg.sender_type === 'user' && getStatusIcon(msg.status)}
                   </div>
                 </div>
+                {msg.sender_type === 'user' && (
+                  <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-primary-100">
+                    {msg.sender_avatar_url || user?.avatar_url ? (
+                      <img
+                        src={resolveAvatar(msg.sender_avatar_url || user?.avatar_url)}
+                        alt={msg.sender_name || user?.name || 'Usuário'}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-primary-700">
+                        {(msg.sender_name || user?.name || 'U').charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
             <div ref={messagesEndRef} />
