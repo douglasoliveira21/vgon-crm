@@ -246,6 +246,7 @@ function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCr
         message_type: 'text',
         send_speed: sendSpeed,
         filter_tag: targetType === 'tag' ? filterTag : undefined,
+        contact_ids: targetType === 'selected' ? selectedContacts.map((contact) => contact.id) : undefined,
         total_contacts: targetType === 'all' ? allContacts.length : selectedContacts.length,
       })
       toast.success('Campanha criada!')

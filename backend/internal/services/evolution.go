@@ -18,12 +18,12 @@ import (
 )
 
 type EvolutionService struct {
-	cfg        *config.Config
-	db         *sql.DB
-	wsHub      *websocket.Hub
-	client     *http.Client
-	botEngine  *BotEngine
-	glpiFlow   *GLPIFlowEngine
+	cfg       *config.Config
+	db        *sql.DB
+	wsHub     *websocket.Hub
+	client    *http.Client
+	botEngine *BotEngine
+	glpiFlow  *GLPIFlowEngine
 }
 
 func NewEvolutionService(cfg *config.Config, db *sql.DB, wsHub *websocket.Hub) *EvolutionService {
@@ -201,6 +201,9 @@ func (s *EvolutionService) GetQRCode(instanceName string) (string, error) {
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 300 {
+		return "", fmt.Errorf("Evolution API error (status %d): %s", resp.StatusCode, string(respBody))
+	}
 
 	var result map[string]interface{}
 	if err := json.Unmarshal(respBody, &result); err != nil {
