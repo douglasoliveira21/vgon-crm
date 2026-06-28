@@ -350,7 +350,93 @@ export default function FlowEditorPage() {
   }
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="automation-builder h-screen flex flex-col">
+      <style jsx global>{`
+        .dark .automation-builder .bg-white {
+          background-color: rgb(17 24 39) !important;
+        }
+        .dark .automation-builder .bg-gray-50,
+        .dark .automation-builder .bg-gray-100 {
+          background-color: rgb(31 41 55) !important;
+        }
+        .dark .automation-builder .bg-gray-200 {
+          background-color: rgb(55 65 81) !important;
+        }
+        .dark .automation-builder .bg-blue-50,
+        .dark .automation-builder .bg-green-50,
+        .dark .automation-builder .bg-purple-50,
+        .dark .automation-builder .bg-orange-50,
+        .dark .automation-builder .bg-red-50 {
+          background-color: rgb(31 41 55) !important;
+        }
+        .dark .automation-builder .text-gray-900 {
+          color: rgb(249 250 251) !important;
+        }
+        .dark .automation-builder .text-gray-700,
+        .dark .automation-builder .text-gray-600 {
+          color: rgb(209 213 219) !important;
+        }
+        .dark .automation-builder .text-gray-500,
+        .dark .automation-builder .text-gray-400 {
+          color: rgb(156 163 175) !important;
+        }
+        .dark .automation-builder .text-blue-600 {
+          color: rgb(96 165 250) !important;
+        }
+        .dark .automation-builder .text-green-600,
+        .dark .automation-builder .text-green-700 {
+          color: rgb(74 222 128) !important;
+        }
+        .dark .automation-builder .text-purple-600 {
+          color: rgb(192 132 252) !important;
+        }
+        .dark .automation-builder .text-orange-600,
+        .dark .automation-builder .text-orange-700 {
+          color: rgb(251 146 60) !important;
+        }
+        .dark .automation-builder .text-red-400,
+        .dark .automation-builder .text-red-600 {
+          color: rgb(248 113 113) !important;
+        }
+        .dark .automation-builder .border-gray-200,
+        .dark .automation-builder .border-gray-300 {
+          border-color: rgb(55 65 81) !important;
+        }
+        .dark .automation-builder .border-blue-500 {
+          border-color: rgb(59 130 246) !important;
+        }
+        .dark .automation-builder .border-green-500 {
+          border-color: rgb(34 197 94) !important;
+        }
+        .dark .automation-builder .border-purple-500 {
+          border-color: rgb(168 85 247) !important;
+        }
+        .dark .automation-builder .border-orange-500 {
+          border-color: rgb(249 115 22) !important;
+        }
+        .dark .automation-builder .border-gray-500 {
+          border-color: rgb(107 114 128) !important;
+        }
+        .dark .automation-builder .hover\\:bg-gray-50:hover,
+        .dark .automation-builder .hover\\:bg-gray-100:hover {
+          background-color: rgb(55 65 81) !important;
+        }
+        .dark .automation-builder input,
+        .dark .automation-builder textarea,
+        .dark .automation-builder select {
+          color: rgb(243 244 246);
+        }
+        .dark .automation-builder .react-flow__controls,
+        .dark .automation-builder .react-flow__minimap {
+          background: rgb(17 24 39);
+          border-color: rgb(55 65 81);
+        }
+        .dark .automation-builder .react-flow__controls-button {
+          background: rgb(31 41 55);
+          border-color: rgb(55 65 81);
+          color: rgb(229 231 235);
+        }
+      `}</style>
       {/* Top bar */}
       <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between flex-shrink-0 z-10">
         <div className="flex items-center gap-3">

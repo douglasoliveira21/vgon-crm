@@ -169,8 +169,8 @@ export default function AutomationsPage() {
     <div className="p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Bots e Automações</h1>
-          <p className="text-gray-500 mt-1">Crie fluxos automáticos e integre com GLPI</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Bots e Automações</h1>
+          <p className="text-gray-500 dark:text-gray-400 mt-1">Crie fluxos automáticos e integre com GLPI</p>
         </div>
         {activeTab === 'bots' && (
           <button onClick={() => router.push('/automations/new')} className="btn-primary">
@@ -181,11 +181,11 @@ export default function AutomationsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 border-b border-gray-200">
+      <div className="flex gap-1 mb-6 border-b border-gray-200 dark:border-gray-800">
         <button
           onClick={() => setActiveTab('bots')}
           className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === 'bots' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+            activeTab === 'bots' ? 'border-primary-600 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
           }`}
         >
           <span className="flex items-center gap-2"><Bot size={16} /> Bots e Fluxos</span>
@@ -193,7 +193,7 @@ export default function AutomationsPage() {
         <button
           onClick={() => { setActiveTab('glpi'); fetchGLPIEntities() }}
           className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-            activeTab === 'glpi' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+            activeTab === 'glpi' ? 'border-primary-600 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
           }`}
         >
           <span className="flex items-center gap-2"><Ticket size={16} /> GLPI - Chamados</span>
@@ -207,13 +207,13 @@ export default function AutomationsPage() {
             <div key={flow.id} className="card p-5 flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                  flow.is_active ? 'bg-green-100' : 'bg-gray-100'
+                  flow.is_active ? 'bg-green-100 dark:bg-green-500/15' : 'bg-gray-100 dark:bg-gray-800'
                 }`}>
-                  <Bot size={22} className={flow.is_active ? 'text-green-600' : 'text-gray-400'} />
+                  <Bot size={22} className={flow.is_active ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'} />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="font-medium text-gray-900">{flow.name}</h3>
+                    <h3 className="font-medium text-gray-900 dark:text-white">{flow.name}</h3>
                     {flow.is_active ? (
                       <span className="badge badge-green">Ativo</span>
                     ) : (
@@ -221,11 +221,11 @@ export default function AutomationsPage() {
                     )}
                   </div>
                   {flow.description && (
-                    <p className="text-sm text-gray-500 mt-0.5">{flow.description}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{flow.description}</p>
                   )}
                   <div className="flex items-center gap-2 mt-1">
                     <Zap size={12} className="text-yellow-500" />
-                    <span className="text-xs text-gray-400">
+                    <span className="text-xs text-gray-400 dark:text-gray-500">
                       Gatilho: {triggerLabels[flow.trigger_type] || flow.trigger_type}
                       {flow.trigger_value && ` - "${flow.trigger_value}"`}
                     </span>
@@ -238,8 +238,8 @@ export default function AutomationsPage() {
                   onClick={() => toggleFlow(flow)}
                   className={`p-2 rounded-lg transition-colors ${
                     flow.is_active
-                      ? 'text-yellow-600 hover:bg-yellow-50'
-                      : 'text-green-600 hover:bg-green-50'
+                      ? 'text-yellow-600 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-500/10'
+                      : 'text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-500/10'
                   }`}
                   title={flow.is_active ? 'Desativar' : 'Ativar'}
                 >
@@ -247,13 +247,13 @@ export default function AutomationsPage() {
                 </button>
                 <button
                   onClick={() => router.push(`/automations/${flow.id}`)}
-                  className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg"
+                  className="p-2 text-gray-400 dark:text-gray-500 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-lg"
                 >
                   <Edit2 size={18} />
                 </button>
                 <button
                   onClick={() => deleteFlow(flow.id)}
-                  className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                  className="p-2 text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg"
                 >
                   <Trash2 size={18} />
                 </button>
@@ -263,9 +263,9 @@ export default function AutomationsPage() {
 
           {flows.length === 0 && !loading && (
             <div className="card p-12 text-center">
-              <Bot size={40} className="text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-500 mb-2">Nenhuma automação criada</p>
-              <p className="text-sm text-gray-400 mb-6 max-w-sm mx-auto">
+              <Bot size={40} className="text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+              <p className="text-gray-500 dark:text-gray-400 mb-2">Nenhuma automação criada</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500 mb-6 max-w-sm mx-auto">
                 Crie fluxos de bots para automatizar o atendimento, respostas e ações
               </p>
               <button onClick={() => router.push('/automations/new')} className="btn-primary inline-flex">
@@ -285,54 +285,54 @@ export default function AutomationsPage() {
               onClick={() => { setShowCreateTicket(true); setCreatedTicketId(null) }}
               className="card p-5 hover:border-primary-300 hover:shadow-md transition-all text-left"
             >
-              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mb-3">
-                <Plus size={20} className="text-blue-600" />
+              <div className="w-10 h-10 bg-blue-100 dark:bg-blue-500/15 rounded-lg flex items-center justify-center mb-3">
+                <Plus size={20} className="text-blue-600 dark:text-blue-400" />
               </div>
-              <h3 className="font-medium text-gray-900">Abrir Chamado</h3>
-              <p className="text-xs text-gray-500 mt-1">Criar um novo ticket no GLPI</p>
+              <h3 className="font-medium text-gray-900 dark:text-white">Abrir Chamado</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Criar um novo ticket no GLPI</p>
             </button>
 
             <button
               onClick={() => setShowViewTicket(true)}
               className="card p-5 hover:border-primary-300 hover:shadow-md transition-all text-left"
             >
-              <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center mb-3">
-                <Eye size={20} className="text-green-600" />
+              <div className="w-10 h-10 bg-green-100 dark:bg-green-500/15 rounded-lg flex items-center justify-center mb-3">
+                <Eye size={20} className="text-green-600 dark:text-green-400" />
               </div>
-              <h3 className="font-medium text-gray-900">Visualizar Chamado</h3>
-              <p className="text-xs text-gray-500 mt-1">Buscar ticket pelo número</p>
+              <h3 className="font-medium text-gray-900 dark:text-white">Visualizar Chamado</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Buscar ticket pelo número</p>
             </button>
 
             <button
               onClick={() => fetchGLPIEntities()}
               className="card p-5 hover:border-primary-300 hover:shadow-md transition-all text-left"
             >
-              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mb-3">
-                <Building2 size={20} className="text-purple-600" />
+              <div className="w-10 h-10 bg-purple-100 dark:bg-purple-500/15 rounded-lg flex items-center justify-center mb-3">
+                <Building2 size={20} className="text-purple-600 dark:text-purple-400" />
               </div>
-              <h3 className="font-medium text-gray-900">Entidades</h3>
-              <p className="text-xs text-gray-500 mt-1">Visualizar e verificar entidades</p>
+              <h3 className="font-medium text-gray-900 dark:text-white">Entidades</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Visualizar e verificar entidades</p>
             </button>
           </div>
 
           {/* Entities List */}
           {glpiEntities.length > 0 && (
             <div className="card p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                <Building2 size={20} className="text-purple-600" />
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+                <Building2 size={20} className="text-purple-600 dark:text-purple-400" />
                 Entidades GLPI
               </h3>
               <div className="space-y-2 max-h-64 overflow-y-auto">
                 {glpiEntities.map((entity) => (
-                  <div key={entity.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div key={entity.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
                     <div>
-                      <p className="text-sm font-medium text-gray-900">{entity.name}</p>
+                      <p className="text-sm font-medium text-gray-900 dark:text-white">{entity.name}</p>
                       {(entity.completename || entity.complete_name) && (
-                        <p className="text-xs text-gray-500">{entity.completename || entity.complete_name}</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">{entity.completename || entity.complete_name}</p>
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-400 bg-gray-200 px-2 py-0.5 rounded">ID: {entity.id}</span>
+                      <span className="text-xs text-gray-400 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded">ID: {entity.id}</span>
                       <button
                         onClick={() => verifyEntity(entity.id)}
                         className="text-xs text-primary-600 hover:text-primary-700 font-medium"
@@ -348,15 +348,15 @@ export default function AutomationsPage() {
 
           {glpiLoading && (
             <div className="card p-8 text-center">
-              <p className="text-gray-500">Carregando dados do GLPI...</p>
+              <p className="text-gray-500 dark:text-gray-400">Carregando dados do GLPI...</p>
             </div>
           )}
 
           {!glpiLoading && glpiEntities.length === 0 && (
             <div className="card p-8 text-center">
-              <Ticket size={40} className="text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-500 mb-2">GLPI Integration</p>
-              <p className="text-sm text-gray-400 max-w-sm mx-auto">
+              <Ticket size={40} className="text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+              <p className="text-gray-500 dark:text-gray-400 mb-2">GLPI Integration</p>
+              <p className="text-sm text-gray-400 dark:text-gray-500 max-w-sm mx-auto">
                 Configure as variáveis GLPI_BASE_URL, GLPI_APP_TOKEN e GLPI_USER_TOKEN para conectar ao seu GLPI.
               </p>
             </div>
@@ -365,19 +365,19 @@ export default function AutomationsPage() {
           {/* Create Ticket Modal */}
           {showCreateTicket && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-2xl p-6 w-full max-w-lg">
+              <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 w-full max-w-lg">
                 <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold text-gray-900">Abrir Chamado GLPI</h3>
-                  <button onClick={() => setShowCreateTicket(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Abrir Chamado GLPI</h3>
+                  <button onClick={() => setShowCreateTicket(false)} className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-200 text-xl">&times;</button>
                 </div>
 
                 {createdTicketId ? (
                   <div className="text-center py-6">
-                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <Ticket size={28} className="text-green-600" />
+                    <div className="w-16 h-16 bg-green-100 dark:bg-green-500/15 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Ticket size={28} className="text-green-600 dark:text-green-400" />
                     </div>
-                    <h4 className="text-lg font-semibold text-gray-900 mb-1">Chamado criado!</h4>
-                    <p className="text-gray-500">Número do ticket: <span className="font-bold text-primary-600">#{createdTicketId}</span></p>
+                    <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Chamado criado!</h4>
+                    <p className="text-gray-500 dark:text-gray-400">Número do ticket: <span className="font-bold text-primary-600 dark:text-primary-400">#{createdTicketId}</span></p>
                     <button onClick={() => { setShowCreateTicket(false); setCreatedTicketId(null) }} className="btn-primary mt-4">
                       Fechar
                     </button>
@@ -385,7 +385,7 @@ export default function AutomationsPage() {
                 ) : (
                   <div className="space-y-4">
                     <div>
-                      <label className="text-sm font-medium text-gray-700 mb-1 block">Título *</label>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">Título *</label>
                       <input
                         type="text"
                         value={ticketForm.title}
@@ -395,7 +395,7 @@ export default function AutomationsPage() {
                       />
                     </div>
                     <div>
-                      <label className="text-sm font-medium text-gray-700 mb-1 block">Descrição *</label>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">Descrição *</label>
                       <textarea
                         value={ticketForm.content}
                         onChange={(e) => setTicketForm({ ...ticketForm, content: e.target.value })}
@@ -405,7 +405,7 @@ export default function AutomationsPage() {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="text-sm font-medium text-gray-700 mb-1 block">Tipo</label>
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">Tipo</label>
                         <select
                           value={ticketForm.ticket_type}
                           onChange={(e) => setTicketForm({ ...ticketForm, ticket_type: Number(e.target.value) })}
@@ -416,7 +416,7 @@ export default function AutomationsPage() {
                         </select>
                       </div>
                       <div>
-                        <label className="text-sm font-medium text-gray-700 mb-1 block">Prioridade</label>
+                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">Prioridade</label>
                         <select
                           value={ticketForm.priority}
                           onChange={(e) => setTicketForm({ ...ticketForm, priority: Number(e.target.value) })}
@@ -429,7 +429,7 @@ export default function AutomationsPage() {
                       </div>
                     </div>
                     <div>
-                      <label className="text-sm font-medium text-gray-700 mb-1 block">Entidade (Vinculação)</label>
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">Entidade (Vinculação)</label>
                       <select
                         value={ticketForm.entity_id}
                         onChange={(e) => setTicketForm({ ...ticketForm, entity_id: Number(e.target.value) })}
@@ -458,10 +458,10 @@ export default function AutomationsPage() {
           {/* View Ticket Modal */}
           {showViewTicket && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-2xl p-6 w-full max-w-lg">
+              <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 w-full max-w-lg">
                 <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold text-gray-900">Visualizar Chamado</h3>
-                  <button onClick={() => { setShowViewTicket(false); setViewedTicket(null) }} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Visualizar Chamado</h3>
+                  <button onClick={() => { setShowViewTicket(false); setViewedTicket(null) }} className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-200 text-xl">&times;</button>
                 </div>
 
                 {/* Search */}
@@ -481,14 +481,14 @@ export default function AutomationsPage() {
 
                 {/* Ticket Details */}
                 {viewedTicket && (
-                  <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+                  <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4 space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium text-gray-400 uppercase">Ticket</span>
                       <span className="text-sm font-bold text-primary-600">#{viewedTicket.id}</span>
                     </div>
                     <div>
                       <span className="text-xs font-medium text-gray-400 uppercase">Título</span>
-                      <p className="text-sm text-gray-900 font-medium">{viewedTicket.title}</p>
+                      <p className="text-sm text-gray-900 dark:text-white font-medium">{viewedTicket.title}</p>
                     </div>
                     <div>
                       <span className="text-xs font-medium text-gray-400 uppercase">Status</span>
@@ -504,22 +504,22 @@ export default function AutomationsPage() {
                     </div>
                     <div>
                       <span className="text-xs font-medium text-gray-400 uppercase">Descrição</span>
-                      <p className="text-sm text-gray-700 whitespace-pre-wrap">{viewedTicket.content}</p>
+                      <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{viewedTicket.content}</p>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <span className="text-xs font-medium text-gray-400 uppercase">Prioridade</span>
-                        <p className="text-sm text-gray-900">{priorityLabels[viewedTicket.priority] || viewedTicket.priority}</p>
+                        <p className="text-sm text-gray-900 dark:text-white">{priorityLabels[viewedTicket.priority] || viewedTicket.priority}</p>
                       </div>
                       <div>
                         <span className="text-xs font-medium text-gray-400 uppercase">Entidade ID</span>
-                        <p className="text-sm text-gray-900">{viewedTicket.entity_id}</p>
+                        <p className="text-sm text-gray-900 dark:text-white">{viewedTicket.entity_id}</p>
                       </div>
                     </div>
                     {viewedTicket.date && (
                       <div>
                         <span className="text-xs font-medium text-gray-400 uppercase">Data de Abertura</span>
-                        <p className="text-sm text-gray-700">{viewedTicket.date}</p>
+                        <p className="text-sm text-gray-700 dark:text-gray-300">{viewedTicket.date}</p>
                       </div>
                     )}
                   </div>
