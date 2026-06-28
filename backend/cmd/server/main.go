@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	_ "time/tzdata"
 
 	"github.com/evocrm/backend/internal/config"
 	"github.com/evocrm/backend/internal/database"

@@ -2,8 +2,6 @@ FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
 
-RUN apk add --no-cache gcc musl-dev git
-
 # Copy all source code first
 COPY . .
 
@@ -19,7 +17,7 @@ FROM alpine:3.19
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 RUN mkdir -p /app/uploads
 
 COPY --from=builder /app/server .
