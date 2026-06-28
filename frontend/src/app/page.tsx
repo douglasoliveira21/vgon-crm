@@ -7,7 +7,10 @@ export default function Home() {
       <section className="border-b border-gray-100 bg-gradient-to-b from-blue-50 to-white">
         <div className="mx-auto max-w-6xl px-6 py-16">
           <div className="max-w-3xl">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary-600">Aplicativo crmvgon</p>
+            <div className="mb-6 flex items-center gap-3">
+              <img src="/crmvgon-logo.svg" alt="Logo do crmvgon" className="h-12 w-12 rounded-2xl" />
+              <span className="text-sm font-semibold uppercase tracking-wide text-primary-600">Aplicativo crmvgon</span>
+            </div>
             <h1 className="mt-4 text-4xl font-bold tracking-tight text-gray-950 sm:text-5xl">
               crmvgon
             </h1>

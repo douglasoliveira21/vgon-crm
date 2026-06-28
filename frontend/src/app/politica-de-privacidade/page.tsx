@@ -11,7 +11,10 @@ export default function PrivacyPolicyPage() {
       <div className="mx-auto max-w-4xl px-6 py-12">
         <div className="mb-8">
           <Link href="/login" className="text-sm font-medium text-primary-600 hover:text-primary-700">
-            crmvgon
+            <span className="inline-flex items-center gap-2">
+              <img src="/crmvgon-logo.svg" alt="Logo do crmvgon" className="h-7 w-7 rounded-lg" />
+              crmvgon
+            </span>
           </Link>
           <h1 className="mt-4 text-3xl font-bold">Politica de Privacidade</h1>
           <p className="mt-2 text-sm text-gray-500">Ultima atualizacao: 28 de junho de 2026</p>
