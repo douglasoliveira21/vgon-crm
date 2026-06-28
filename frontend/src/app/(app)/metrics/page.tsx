@@ -102,10 +102,10 @@ export default function MetricsPage() {
   if (loading) {
     return (
       <div className="p-6 animate-pulse">
-        <div className="h-8 bg-gray-200 rounded w-48 mb-6"></div>
+        <div className="h-8 bg-gray-200 dark:bg-gray-800 rounded w-48 mb-6"></div>
         <div className="grid grid-cols-4 gap-4">
           {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-28 bg-gray-200 rounded-xl"></div>
+            <div key={i} className="h-28 bg-gray-200 dark:bg-gray-800 rounded-xl"></div>
           ))}
         </div>
       </div>
@@ -116,8 +116,8 @@ export default function MetricsPage() {
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Métricas e Relatórios</h1>
-          <p className="text-gray-500 mt-1">Acompanhe o desempenho da sua equipe</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Métricas e Relatórios</h1>
+          <p className="text-gray-500 dark:text-gray-400 mt-1">Acompanhe o desempenho da sua equipe</p>
         </div>
         <button onClick={exportSLAReport} className="btn-secondary">
           Exportar relatório SLA
@@ -153,60 +153,60 @@ export default function MetricsPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 mb-8">
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-              <CheckCircle size={20} className="text-green-600" />
+            <div className="w-10 h-10 bg-green-100 dark:bg-green-500/15 rounded-lg flex items-center justify-center">
+              <CheckCircle size={20} className="text-green-600 dark:text-green-400" />
             </div>
             <div>
-              <p className="text-sm text-gray-500">Conversas resolvidas</p>
-              <p className="text-xl font-bold text-gray-900">{metrics.resolved_conversations || 0}</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Conversas resolvidas</p>
+              <p className="text-xl font-bold text-gray-900 dark:text-white">{metrics.resolved_conversations || 0}</p>
             </div>
           </div>
         </div>
 
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center">
-              <AlertCircle size={20} className="text-yellow-600" />
+            <div className="w-10 h-10 bg-yellow-100 dark:bg-yellow-500/15 rounded-lg flex items-center justify-center">
+              <AlertCircle size={20} className="text-yellow-600 dark:text-yellow-400" />
             </div>
             <div>
-              <p className="text-sm text-gray-500">Conversas abertas</p>
-              <p className="text-xl font-bold text-gray-900">{metrics.open_conversations || 0}</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Conversas abertas</p>
+              <p className="text-xl font-bold text-gray-900 dark:text-white">{metrics.open_conversations || 0}</p>
             </div>
           </div>
         </div>
 
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-              <Users size={20} className="text-blue-600" />
+            <div className="w-10 h-10 bg-blue-100 dark:bg-blue-500/15 rounded-lg flex items-center justify-center">
+              <Users size={20} className="text-blue-600 dark:text-blue-400" />
             </div>
             <div>
-              <p className="text-sm text-gray-500">Contatos</p>
-              <p className="text-xl font-bold text-gray-900">{metrics.total_contacts || 0}</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Contatos</p>
+              <p className="text-xl font-bold text-gray-900 dark:text-white">{metrics.total_contacts || 0}</p>
             </div>
           </div>
         </div>
 
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
-              <Headphones size={20} className="text-emerald-600" />
+            <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-500/15 rounded-lg flex items-center justify-center">
+              <Headphones size={20} className="text-emerald-600 dark:text-emerald-400" />
             </div>
             <div>
-              <p className="text-sm text-gray-500">Atendidos dentro do SLA</p>
-              <p className="text-xl font-bold text-gray-900">{metrics.sla_within || 0}</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Atendidos dentro do SLA</p>
+              <p className="text-xl font-bold text-gray-900 dark:text-white">{metrics.sla_within || 0}</p>
             </div>
           </div>
         </div>
 
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
-              <Timer size={20} className="text-red-600" />
+            <div className="w-10 h-10 bg-red-100 dark:bg-red-500/15 rounded-lg flex items-center justify-center">
+              <Timer size={20} className="text-red-600 dark:text-red-400" />
             </div>
             <div>
-              <p className="text-sm text-gray-500">SLA estourados</p>
-              <p className="text-xl font-bold text-gray-900">{metrics.sla_breached || 0}</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">SLA estourados</p>
+              <p className="text-xl font-bold text-gray-900 dark:text-white">{metrics.sla_breached || 0}</p>
             </div>
           </div>
         </div>
@@ -215,41 +215,41 @@ export default function MetricsPage() {
       {/* Deals Overview */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         <div className="card p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Vendas</h3>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Vendas</h3>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Valor ganho</span>
-              <span className="font-semibold text-green-600">
+              <span className="text-sm text-gray-600 dark:text-gray-400">Valor ganho</span>
+              <span className="font-semibold text-green-600 dark:text-green-400">
                 R$ {(metrics.deals_won_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Em negociação</span>
-              <span className="font-semibold text-blue-600">
+              <span className="text-sm text-gray-600 dark:text-gray-400">Em negociação</span>
+              <span className="font-semibold text-blue-600 dark:text-blue-400">
                 R$ {(metrics.deals_open_value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Deals ganhos</span>
-              <span className="font-semibold text-gray-900">{metrics.deals_won_count || 0}</span>
+              <span className="text-sm text-gray-600 dark:text-gray-400">Deals ganhos</span>
+              <span className="font-semibold text-gray-900 dark:text-white">{metrics.deals_won_count || 0}</span>
             </div>
           </div>
         </div>
 
         <div className="card p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Performance</h3>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Performance</h3>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Total atendimentos</span>
-              <span className="font-semibold text-gray-900">{metrics.total_conversations || 0}</span>
+              <span className="text-sm text-gray-600 dark:text-gray-400">Total atendimentos</span>
+              <span className="font-semibold text-gray-900 dark:text-white">{metrics.total_conversations || 0}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Conversas resolvidas</span>
-              <span className="font-semibold text-gray-900">{metrics.resolved_conversations || 0}</span>
+              <span className="text-sm text-gray-600 dark:text-gray-400">Conversas resolvidas</span>
+              <span className="font-semibold text-gray-900 dark:text-white">{metrics.resolved_conversations || 0}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-600">Taxa de resolução</span>
-              <span className="font-semibold text-green-600">
+              <span className="text-sm text-gray-600 dark:text-gray-400">Taxa de resolução</span>
+              <span className="font-semibold text-green-600 dark:text-green-400">
                 {metrics.total_conversations > 0
                   ? Math.round((metrics.resolved_conversations / metrics.total_conversations) * 100)
                   : 0}%
@@ -263,13 +263,13 @@ export default function MetricsPage() {
       <div className="card p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Métricas de Atendimento</h3>
-            <p className="text-sm text-gray-500 mt-0.5">Chamados atendidos, resolvidos e tempos</p>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Métricas de Atendimento</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">Chamados atendidos, resolvidos e tempos</p>
           </div>
           <select
             value={selectedUser}
             onChange={(e) => setSelectedUser(e.target.value)}
-            className="text-sm border border-gray-200 rounded-lg px-3 py-2 text-gray-700 bg-gray-50 focus:border-primary-500 outline-none min-w-[200px]"
+            className="text-sm border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 text-gray-700 dark:text-gray-100 bg-gray-50 dark:bg-gray-800 focus:border-primary-500 outline-none min-w-[200px]"
           >
             <option value="">Todos os atendentes</option>
             {users.map((u) => (
@@ -281,49 +281,49 @@ export default function MetricsPage() {
         {loadingAttendance ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-24 bg-gray-100 rounded-xl animate-pulse"></div>
+              <div key={i} className="h-24 bg-gray-100 dark:bg-gray-800 rounded-xl animate-pulse"></div>
             ))}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-blue-50 rounded-xl p-4">
+            <div className="bg-blue-50 dark:bg-blue-500/10 rounded-xl p-4">
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-9 h-9 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <Headphones size={18} className="text-blue-600" />
+                <div className="w-9 h-9 bg-blue-100 dark:bg-blue-500/15 rounded-lg flex items-center justify-center">
+                  <Headphones size={18} className="text-blue-600 dark:text-blue-400" />
                 </div>
               </div>
-              <p className="text-2xl font-bold text-gray-900">{attendance.attended}</p>
-              <p className="text-xs text-gray-500 mt-0.5">Chamados Atendidos</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{attendance.attended}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Chamados Atendidos</p>
             </div>
 
-            <div className="bg-green-50 rounded-xl p-4">
+            <div className="bg-green-50 dark:bg-green-500/10 rounded-xl p-4">
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-9 h-9 bg-green-100 rounded-lg flex items-center justify-center">
-                  <CheckCircle size={18} className="text-green-600" />
+                <div className="w-9 h-9 bg-green-100 dark:bg-green-500/15 rounded-lg flex items-center justify-center">
+                  <CheckCircle size={18} className="text-green-600 dark:text-green-400" />
                 </div>
               </div>
-              <p className="text-2xl font-bold text-gray-900">{attendance.resolved}</p>
-              <p className="text-xs text-gray-500 mt-0.5">Chamados Resolvidos</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{attendance.resolved}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Chamados Resolvidos</p>
             </div>
 
-            <div className="bg-purple-50 rounded-xl p-4">
+            <div className="bg-purple-50 dark:bg-purple-500/10 rounded-xl p-4">
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-9 h-9 bg-purple-100 rounded-lg flex items-center justify-center">
-                  <Clock size={18} className="text-purple-600" />
+                <div className="w-9 h-9 bg-purple-100 dark:bg-purple-500/15 rounded-lg flex items-center justify-center">
+                  <Clock size={18} className="text-purple-600 dark:text-purple-400" />
                 </div>
               </div>
-              <p className="text-2xl font-bold text-gray-900">{formatTime(attendance.total_time_minutes)}</p>
-              <p className="text-xs text-gray-500 mt-0.5">Tempo Total de Atendimento</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{formatTime(attendance.total_time_minutes)}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Tempo Total de Atendimento</p>
             </div>
 
-            <div className="bg-orange-50 rounded-xl p-4">
+            <div className="bg-orange-50 dark:bg-orange-500/10 rounded-xl p-4">
               <div className="flex items-center gap-3 mb-2">
-                <div className="w-9 h-9 bg-orange-100 rounded-lg flex items-center justify-center">
-                  <Timer size={18} className="text-orange-600" />
+                <div className="w-9 h-9 bg-orange-100 dark:bg-orange-500/15 rounded-lg flex items-center justify-center">
+                  <Timer size={18} className="text-orange-600 dark:text-orange-400" />
                 </div>
               </div>
-              <p className="text-2xl font-bold text-gray-900">{formatTime(attendance.avg_time_minutes)}</p>
-              <p className="text-xs text-gray-500 mt-0.5">Média de Tempo de Atendimento</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{formatTime(attendance.avg_time_minutes)}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Média de Tempo de Atendimento</p>
             </div>
           </div>
         )}
@@ -346,10 +346,10 @@ function MetricCard({
   change?: string
 }) {
   const colors: Record<string, string> = {
-    blue: 'bg-blue-50 text-blue-600',
-    green: 'bg-green-50 text-green-600',
-    purple: 'bg-purple-50 text-purple-600',
-    orange: 'bg-orange-50 text-orange-600',
+    blue: 'bg-blue-50 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400',
+    green: 'bg-green-50 text-green-600 dark:bg-green-500/15 dark:text-green-400',
+    purple: 'bg-purple-50 text-purple-600 dark:bg-purple-500/15 dark:text-purple-400',
+    orange: 'bg-orange-50 text-orange-600 dark:bg-orange-500/15 dark:text-orange-400',
   }
 
   return (
@@ -359,13 +359,13 @@ function MetricCard({
           {icon}
         </div>
         {change && (
-          <span className="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+          <span className="text-xs font-medium text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-500/15 px-2 py-0.5 rounded-full">
             {change}
           </span>
         )}
       </div>
-      <p className="text-2xl font-bold text-gray-900">{value}</p>
-      <p className="text-sm text-gray-500 mt-0.5">{label}</p>
+      <p className="text-2xl font-bold text-gray-900 dark:text-white">{value}</p>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{label}</p>
     </div>
   )
 }
