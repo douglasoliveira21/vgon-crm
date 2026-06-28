@@ -11,13 +11,16 @@ import (
 	"log"
 	"mime"
 	"net"
+	"net/http"
 	"net/mail"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/evocrm/backend/internal/config"
 	ws "github.com/evocrm/backend/internal/websocket"
 	"github.com/google/uuid"
 )
@@ -25,18 +28,23 @@ import (
 type EmailService struct {
 	db    *sql.DB
 	wsHub *ws.Hub
+	cfg   *config.Config
 }
 
 type EmailChannelSettings struct {
-	Provider  string `json:"provider,omitempty"`
-	IMAPHost  string `json:"imap_host"`
-	IMAPPort  int    `json:"imap_port"`
-	Username  string `json:"username"`
-	Password  string `json:"password,omitempty"`
-	Mailbox   string `json:"mailbox"`
-	UseTLS    bool   `json:"use_tls"`
-	LastUID   uint32 `json:"last_uid,omitempty"`
-	MaxImport int    `json:"max_import,omitempty"`
+	Provider     string    `json:"provider,omitempty"`
+	IMAPHost     string    `json:"imap_host"`
+	IMAPPort     int       `json:"imap_port"`
+	Username     string    `json:"username"`
+	Password     string    `json:"password,omitempty"`
+	Mailbox      string    `json:"mailbox"`
+	UseTLS       bool      `json:"use_tls"`
+	LastUID      uint32    `json:"last_uid,omitempty"`
+	MaxImport    int       `json:"max_import,omitempty"`
+	AccessToken  string    `json:"access_token,omitempty"`
+	RefreshToken string    `json:"refresh_token,omitempty"`
+	TokenExpiry  time.Time `json:"token_expiry,omitempty"`
+	EmailAddress string    `json:"email_address,omitempty"`
 }
 
 type fetchedEmail struct {
@@ -49,8 +57,8 @@ type fetchedEmail struct {
 	Body      string
 }
 
-func NewEmailService(db *sql.DB, wsHub *ws.Hub) *EmailService {
-	return &EmailService{db: db, wsHub: wsHub}
+func NewEmailService(db *sql.DB, wsHub *ws.Hub, cfg *config.Config) *EmailService {
+	return &EmailService{db: db, wsHub: wsHub, cfg: cfg}
 }
 
 func (s *EmailService) StartPeriodicSync() {
@@ -101,7 +109,14 @@ func (s *EmailService) SyncChannel(companyID, channelID string) (int, error) {
 		return 0, err
 	}
 
-	emails, lastUID, err := fetchInboxEmails(settings)
+	var emails []fetchedEmail
+	var lastUID uint32
+	if settings.Provider == "gmail" || settings.Provider == "outlook" {
+		emails, err = s.fetchOAuthEmails(&settings)
+		lastUID = settings.LastUID
+	} else {
+		emails, lastUID, err = fetchInboxEmails(settings)
+	}
 	if err != nil {
 		s.db.Exec("UPDATE channels SET status = 'error', updated_at = NOW() WHERE id = $1 AND company_id = $2", channelID, companyID)
 		return 0, err
@@ -133,6 +148,217 @@ func (s *EmailService) SyncChannel(companyID, channelID string) (int, error) {
 	`, updatedSettings, channelID, companyID)
 
 	return imported, nil
+}
+
+func (s *EmailService) fetchOAuthEmails(settings *EmailChannelSettings) ([]fetchedEmail, error) {
+	if settings.AccessToken == "" {
+		return nil, fmt.Errorf("conta OAuth sem token de acesso")
+	}
+	if !settings.TokenExpiry.IsZero() && time.Now().After(settings.TokenExpiry.Add(-2*time.Minute)) {
+		if err := s.refreshOAuthToken(settings); err != nil {
+			return nil, err
+		}
+	}
+	if settings.Provider == "gmail" {
+		return fetchGmailAPIEmails(settings)
+	}
+	if settings.Provider == "outlook" {
+		return fetchOutlookAPIEmails(settings)
+	}
+	return nil, fmt.Errorf("provedor OAuth não suportado")
+}
+
+func (s *EmailService) refreshOAuthToken(settings *EmailChannelSettings) error {
+	if settings.RefreshToken == "" {
+		return fmt.Errorf("refresh token ausente")
+	}
+
+	values := url.Values{}
+	values.Set("grant_type", "refresh_token")
+	values.Set("refresh_token", settings.RefreshToken)
+
+	tokenURL := ""
+	if settings.Provider == "gmail" {
+		tokenURL = "https://oauth2.googleapis.com/token"
+		values.Set("client_id", s.cfg.GoogleClientID)
+		values.Set("client_secret", s.cfg.GoogleClientSecret)
+	} else if settings.Provider == "outlook" {
+		tokenURL = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+		values.Set("client_id", s.cfg.MicrosoftClientID)
+		values.Set("client_secret", s.cfg.MicrosoftClientSecret)
+	}
+	if tokenURL == "" {
+		return fmt.Errorf("provedor inválido")
+	}
+
+	resp, err := http.PostForm(tokenURL, values)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("falha ao renovar token: %s", string(body))
+	}
+
+	var token struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		ExpiresIn    int    `json:"expires_in"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
+		return err
+	}
+	if token.AccessToken != "" {
+		settings.AccessToken = token.AccessToken
+	}
+	if token.RefreshToken != "" {
+		settings.RefreshToken = token.RefreshToken
+	}
+	if token.ExpiresIn > 0 {
+		settings.TokenExpiry = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
+	}
+	return nil
+}
+
+func fetchGmailAPIEmails(settings *EmailChannelSettings) ([]fetchedEmail, error) {
+	maxResults := settings.MaxImport
+	if maxResults <= 0 || maxResults > 100 {
+		maxResults = 50
+	}
+	endpoint := fmt.Sprintf("https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=%d&q=in:inbox", maxResults)
+	req, _ := http.NewRequest("GET", endpoint, nil)
+	req.Header.Set("Authorization", "Bearer "+settings.AccessToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("Gmail API retornou erro: %s", string(body))
+	}
+
+	var list struct {
+		Messages []struct {
+			ID string `json:"id"`
+		} `json:"messages"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		return nil, err
+	}
+
+	var result []fetchedEmail
+	for _, item := range list.Messages {
+		msg, err := fetchGmailMessage(settings.AccessToken, item.ID)
+		if err == nil && msg.FromEmail != "" {
+			result = append(result, msg)
+		}
+	}
+	return result, nil
+}
+
+func fetchGmailMessage(accessToken, id string) (fetchedEmail, error) {
+	req, _ := http.NewRequest("GET", "https://gmail.googleapis.com/gmail/v1/users/me/messages/"+url.PathEscape(id)+"?format=full", nil)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fetchedEmail{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fetchedEmail{}, fmt.Errorf("falha ao ler mensagem Gmail")
+	}
+	var raw struct {
+		ID           string `json:"id"`
+		Snippet      string `json:"snippet"`
+		InternalDate string `json:"internalDate"`
+		Payload      struct {
+			Headers []struct {
+				Name  string `json:"name"`
+				Value string `json:"value"`
+			} `json:"headers"`
+		} `json:"payload"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return fetchedEmail{}, err
+	}
+	msg := fetchedEmail{MessageID: "gmail:" + raw.ID, Body: raw.Snippet}
+	for _, h := range raw.Payload.Headers {
+		switch strings.ToLower(h.Name) {
+		case "subject":
+			msg.Subject = decodeHeader(h.Value)
+		case "from":
+			if addr, err := mail.ParseAddress(h.Value); err == nil {
+				msg.FromName = decodeHeader(addr.Name)
+				msg.FromEmail = strings.ToLower(addr.Address)
+			}
+		case "date":
+			if parsed, err := mail.ParseDate(h.Value); err == nil {
+				msg.Date = parsed
+			}
+		case "message-id":
+			if h.Value != "" {
+				msg.MessageID = strings.Trim(h.Value, "<>")
+			}
+		}
+	}
+	if msg.Date.IsZero() && raw.InternalDate != "" {
+		if ms, err := strconv.ParseInt(raw.InternalDate, 10, 64); err == nil {
+			msg.Date = time.UnixMilli(ms)
+		}
+	}
+	return msg, nil
+}
+
+func fetchOutlookAPIEmails(settings *EmailChannelSettings) ([]fetchedEmail, error) {
+	top := settings.MaxImport
+	if top <= 0 || top > 100 {
+		top = 50
+	}
+	endpoint := fmt.Sprintf("https://graph.microsoft.com/v1.0/me/messages?$top=%d&$select=id,subject,from,receivedDateTime,bodyPreview", top)
+	req, _ := http.NewRequest("GET", endpoint, nil)
+	req.Header.Set("Authorization", "Bearer "+settings.AccessToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("Microsoft Graph retornou erro: %s", string(body))
+	}
+
+	var raw struct {
+		Value []struct {
+			ID               string `json:"id"`
+			Subject          string `json:"subject"`
+			ReceivedDateTime string `json:"receivedDateTime"`
+			BodyPreview      string `json:"bodyPreview"`
+			From             struct {
+				EmailAddress struct {
+					Name    string `json:"name"`
+					Address string `json:"address"`
+				} `json:"emailAddress"`
+			} `json:"from"`
+		} `json:"value"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, err
+	}
+	var result []fetchedEmail
+	for _, item := range raw.Value {
+		date, _ := time.Parse(time.RFC3339, item.ReceivedDateTime)
+		result = append(result, fetchedEmail{
+			MessageID: "outlook:" + item.ID,
+			FromName:  item.From.EmailAddress.Name,
+			FromEmail: strings.ToLower(item.From.EmailAddress.Address),
+			Subject:   item.Subject,
+			Date:      date,
+			Body:      item.BodyPreview,
+		})
+	}
+	return result, nil
 }
 
 func (s *EmailService) saveEmail(companyID, channelID string, item fetchedEmail) (bool, error) {
@@ -261,6 +487,15 @@ func parseEmailSettings(raw []byte) (EmailChannelSettings, error) {
 	var settings EmailChannelSettings
 	if err := json.Unmarshal(raw, &settings); err != nil {
 		return settings, fmt.Errorf("invalid email settings: %w", err)
+	}
+	if settings.Provider == "gmail" || settings.Provider == "outlook" {
+		if settings.AccessToken == "" && settings.RefreshToken == "" {
+			return settings, fmt.Errorf("conta OAuth sem tokens")
+		}
+		if settings.MaxImport <= 0 {
+			settings.MaxImport = 100
+		}
+		return settings, nil
 	}
 	if settings.IMAPHost == "" || settings.Username == "" || settings.Password == "" {
 		return settings, fmt.Errorf("IMAP host, user and password are required")

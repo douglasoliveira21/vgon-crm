@@ -68,6 +68,7 @@ export default function ChannelsPage() {
   const [qrCode, setQrCode] = useState<string | null>(null)
   const [qrInstanceId, setQrInstanceId] = useState<string | null>(null)
   const [emailForm, setEmailForm] = useState(defaultEmailForm)
+  const [showImapForm, setShowImapForm] = useState(false)
 
   const applyEmailProvider = (provider: 'gmail' | 'outlook' | 'imap') => {
     const currentName = emailForm.name
@@ -194,6 +195,17 @@ export default function ChannelsPage() {
       toast.error(error.response?.data?.error || 'Erro ao conectar e-mail')
     } finally {
       setSavingEmail(false)
+    }
+  }
+
+  const startEmailOAuth = async (provider: 'gmail' | 'outlook') => {
+    try {
+      const response = await api.get(`/channels/email/oauth/${provider}/start`)
+      if (response.data.auth_url) {
+        window.location.href = response.data.auth_url
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao iniciar autorização')
     }
   }
 
@@ -463,33 +475,47 @@ export default function ChannelsPage() {
               </button>
             </div>
 
-            <form onSubmit={createEmailChannel} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de conta</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => applyEmailProvider('gmail')}
-                    className={`rounded-lg border px-3 py-2 text-sm font-medium ${emailForm.provider === 'gmail' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-                  >
-                    Gmail
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => applyEmailProvider('outlook')}
-                    className={`rounded-lg border px-3 py-2 text-sm font-medium ${emailForm.provider === 'outlook' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-                  >
-                    Outlook
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => applyEmailProvider('imap')}
-                    className={`rounded-lg border px-3 py-2 text-sm font-medium ${emailForm.provider === 'imap' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-                  >
-                    IMAP
-                  </button>
+            <div className="space-y-3 mb-5">
+              <button
+                type="button"
+                onClick={() => startEmailOAuth('gmail')}
+                className="w-full flex items-center justify-between rounded-xl border border-gray-200 p-4 text-left hover:border-blue-500 hover:bg-blue-50 transition-colors"
+              >
+                <div>
+                  <p className="font-medium text-gray-900">Gmail</p>
+                  <p className="text-xs text-gray-500">Abrir tela do Google e permitir leitura de e-mails</p>
                 </div>
-              </div>
+                <span className="text-sm font-medium text-blue-600">Conectar</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => startEmailOAuth('outlook')}
+                className="w-full flex items-center justify-between rounded-xl border border-gray-200 p-4 text-left hover:border-blue-500 hover:bg-blue-50 transition-colors"
+              >
+                <div>
+                  <p className="font-medium text-gray-900">Outlook / Microsoft 365</p>
+                  <p className="text-xs text-gray-500">Abrir tela da Microsoft e permitir leitura de e-mails</p>
+                </div>
+                <span className="text-sm font-medium text-blue-600">Conectar</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  applyEmailProvider('imap')
+                  setShowImapForm((value) => !value)
+                }}
+                className="w-full flex items-center justify-between rounded-xl border border-gray-200 p-4 text-left hover:border-gray-400 hover:bg-gray-50 transition-colors"
+              >
+                <div>
+                  <p className="font-medium text-gray-900">Outro provedor IMAP</p>
+                  <p className="text-xs text-gray-500">Preencher servidor, porta, usuário e senha manualmente</p>
+                </div>
+                <span className="text-sm font-medium text-gray-600">{showImapForm ? 'Ocultar' : 'Configurar'}</span>
+              </button>
+            </div>
+
+            {showImapForm && (
+            <form onSubmit={createEmailChannel} className="space-y-4 border-t border-gray-100 pt-5">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Nome do canal</label>
                 <input className="input" value={emailForm.name} onChange={e => setEmailForm({ ...emailForm, name: e.target.value })} placeholder="ex: Suporte" required />
@@ -537,6 +563,7 @@ export default function ChannelsPage() {
                 </button>
               </div>
             </form>
+            )}
           </div>
         </div>
       )}

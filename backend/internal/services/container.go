@@ -36,7 +36,7 @@ func NewContainer(db *sql.DB, rdb *redis.Client, cfg *config.Config, wsHub *webs
 	container.Auth = NewAuthService(db, cfg)
 	container.Evolution = NewEvolutionService(cfg, db, wsHub)
 	container.Message = NewMessageService(db, rdb, wsHub)
-	container.Email = NewEmailService(db, wsHub)
+	container.Email = NewEmailService(db, wsHub, cfg)
 	container.Contact = NewContactService(db)
 	container.Bot = NewBotEngine(db, wsHub, container.Evolution)
 	container.GLPI = NewGLPIService(cfg.GLPIBaseURL, cfg.GLPIAppToken)

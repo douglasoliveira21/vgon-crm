@@ -40,6 +40,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	// Widget Public Routes
 	// ============================================
 	api.Get("/widget/:id/config", GetWidgetPublicConfig(svc))
+	api.Get("/oauth/email/:provider/callback", EmailOAuthCallback(svc))
 
 	// ============================================
 	// Protected Routes
@@ -103,6 +104,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	// Channels
 	channels := protected.Group("/channels")
 	channels.Get("/", GetChannels(svc))
+	channels.Get("/email/oauth/:provider/start", StartEmailOAuth(svc))
 	channels.Post("/email", CreateEmailChannel(svc))
 	channels.Put("/email/:id", UpdateEmailChannel(svc))
 	channels.Delete("/email/:id", DeleteEmailChannel(svc))
