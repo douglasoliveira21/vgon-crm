@@ -12,7 +12,7 @@ export default function TermsOfServicePage() {
         <div className="mb-8">
           <Link href="/login" className="text-sm font-medium text-primary-600 hover:text-primary-700">
             <span className="inline-flex items-center gap-2">
-              <img src="/crmvgon-logo.svg" alt="Logo do crmvgon" className="h-7 w-7 rounded-lg" />
+              <img src="/logo-black.png" alt="Logo do crmvgon" className="h-9 w-auto object-contain" />
               crmvgon
             </span>
           </Link>

@@ -8,6 +8,11 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'crmvgon - CRM de atendimento',
   description: 'crmvgon centraliza conversas, contatos, Gmail, Outlook e canais de atendimento em um CRM.',
+  icons: {
+    icon: '/favicon.png',
+    shortcut: '/favicon.png',
+    apple: '/favicon.png',
+  },
 }
 
 export default function RootLayout({

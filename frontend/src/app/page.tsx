@@ -7,9 +7,8 @@ export default function Home() {
       <section className="border-b border-gray-100 bg-gradient-to-b from-blue-50 to-white">
         <div className="mx-auto max-w-6xl px-6 py-16">
           <div className="max-w-3xl">
-            <div className="mb-6 flex items-center gap-3">
-              <img src="/crmvgon-logo.svg" alt="Logo do crmvgon" className="h-12 w-12 rounded-2xl" />
-              <span className="text-sm font-semibold uppercase tracking-wide text-primary-600">Aplicativo crmvgon</span>
+            <div className="mb-8 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+              <img src="/logo-black.png" alt="Logo do crmvgon" className="h-16 w-auto max-w-full object-contain" />
             </div>
             <h1 className="mt-4 text-4xl font-bold tracking-tight text-gray-950 sm:text-5xl">
               crmvgon
@@ -104,6 +103,12 @@ export default function Home() {
               </Link>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="bg-gray-950">
+        <div className="mx-auto max-w-6xl px-6 py-10">
+          <img src="/logo-white.png" alt="Logo branco do crmvgon" className="h-14 w-auto max-w-full object-contain" />
         </div>
       </section>
     </main>

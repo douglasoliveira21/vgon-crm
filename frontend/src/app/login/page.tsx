@@ -38,7 +38,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
-          <img src="/crmvgon-logo.svg" alt="Logo do crmvgon" className="mx-auto mb-4 h-16 w-16 rounded-2xl" />
+          <img src="/logo-white.png" alt="Logo branco do crmvgon" className="mx-auto mb-4 h-20 w-auto max-w-full object-contain" />
           <h1 className="text-2xl font-bold text-white">crmvgon</h1>
           <p className="text-gray-400 mt-1">CRM de atendimento com conversas, contatos e e-mail</p>
         </div>
