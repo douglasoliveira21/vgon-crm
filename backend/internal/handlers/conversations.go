@@ -270,8 +270,27 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		// If not private, send via WhatsApp
+		// If not private, send through the conversation channel
 		if !body.IsPrivate {
+			var channelType string
+			_ = svc.DB.QueryRow(`
+				SELECT COALESCE(ch.type, '')
+				FROM conversations c
+				LEFT JOIN channels ch ON c.channel_id = ch.id
+				WHERE c.id = $1 AND c.company_id = $2
+			`, conversationID, companyID).Scan(&channelType)
+
+			if channelType == "email" {
+				externalID, err := svc.Email.SendReply(companyID, conversationID, body.Content)
+				if err != nil {
+					svc.DB.Exec("UPDATE messages SET status = 'failed' WHERE id = $1 AND company_id = $2", msg.ID, companyID)
+					return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+				}
+				if externalID != "" {
+					svc.DB.Exec("UPDATE messages SET external_id = $1, status = 'sent' WHERE id = $2 AND company_id = $3", externalID, msg.ID, companyID)
+				}
+			}
+
 			// Get contact phone and instance
 			var phone, instanceName string
 			err := svc.DB.QueryRow(`
@@ -283,7 +302,7 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 				WHERE c.id = $1
 			`, conversationID).Scan(&phone, &instanceName)
 
-			if err == nil && phone != "" && instanceName != "" {
+			if channelType != "email" && err == nil && phone != "" && instanceName != "" {
 				// Get agent name to prefix message
 				var agentName string
 				svc.DB.QueryRow("SELECT name FROM users WHERE id = $1", userID).Scan(&agentName)

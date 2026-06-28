@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/mail"
+	"net/smtp"
 	"net/url"
 	"regexp"
 	"sort"
@@ -37,6 +39,11 @@ type EmailChannelSettings struct {
 	IMAPPort     int       `json:"imap_port"`
 	Username     string    `json:"username"`
 	Password     string    `json:"password,omitempty"`
+	SMTPHost     string    `json:"smtp_host,omitempty"`
+	SMTPPort     int       `json:"smtp_port,omitempty"`
+	SMTPUsername string    `json:"smtp_username,omitempty"`
+	SMTPPassword string    `json:"smtp_password,omitempty"`
+	SMTPUseTLS   bool      `json:"smtp_use_tls"`
 	Mailbox      string    `json:"mailbox"`
 	UseTLS       bool      `json:"use_tls"`
 	LastUID      uint32    `json:"last_uid,omitempty"`
@@ -45,6 +52,16 @@ type EmailChannelSettings struct {
 	RefreshToken string    `json:"refresh_token,omitempty"`
 	TokenExpiry  time.Time `json:"token_expiry,omitempty"`
 	EmailAddress string    `json:"email_address,omitempty"`
+}
+
+type emailSendTarget struct {
+	ChannelID    string
+	ChannelName  string
+	ContactEmail string
+	ContactName  string
+	Subject      string
+	Settings     EmailChannelSettings
+	RawSettings  []byte
 }
 
 type fetchedEmail struct {
@@ -124,7 +141,7 @@ func (s *EmailService) SyncChannel(companyID, channelID string) (int, error) {
 
 	imported := 0
 	for _, item := range emails {
-		if item.UID <= settings.LastUID {
+		if item.UID > 0 && item.UID <= settings.LastUID {
 			continue
 		}
 		ok, err := s.saveEmail(companyID, channelID, item)
@@ -148,6 +165,214 @@ func (s *EmailService) SyncChannel(companyID, channelID string) (int, error) {
 	`, updatedSettings, channelID, companyID)
 
 	return imported, nil
+}
+
+func (s *EmailService) SendReply(companyID, conversationID, content string) (string, error) {
+	target, err := s.getEmailSendTarget(companyID, conversationID)
+	if err != nil {
+		return "", err
+	}
+	if target.ContactEmail == "" {
+		return "", fmt.Errorf("contato sem e-mail")
+	}
+
+	subject := strings.TrimSpace(target.Subject)
+	if subject == "" {
+		subject = "Resposta"
+	}
+	if !strings.HasPrefix(strings.ToLower(subject), "re:") {
+		subject = "Re: " + subject
+	}
+
+	var externalID string
+	switch target.Settings.Provider {
+	case "gmail":
+		externalID, err = s.sendGmailReply(&target.Settings, target.ContactEmail, subject, content)
+	case "outlook":
+		externalID, err = s.sendOutlookReply(&target.Settings, target.ContactEmail, subject, content)
+	default:
+		externalID, err = sendSMTPReply(target.Settings, target.ContactEmail, subject, content)
+	}
+	if err != nil {
+		return "", err
+	}
+
+	updatedSettings, _ := json.Marshal(target.Settings)
+	_, _ = s.db.Exec("UPDATE channels SET settings = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3", updatedSettings, target.ChannelID, companyID)
+	return externalID, nil
+}
+
+func (s *EmailService) getEmailSendTarget(companyID, conversationID string) (emailSendTarget, error) {
+	var target emailSendTarget
+	err := s.db.QueryRow(`
+		SELECT ch.id, ch.name, ch.settings, COALESCE(co.email, ''), COALESCE(co.name, ''), COALESCE(c.subject, '')
+		FROM conversations c
+		JOIN channels ch ON c.channel_id = ch.id
+		JOIN contacts co ON c.contact_id = co.id
+		WHERE c.id = $1 AND c.company_id = $2 AND ch.type = 'email'
+	`, conversationID, companyID).Scan(&target.ChannelID, &target.ChannelName, &target.RawSettings, &target.ContactEmail, &target.ContactName, &target.Subject)
+	if err != nil {
+		return target, fmt.Errorf("conversa de e-mail não encontrada: %w", err)
+	}
+	settings, err := parseEmailSettings(target.RawSettings)
+	if err != nil {
+		return target, err
+	}
+	target.Settings = settings
+	return target, nil
+}
+
+func (s *EmailService) sendGmailReply(settings *EmailChannelSettings, to, subject, body string) (string, error) {
+	if err := s.ensureOAuthAccess(settings); err != nil {
+		return "", err
+	}
+	from := settings.EmailAddress
+	if from == "" {
+		from = settings.Username
+	}
+	rawMessage := buildRawEmail(from, to, subject, body)
+	payload, _ := json.Marshal(map[string]string{
+		"raw": base64.RawURLEncoding.EncodeToString([]byte(rawMessage)),
+	})
+	req, _ := http.NewRequest("POST", "https://gmail.googleapis.com/gmail/v1/users/me/messages/send", bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+settings.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("Gmail API falhou ao enviar: %s", string(respBody))
+	}
+	var raw struct {
+		ID string `json:"id"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&raw)
+	if raw.ID != "" {
+		return "gmail:" + raw.ID, nil
+	}
+	return "gmail:sent:" + uuid.New().String(), nil
+}
+
+func (s *EmailService) sendOutlookReply(settings *EmailChannelSettings, to, subject, body string) (string, error) {
+	if err := s.ensureOAuthAccess(settings); err != nil {
+		return "", err
+	}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"message": map[string]interface{}{
+			"subject": subject,
+			"body": map[string]string{
+				"contentType": "Text",
+				"content":     body,
+			},
+			"toRecipients": []map[string]interface{}{
+				{"emailAddress": map[string]string{"address": to}},
+			},
+		},
+		"saveToSentItems": true,
+	})
+	req, _ := http.NewRequest("POST", "https://graph.microsoft.com/v1.0/me/sendMail", bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+settings.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("Microsoft Graph falhou ao enviar: %s", string(respBody))
+	}
+	return "outlook:sent:" + uuid.New().String(), nil
+}
+
+func (s *EmailService) ensureOAuthAccess(settings *EmailChannelSettings) error {
+	if settings.AccessToken == "" {
+		return fmt.Errorf("conta OAuth sem token de acesso")
+	}
+	if !settings.TokenExpiry.IsZero() && time.Now().After(settings.TokenExpiry.Add(-2*time.Minute)) {
+		return s.refreshOAuthToken(settings)
+	}
+	return nil
+}
+
+func sendSMTPReply(settings EmailChannelSettings, to, subject, body string) (string, error) {
+	host := strings.TrimSpace(settings.SMTPHost)
+	if host == "" {
+		return "", fmt.Errorf("SMTP não configurado para este canal")
+	}
+	port := settings.SMTPPort
+	if port == 0 {
+		if settings.SMTPUseTLS {
+			port = 465
+		} else {
+			port = 587
+		}
+	}
+	username := settings.SMTPUsername
+	if username == "" {
+		username = settings.Username
+	}
+	password := settings.SMTPPassword
+	if password == "" {
+		password = settings.Password
+	}
+	from := settings.EmailAddress
+	if from == "" {
+		from = username
+	}
+	if username == "" || password == "" || from == "" {
+		return "", fmt.Errorf("usuário, senha ou remetente SMTP ausente")
+	}
+
+	address := fmt.Sprintf("%s:%d", host, port)
+	message := []byte(buildRawEmail(from, to, subject, body))
+	auth := smtp.PlainAuth("", username, password, host)
+
+	if settings.SMTPUseTLS && port == 465 {
+		conn, err := tls.Dial("tcp", address, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+		if err != nil {
+			return "", err
+		}
+		defer conn.Close()
+		client, err := smtp.NewClient(conn, host)
+		if err != nil {
+			return "", err
+		}
+		defer client.Quit()
+		if err := client.Auth(auth); err != nil {
+			return "", err
+		}
+		if err := client.Mail(from); err != nil {
+			return "", err
+		}
+		if err := client.Rcpt(to); err != nil {
+			return "", err
+		}
+		writer, err := client.Data()
+		if err != nil {
+			return "", err
+		}
+		if _, err := writer.Write(message); err != nil {
+			return "", err
+		}
+		if err := writer.Close(); err != nil {
+			return "", err
+		}
+		return "smtp:sent:" + uuid.New().String(), nil
+	}
+
+	if err := smtp.SendMail(address, auth, from, []string{to}, message); err != nil {
+		return "", err
+	}
+	return "smtp:sent:" + uuid.New().String(), nil
+}
+
+func buildRawEmail(from, to, subject, body string) string {
+	encodedSubject := mime.QEncoding.Encode("utf-8", subject)
+	return fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n%s", from, to, encodedSubject, body)
 }
 
 func (s *EmailService) fetchOAuthEmails(settings *EmailChannelSettings) ([]fetchedEmail, error) {

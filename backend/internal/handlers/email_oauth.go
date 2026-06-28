@@ -127,7 +127,7 @@ func buildEmailOAuthURL(svc *services.Container, provider, redirectURI, state st
 		values.Set("client_id", svc.Config.GoogleClientID)
 		values.Set("access_type", "offline")
 		values.Set("prompt", "consent")
-		values.Set("scope", "openid email https://www.googleapis.com/auth/gmail.readonly")
+		values.Set("scope", "openid email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send")
 		return "https://accounts.google.com/o/oauth2/v2/auth?" + values.Encode(), nil
 	}
 	if provider == "outlook" {
@@ -136,7 +136,7 @@ func buildEmailOAuthURL(svc *services.Container, provider, redirectURI, state st
 		}
 		values.Set("client_id", svc.Config.MicrosoftClientID)
 		values.Set("response_mode", "query")
-		values.Set("scope", "offline_access User.Read Mail.Read")
+		values.Set("scope", "offline_access User.Read Mail.Read Mail.Send")
 		return "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?" + values.Encode(), nil
 	}
 	return "", fmt.Errorf("provedor não suportado")

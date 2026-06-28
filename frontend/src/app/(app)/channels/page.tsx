@@ -48,6 +48,11 @@ const defaultEmailForm = {
   name: '',
   imap_host: '',
   imap_port: 993,
+  smtp_host: '',
+  smtp_port: 587,
+  smtp_username: '',
+  smtp_password: '',
+  smtp_use_tls: false,
   username: '',
   password: '',
   mailbox: 'INBOX',
@@ -102,6 +107,11 @@ export default function ChannelsPage() {
       name: currentName === 'Gmail' || currentName === 'Outlook' ? '' : currentName,
       imap_host: '',
       imap_port: 993,
+      smtp_host: '',
+      smtp_port: 587,
+      smtp_username: '',
+      smtp_password: '',
+      smtp_use_tls: false,
       mailbox: 'INBOX',
       use_tls: true,
     })
@@ -538,6 +548,26 @@ export default function ChannelsPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Senha ou senha de aplicativo</label>
                 <input type="password" className="input" value={emailForm.password} onChange={e => setEmailForm({ ...emailForm, password: e.target.value })} required />
               </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Servidor SMTP</label>
+                  <input className="input" value={emailForm.smtp_host} onChange={e => setEmailForm({ ...emailForm, smtp_host: e.target.value })} placeholder="smtp.seudominio.com" required />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Porta SMTP</label>
+                  <input type="number" className="input" value={emailForm.smtp_port} onChange={e => setEmailForm({ ...emailForm, smtp_port: Number(e.target.value) })} required />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Usuário SMTP</label>
+                  <input className="input" value={emailForm.smtp_username} onChange={e => setEmailForm({ ...emailForm, smtp_username: e.target.value })} placeholder="vazio usa o mesmo e-mail" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Senha SMTP</label>
+                  <input type="password" className="input" value={emailForm.smtp_password} onChange={e => setEmailForm({ ...emailForm, smtp_password: e.target.value })} placeholder="vazio usa a mesma senha" />
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Pasta</label>
@@ -551,6 +581,10 @@ export default function ChannelsPage() {
               <label className="flex items-center gap-2 text-sm text-gray-700">
                 <input type="checkbox" checked={emailForm.use_tls} onChange={e => setEmailForm({ ...emailForm, use_tls: e.target.checked, imap_port: e.target.checked ? 993 : 143 })} />
                 Usar TLS/SSL
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" checked={emailForm.smtp_use_tls} onChange={e => setEmailForm({ ...emailForm, smtp_use_tls: e.target.checked, smtp_port: e.target.checked ? 465 : 587 })} />
+                SMTP com SSL direto
               </label>
               <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
                 Gmail e Outlook normalmente exigem senha de aplicativo quando a conta tem verificacao em duas etapas.
