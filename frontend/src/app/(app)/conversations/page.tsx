@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import wsService from '@/lib/websocket'
 import { useAuthStore } from '@/store/auth'
@@ -83,6 +84,7 @@ interface TeamItem {
 
 export default function ConversationsPage() {
   const { user } = useAuthStore()
+  const searchParams = useSearchParams()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
@@ -138,7 +140,7 @@ export default function ConversationsPage() {
     fetchUsers()
     fetchTeams()
     fetchQuickReplies()
-  }, [filter, statusFilter])
+  }, [filter, statusFilter, searchParams])
 
   useEffect(() => {
     const handleNewMessage = (data: Message) => {
@@ -295,6 +297,8 @@ export default function ConversationsPage() {
   const fetchConversations = async () => {
     try {
       const params: any = {}
+      const channelParam = searchParams.get('channel')
+      if (channelParam) params.channel = channelParam
 
       // Tab filter
       if (filter === 'mine') params.assigned_to = user?.id
@@ -333,9 +337,9 @@ export default function ConversationsPage() {
   const fetchTabUnreadCounts = async () => {
     try {
       const [mineRes, unassignedRes, allRes] = await Promise.all([
-        api.get('/conversations', { params: { assigned_to: user?.id, status: 'open,in_progress,pending' } }),
-        api.get('/conversations', { params: { unassigned: 'true', status: 'open,in_progress,pending' } }),
-        api.get('/conversations', { params: { status: 'open,in_progress,pending' } }),
+        api.get('/conversations', { params: { assigned_to: user?.id, status: 'open,in_progress,pending', channel: searchParams.get('channel') || undefined } }),
+        api.get('/conversations', { params: { unassigned: 'true', status: 'open,in_progress,pending', channel: searchParams.get('channel') || undefined } }),
+        api.get('/conversations', { params: { status: 'open,in_progress,pending', channel: searchParams.get('channel') || undefined } }),
       ])
       const mineConvs: Conversation[] = mineRes.data.conversations || []
       const unassignedConvs: Conversation[] = unassignedRes.data.conversations || []

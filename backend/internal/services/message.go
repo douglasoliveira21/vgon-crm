@@ -115,7 +115,7 @@ func (s *MessageService) SaveAndSendMessage(companyID, userID string, req *SendT
 }
 
 // GetConversations returns conversations for a company
-func (s *MessageService) GetConversations(companyID string, status string, assignedTo string, teamID string, unassigned bool, limit, offset int) ([]models.Conversation, error) {
+func (s *MessageService) GetConversations(companyID string, status string, assignedTo string, teamID string, channelID string, unassigned bool, limit, offset int) ([]models.Conversation, error) {
 	if limit == 0 {
 		limit = 50
 	}
@@ -166,6 +166,12 @@ func (s *MessageService) GetConversations(companyID string, status string, assig
 	if teamID != "" {
 		query += fmt.Sprintf(" AND c.team_id = $%d", argIdx)
 		args = append(args, teamID)
+		argIdx++
+	}
+
+	if channelID != "" {
+		query += fmt.Sprintf(" AND c.channel_id = $%d", argIdx)
+		args = append(args, channelID)
 		argIdx++
 	}
 

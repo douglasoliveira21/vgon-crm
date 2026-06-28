@@ -27,6 +27,7 @@ export interface Channel {
   name: string
   type: 'whatsapp' | 'instagram' | 'facebook' | 'telegram' | 'webchat' | 'email'
   status: 'connected' | 'disconnected' | 'connecting' | 'error'
+  settings?: Record<string, any>
   is_active: boolean
 }
 

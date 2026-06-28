@@ -77,12 +77,13 @@ func GetConversations(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 		status := c.Query("status")
 		teamID := c.Query("team_id")
+		channelID := c.Query("channel")
 		assignedTo := c.Query("assigned_to")
 		unassigned := c.Query("unassigned")
 		limit := c.QueryInt("limit", 50)
 		offset := c.QueryInt("offset", 0)
 
-		conversations, err := svc.Message.GetConversations(companyID, status, assignedTo, teamID, unassigned == "true", limit, offset)
+		conversations, err := svc.Message.GetConversations(companyID, status, assignedTo, teamID, channelID, unassigned == "true", limit, offset)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -98,7 +99,7 @@ func GetMyConversations(svc *services.Container) fiber.Handler {
 		limit := c.QueryInt("limit", 50)
 		offset := c.QueryInt("offset", 0)
 
-		conversations, err := svc.Message.GetConversations(companyID, "", userID, "", false, limit, offset)
+		conversations, err := svc.Message.GetConversations(companyID, "", userID, "", "", false, limit, offset)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -112,7 +113,7 @@ func GetConversation(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 		conversationID := c.Params("id")
 
-		conversations, err := svc.Message.GetConversations(companyID, "", "", "", false, 1, 0)
+		conversations, err := svc.Message.GetConversations(companyID, "", "", "", "", false, 1, 0)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}

@@ -17,6 +17,7 @@ type Container struct {
 	Auth      *AuthService
 	Evolution *EvolutionService
 	Message   *MessageService
+	Email     *EmailService
 	Contact   *ContactService
 	Bot       *BotEngine
 	GLPI      *GLPIService
@@ -35,6 +36,7 @@ func NewContainer(db *sql.DB, rdb *redis.Client, cfg *config.Config, wsHub *webs
 	container.Auth = NewAuthService(db, cfg)
 	container.Evolution = NewEvolutionService(cfg, db, wsHub)
 	container.Message = NewMessageService(db, rdb, wsHub)
+	container.Email = NewEmailService(db, wsHub)
 	container.Contact = NewContactService(db)
 	container.Bot = NewBotEngine(db, wsHub, container.Evolution)
 	container.GLPI = NewGLPIService(cfg.GLPIBaseURL, cfg.GLPIAppToken)

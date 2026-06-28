@@ -158,7 +158,7 @@ func GetChannels(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 
 		rows, err := svc.DB.Query(`
-			SELECT id, name, type, status, is_active, created_at
+			SELECT id, name, type, status, settings, is_active, created_at
 			FROM channels WHERE company_id = $1 ORDER BY created_at DESC
 		`, companyID)
 		if err != nil {
@@ -169,17 +169,30 @@ func GetChannels(svc *services.Container) fiber.Handler {
 		var channels []map[string]interface{}
 		for rows.Next() {
 			var id, name, chType, status string
+			var rawSettings []byte
 			var isActive bool
 			var createdAt string
-			rows.Scan(&id, &name, &chType, &status, &isActive, &createdAt)
+			rows.Scan(&id, &name, &chType, &status, &rawSettings, &isActive, &createdAt)
+			settings := sanitizeChannelSettings(chType, rawSettings)
 			channels = append(channels, map[string]interface{}{
 				"id": id, "name": name, "type": chType, "status": status,
-				"is_active": isActive, "created_at": createdAt,
+				"settings": settings, "is_active": isActive, "created_at": createdAt,
 			})
 		}
 
 		return c.JSON(fiber.Map{"channels": channels})
 	}
+}
+
+func sanitizeChannelSettings(channelType string, raw []byte) map[string]interface{} {
+	settings := map[string]interface{}{}
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &settings)
+	}
+	if channelType == "email" {
+		delete(settings, "password")
+	}
+	return settings
 }
 
 // ============================================

@@ -103,6 +103,10 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	// Channels
 	channels := protected.Group("/channels")
 	channels.Get("/", GetChannels(svc))
+	channels.Post("/email", CreateEmailChannel(svc))
+	channels.Put("/email/:id", UpdateEmailChannel(svc))
+	channels.Delete("/email/:id", DeleteEmailChannel(svc))
+	channels.Post("/email/:id/sync", SyncEmailChannel(svc))
 
 	// Funnels
 	funnels := protected.Group("/funnels")
