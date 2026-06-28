@@ -105,23 +105,25 @@ type WhatsAppInstance struct {
 
 // Contact represents a customer contact
 type Contact struct {
-	ID          string    `json:"id"`
-	CompanyID   string    `json:"company_id"`
-	Name        *string   `json:"name,omitempty"`
-	Phone       *string   `json:"phone,omitempty"`
-	Email       *string   `json:"email,omitempty"`
-	CompanyName *string   `json:"company_name,omitempty"`
-	Position    *string   `json:"position,omitempty"`
-	City        *string   `json:"city,omitempty"`
-	State       *string   `json:"state,omitempty"`
-	Origin      *string   `json:"origin,omitempty"`
-	AvatarURL   *string   `json:"avatar_url,omitempty"`
-	Notes       *string   `json:"notes,omitempty"`
-	AssignedTo  *string   `json:"assigned_to,omitempty"`
-	IsOptedOut  bool      `json:"is_opted_out"`
-	Tags        []Tag     `json:"tags,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                  string    `json:"id"`
+	CompanyID           string    `json:"company_id"`
+	Name                *string   `json:"name,omitempty"`
+	Phone               *string   `json:"phone,omitempty"`
+	Email               *string   `json:"email,omitempty"`
+	CustomerCompanyID   *string   `json:"customer_company_id,omitempty"`
+	CustomerCompanyName *string   `json:"customer_company_name,omitempty"`
+	CompanyName         *string   `json:"company_name,omitempty"`
+	Position            *string   `json:"position,omitempty"`
+	City                *string   `json:"city,omitempty"`
+	State               *string   `json:"state,omitempty"`
+	Origin              *string   `json:"origin,omitempty"`
+	AvatarURL           *string   `json:"avatar_url,omitempty"`
+	Notes               *string   `json:"notes,omitempty"`
+	AssignedTo          *string   `json:"assigned_to,omitempty"`
+	IsOptedOut          bool      `json:"is_opted_out"`
+	Tags                []Tag     `json:"tags,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // Tag represents a label/tag
@@ -134,25 +136,31 @@ type Tag struct {
 
 // Conversation represents a chat conversation
 type Conversation struct {
-	ID                 string     `json:"id"`
-	CompanyID          string     `json:"company_id"`
-	ContactID          string     `json:"contact_id"`
-	ChannelID          *string    `json:"channel_id,omitempty"`
-	AssignedTo         *string    `json:"assigned_to,omitempty"`
-	TeamID             *string    `json:"team_id,omitempty"`
-	Status             string     `json:"status"`
-	Priority           string     `json:"priority"`
-	Subject            *string    `json:"subject,omitempty"`
-	LastMessageAt      *time.Time `json:"last_message_at,omitempty"`
-	LastMessagePreview *string    `json:"last_message_preview,omitempty"`
-	UnreadCount        int        `json:"unread_count"`
-	ContactName        *string    `json:"contact_name,omitempty"`
-	ContactPhone       *string    `json:"contact_phone,omitempty"`
-	ContactAvatarURL   *string    `json:"contact_avatar_url,omitempty"`
-	AssignedToName     *string    `json:"assigned_to_name,omitempty"`
-	ChannelName        *string    `json:"channel_name,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	ID                  string     `json:"id"`
+	CompanyID           string     `json:"company_id"`
+	ContactID           string     `json:"contact_id"`
+	ChannelID           *string    `json:"channel_id,omitempty"`
+	AssignedTo          *string    `json:"assigned_to,omitempty"`
+	TeamID              *string    `json:"team_id,omitempty"`
+	Status              string     `json:"status"`
+	Priority            string     `json:"priority"`
+	Subject             *string    `json:"subject,omitempty"`
+	LastMessageAt       *time.Time `json:"last_message_at,omitempty"`
+	LastMessagePreview  *string    `json:"last_message_preview,omitempty"`
+	UnreadCount         int        `json:"unread_count"`
+	ContactName         *string    `json:"contact_name,omitempty"`
+	ContactPhone        *string    `json:"contact_phone,omitempty"`
+	ContactAvatarURL    *string    `json:"contact_avatar_url,omitempty"`
+	CustomerCompanyID   *string    `json:"customer_company_id,omitempty"`
+	CustomerCompanyName *string    `json:"customer_company_name,omitempty"`
+	FirstResponseDueAt  *time.Time `json:"first_response_due_at,omitempty"`
+	ResolutionDueAt     *time.Time `json:"resolution_due_at,omitempty"`
+	FirstResponseAt     *time.Time `json:"first_response_at,omitempty"`
+	ResolvedAt          *time.Time `json:"resolved_at,omitempty"`
+	AssignedToName      *string    `json:"assigned_to_name,omitempty"`
+	ChannelName         *string    `json:"channel_name,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
 // Message represents a chat message

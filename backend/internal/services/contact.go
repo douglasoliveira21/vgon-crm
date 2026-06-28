@@ -17,28 +17,30 @@ func NewContactService(db *sql.DB) *ContactService {
 }
 
 type CreateContactRequest struct {
-	Name        *string `json:"name"`
-	Phone       *string `json:"phone"`
-	Email       *string `json:"email"`
-	CompanyName *string `json:"company_name"`
-	Position    *string `json:"position"`
-	City        *string `json:"city"`
-	State       *string `json:"state"`
-	Origin      *string `json:"origin"`
-	Notes       *string `json:"notes"`
+	Name              *string `json:"name"`
+	Phone             *string `json:"phone"`
+	Email             *string `json:"email"`
+	CustomerCompanyID *string `json:"customer_company_id"`
+	CompanyName       *string `json:"company_name"`
+	Position          *string `json:"position"`
+	City              *string `json:"city"`
+	State             *string `json:"state"`
+	Origin            *string `json:"origin"`
+	Notes             *string `json:"notes"`
 }
 
 type UpdateContactRequest struct {
-	Name        *string `json:"name"`
-	Phone       *string `json:"phone"`
-	Email       *string `json:"email"`
-	CompanyName *string `json:"company_name"`
-	Position    *string `json:"position"`
-	City        *string `json:"city"`
-	State       *string `json:"state"`
-	Origin      *string `json:"origin"`
-	Notes       *string `json:"notes"`
-	AssignedTo  *string `json:"assigned_to"`
+	Name              *string `json:"name"`
+	Phone             *string `json:"phone"`
+	Email             *string `json:"email"`
+	CustomerCompanyID *string `json:"customer_company_id"`
+	CompanyName       *string `json:"company_name"`
+	Position          *string `json:"position"`
+	City              *string `json:"city"`
+	State             *string `json:"state"`
+	Origin            *string `json:"origin"`
+	Notes             *string `json:"notes"`
+	AssignedTo        *string `json:"assigned_to"`
 }
 
 // GetContacts returns contacts for a company
@@ -63,9 +65,12 @@ func (s *ContactService) GetContacts(companyID string, search string, limit, off
 
 	// Data query
 	query := `
-		SELECT id, company_id, name, phone, email, company_name, position, city, state, origin, 
-			   avatar_url, notes, assigned_to, is_opted_out, created_at, updated_at
-		FROM contacts WHERE company_id = $1
+		SELECT c.id, c.company_id, c.name, c.phone, c.email, c.customer_company_id, cc.name,
+			   c.company_name, c.position, c.city, c.state, c.origin, c.avatar_url, c.notes,
+			   c.assigned_to, c.is_opted_out, c.created_at, c.updated_at
+		FROM contacts c
+		LEFT JOIN customer_companies cc ON c.customer_company_id = cc.id
+		WHERE c.company_id = $1
 	`
 	dataArgs := []interface{}{companyID}
 	dataArgIdx := 2
@@ -90,7 +95,7 @@ func (s *ContactService) GetContacts(companyID string, search string, limit, off
 	for rows.Next() {
 		var c models.Contact
 		err := rows.Scan(
-			&c.ID, &c.CompanyID, &c.Name, &c.Phone, &c.Email, &c.CompanyName,
+			&c.ID, &c.CompanyID, &c.Name, &c.Phone, &c.Email, &c.CustomerCompanyID, &c.CustomerCompanyName, &c.CompanyName,
 			&c.Position, &c.City, &c.State, &c.Origin, &c.AvatarURL, &c.Notes,
 			&c.AssignedTo, &c.IsOptedOut, &c.CreatedAt, &c.UpdatedAt,
 		)
@@ -107,11 +112,14 @@ func (s *ContactService) GetContacts(companyID string, search string, limit, off
 func (s *ContactService) GetContactByID(contactID, companyID string) (*models.Contact, error) {
 	var c models.Contact
 	err := s.db.QueryRow(`
-		SELECT id, company_id, name, phone, email, company_name, position, city, state, origin,
-			   avatar_url, notes, assigned_to, is_opted_out, created_at, updated_at
-		FROM contacts WHERE id = $1 AND company_id = $2
+		SELECT c.id, c.company_id, c.name, c.phone, c.email, c.customer_company_id, cc.name,
+			   c.company_name, c.position, c.city, c.state, c.origin,
+			   c.avatar_url, c.notes, c.assigned_to, c.is_opted_out, c.created_at, c.updated_at
+		FROM contacts c
+		LEFT JOIN customer_companies cc ON c.customer_company_id = cc.id
+		WHERE c.id = $1 AND c.company_id = $2
 	`, contactID, companyID).Scan(
-		&c.ID, &c.CompanyID, &c.Name, &c.Phone, &c.Email, &c.CompanyName,
+		&c.ID, &c.CompanyID, &c.Name, &c.Phone, &c.Email, &c.CustomerCompanyID, &c.CustomerCompanyName, &c.CompanyName,
 		&c.Position, &c.City, &c.State, &c.Origin, &c.AvatarURL, &c.Notes,
 		&c.AssignedTo, &c.IsOptedOut, &c.CreatedAt, &c.UpdatedAt,
 	)
@@ -151,9 +159,9 @@ func (s *ContactService) CreateContact(companyID string, req *CreateContactReque
 
 	id := uuid.New().String()
 	_, err := s.db.Exec(`
-		INSERT INTO contacts (id, company_id, name, phone, email, company_name, position, city, state, origin, notes)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-	`, id, companyID, req.Name, req.Phone, req.Email, req.CompanyName, req.Position, req.City, req.State, req.Origin, req.Notes)
+		INSERT INTO contacts (id, company_id, name, phone, email, customer_company_id, company_name, position, city, state, origin, notes)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, '')::uuid, $7, $8, $9, $10, $11, $12)
+	`, id, companyID, req.Name, req.Phone, req.Email, stringPtrValue(req.CustomerCompanyID), req.CompanyName, req.Position, req.City, req.State, req.Origin, req.Notes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create contact: %w", err)
 	}
@@ -168,16 +176,17 @@ func (s *ContactService) UpdateContact(contactID, companyID string, req *UpdateC
 			name = COALESCE($3, name),
 			phone = COALESCE($4, phone),
 			email = COALESCE($5, email),
-			company_name = COALESCE($6, company_name),
-			position = COALESCE($7, position),
-			city = COALESCE($8, city),
-			state = COALESCE($9, state),
-			origin = COALESCE($10, origin),
-			notes = COALESCE($11, notes),
-			assigned_to = COALESCE($12, assigned_to),
+			customer_company_id = COALESCE(NULLIF($6, '')::uuid, customer_company_id),
+			company_name = COALESCE($7, company_name),
+			position = COALESCE($8, position),
+			city = COALESCE($9, city),
+			state = COALESCE($10, state),
+			origin = COALESCE($11, origin),
+			notes = COALESCE($12, notes),
+			assigned_to = COALESCE($13, assigned_to),
 			updated_at = NOW()
 		WHERE id = $1 AND company_id = $2
-	`, contactID, companyID, req.Name, req.Phone, req.Email, req.CompanyName,
+	`, contactID, companyID, req.Name, req.Phone, req.Email, stringPtrValue(req.CustomerCompanyID), req.CompanyName,
 		req.Position, req.City, req.State, req.Origin, req.Notes, req.AssignedTo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update contact: %w", err)
@@ -204,4 +213,11 @@ func (s *ContactService) AddTagToContact(contactID, tagID string) error {
 func (s *ContactService) RemoveTagFromContact(contactID, tagID string) error {
 	_, err := s.db.Exec("DELETE FROM contact_tags WHERE contact_id = $1 AND tag_id = $2", contactID, tagID)
 	return err
+}
+
+func stringPtrValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

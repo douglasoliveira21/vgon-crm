@@ -77,6 +77,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	conversations.Post("/:id/assign", AssignConversation(svc))
 	conversations.Post("/:id/unassign", UnassignConversation(svc))
 	conversations.Post("/:id/transfer", TransferConversation(svc))
+	conversations.Put("/:id/customer-company", LinkConversationCustomerCompany(svc))
 	conversations.Post("/:id/close", CloseConversation(svc))
 	conversations.Post("/:id/reopen", ReopenConversation(svc))
 	conversations.Post("/:id/read", MarkConversationRead(svc))
@@ -95,6 +96,15 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	contacts.Delete("/:id", DeleteContact(svc))
 	contacts.Post("/:id/tags", AddContactTag(svc))
 	contacts.Delete("/:id/tags/:tagId", RemoveContactTag(svc))
+
+	// Customer companies
+	customerCompanies := protected.Group("/customer-companies")
+	customerCompanies.Get("/", ListCustomerCompanies(svc))
+	customerCompanies.Get("/lookup/:cnpj", LookupCNPJ(svc))
+	customerCompanies.Get("/sla-report.csv", ExportCustomerCompanySLAReport(svc))
+	customerCompanies.Post("/", CreateCustomerCompany(svc))
+	customerCompanies.Put("/:id", UpdateCustomerCompany(svc))
+	customerCompanies.Delete("/:id", DeleteCustomerCompany(svc))
 
 	// Teams
 	teams := protected.Group("/teams")

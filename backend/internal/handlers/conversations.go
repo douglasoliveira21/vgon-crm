@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"strings"
 	"time"
 
@@ -43,8 +44,9 @@ func StartConversation(svc *services.Container) fiber.Handler {
 			svc.DB.QueryRow("SELECT id FROM channels WHERE company_id = $1 AND status = 'connected' LIMIT 1", companyID).Scan(&channelID)
 
 			conversationID = uuid.New().String()
-			svc.DB.Exec("INSERT INTO conversations (id, company_id, contact_id, channel_id, assigned_to, status, last_message_at) VALUES ($1, $2, $3, $4, $5, 'in_progress', NOW())",
+			svc.DB.Exec("INSERT INTO conversations (id, company_id, contact_id, channel_id, assigned_to, status, last_message_at, customer_company_id) VALUES ($1, $2, $3, $4, $5, 'in_progress', NOW(), (SELECT customer_company_id FROM contacts WHERE id = $3))",
 				conversationID, companyID, contactID, channelID, userID)
+			applyConversationSLA(svc.DB, companyID, conversationID)
 		}
 
 		// If message provided, send it
@@ -70,6 +72,24 @@ func StartConversation(svc *services.Container) fiber.Handler {
 
 		return c.JSON(fiber.Map{"conversation_id": conversationID, "contact_id": contactID})
 	}
+}
+
+func applyConversationSLA(db *sql.DB, companyID, conversationID string) {
+	db.Exec(`
+		UPDATE conversations conv
+		SET customer_company_id = COALESCE(conv.customer_company_id, ct.customer_company_id),
+		    first_response_due_at = CASE
+		      WHEN cc.id IS NULL THEN NULL
+		      ELSE conv.created_at + (cc.initial_response_sla_minutes || ' minutes')::interval
+		    END,
+		    resolution_due_at = CASE
+		      WHEN cc.id IS NULL THEN NULL
+		      ELSE conv.created_at + (cc.resolution_sla_minutes || ' minutes')::interval
+		    END
+		FROM contacts ct
+		LEFT JOIN customer_companies cc ON COALESCE(conv.customer_company_id, ct.customer_company_id) = cc.id
+		WHERE conv.id = $1 AND conv.company_id = $2 AND conv.contact_id = ct.id
+	`, conversationID, companyID)
 }
 
 func GetConversations(svc *services.Container) fiber.Handler {
@@ -200,6 +220,40 @@ func CloseConversation(svc *services.Container) fiber.Handler {
 	}
 }
 
+func LinkConversationCustomerCompany(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		conversationID := c.Params("id")
+		var body struct {
+			CustomerCompanyID *string `json:"customer_company_id"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+		customerCompanyID := ""
+		if body.CustomerCompanyID != nil {
+			customerCompanyID = *body.CustomerCompanyID
+		}
+		_, err := svc.DB.Exec(`
+			UPDATE contacts SET customer_company_id = NULLIF($1, '')::uuid, updated_at = NOW()
+			WHERE id = (SELECT contact_id FROM conversations WHERE id = $2 AND company_id = $3)
+			  AND company_id = $3
+		`, customerCompanyID, conversationID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		_, err = svc.DB.Exec(`
+			UPDATE conversations SET customer_company_id = NULLIF($1, '')::uuid, updated_at = NOW()
+			WHERE id = $2 AND company_id = $3
+		`, customerCompanyID, conversationID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		applyConversationSLA(svc.DB, companyID, conversationID)
+		return c.JSON(fiber.Map{"message": "Empresa vinculada"})
+	}
+}
+
 func ReopenConversation(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
@@ -269,6 +323,10 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
+		svc.DB.Exec(`
+			UPDATE conversations SET first_response_at = COALESCE(first_response_at, NOW())
+			WHERE id = $1 AND company_id = $2
+		`, conversationID, companyID)
 
 		// If not private, send through the conversation channel
 		if !body.IsPrivate {

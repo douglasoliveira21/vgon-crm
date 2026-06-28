@@ -702,6 +702,7 @@ func GetMetrics(svc *services.Container) fiber.Handler {
 		var dealsWonValue, dealsOpenValue float64
 		var dealsWonCount int
 		var totalContacts int
+		var slaWithin, slaBreached int
 
 		// Conversations metrics
 		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1", companyID).Scan(&totalConversations)
@@ -719,6 +720,23 @@ func GetMetrics(svc *services.Container) fiber.Handler {
 		// Contacts
 		svc.DB.QueryRow("SELECT COUNT(*) FROM contacts WHERE company_id = $1", companyID).Scan(&totalContacts)
 
+		svc.DB.QueryRow(`
+			SELECT COUNT(*) FROM conversations
+			WHERE company_id = $1 AND customer_company_id IS NOT NULL AND status = 'resolved'
+			  AND (
+			    (first_response_due_at IS NULL OR (first_response_at IS NOT NULL AND first_response_at <= first_response_due_at))
+			    AND (resolution_due_at IS NULL OR (resolved_at IS NOT NULL AND resolved_at <= resolution_due_at))
+			  )
+		`, companyID).Scan(&slaWithin)
+		svc.DB.QueryRow(`
+			SELECT COUNT(*) FROM conversations
+			WHERE company_id = $1 AND customer_company_id IS NOT NULL
+			  AND (
+			    (first_response_due_at IS NOT NULL AND COALESCE(first_response_at, NOW()) > first_response_due_at)
+			    OR (resolution_due_at IS NOT NULL AND COALESCE(resolved_at, NOW()) > resolution_due_at)
+			  )
+		`, companyID).Scan(&slaBreached)
+
 		metrics := fiber.Map{
 			"total_conversations":    totalConversations,
 			"open_conversations":     openConversations,
@@ -728,6 +746,8 @@ func GetMetrics(svc *services.Container) fiber.Handler {
 			"deals_open_value":       dealsOpenValue,
 			"deals_won_count":        dealsWonCount,
 			"total_contacts":         totalContacts,
+			"sla_within":             slaWithin,
+			"sla_breached":           slaBreached,
 		}
 
 		return c.JSON(fiber.Map{"metrics": metrics})

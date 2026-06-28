@@ -126,9 +126,13 @@ func (s *MessageService) GetConversations(companyID string, status string, assig
 			   c.status, c.priority, c.subject, c.last_message_at, c.last_message_preview,
 			   c.unread_count, c.created_at, c.updated_at,
 			   co.name as contact_name, co.phone as contact_phone, co.avatar_url as contact_avatar_url,
+			   COALESCE(c.customer_company_id, co.customer_company_id) as customer_company_id,
+			   cc.name as customer_company_name,
+			   c.first_response_due_at, c.resolution_due_at, c.first_response_at, c.resolved_at,
 			   u.name as assigned_to_name, ch.name as channel_name
 		FROM conversations c
 		LEFT JOIN contacts co ON c.contact_id = co.id
+		LEFT JOIN customer_companies cc ON COALESCE(c.customer_company_id, co.customer_company_id) = cc.id
 		LEFT JOIN users u ON c.assigned_to = u.id
 		LEFT JOIN channels ch ON c.channel_id = ch.id
 		WHERE c.company_id = $1
@@ -194,6 +198,8 @@ func (s *MessageService) GetConversations(companyID string, status string, assig
 			&conv.TeamID, &conv.Status, &conv.Priority, &conv.Subject, &conv.LastMessageAt,
 			&conv.LastMessagePreview, &conv.UnreadCount, &conv.CreatedAt, &conv.UpdatedAt,
 			&conv.ContactName, &conv.ContactPhone, &conv.ContactAvatarURL,
+			&conv.CustomerCompanyID, &conv.CustomerCompanyName,
+			&conv.FirstResponseDueAt, &conv.ResolutionDueAt, &conv.FirstResponseAt, &conv.ResolvedAt,
 			&conv.AssignedToName, &conv.ChannelName,
 		)
 		if err != nil {

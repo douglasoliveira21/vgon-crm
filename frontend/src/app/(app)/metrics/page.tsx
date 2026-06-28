@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
+import toast from 'react-hot-toast'
 import {
   MessageSquare,
   TrendingUp,
@@ -84,6 +85,20 @@ export default function MetricsPage() {
     return `${hours}h ${mins}min`
   }
 
+  const exportSLAReport = async () => {
+    try {
+      const response = await api.get('/customer-companies/sla-report.csv', { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'text/csv;charset=utf-8;' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `relatorio-sla-empresas-${new Date().toISOString().slice(0, 10)}.csv`
+      link.click()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      toast.error('Erro ao exportar relatório de SLA')
+    }
+  }
+
   if (loading) {
     return (
       <div className="p-6 animate-pulse">
@@ -104,13 +119,13 @@ export default function MetricsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Métricas e Relatórios</h1>
           <p className="text-gray-500 mt-1">Acompanhe o desempenho da sua equipe</p>
         </div>
-        <button className="btn-secondary">
-          Exportar CSV
+        <button onClick={exportSLAReport} className="btn-secondary">
+          Exportar relatório SLA
         </button>
       </div>
 
       {/* Main Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 mb-8">
         <MetricCard
           label="Atendimentos"
           value={metrics.total_conversations || 0}
@@ -135,7 +150,7 @@ export default function MetricsPage() {
       </div>
 
       {/* Secondary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 mb-8">
         <div className="card p-5">
           <div className="flex items-center gap-3 mb-4">
             <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
@@ -168,6 +183,30 @@ export default function MetricsPage() {
             <div>
               <p className="text-sm text-gray-500">Contatos</p>
               <p className="text-xl font-bold text-gray-900">{metrics.total_contacts || 0}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="card p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
+              <Headphones size={20} className="text-emerald-600" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Atendidos dentro do SLA</p>
+              <p className="text-xl font-bold text-gray-900">{metrics.sla_within || 0}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="card p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 bg-red-100 rounded-lg flex items-center justify-center">
+              <Timer size={20} className="text-red-600" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">SLA estourados</p>
+              <p className="text-xl font-bold text-gray-900">{metrics.sla_breached || 0}</p>
             </div>
           </div>
         </div>

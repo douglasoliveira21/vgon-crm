@@ -31,6 +31,8 @@ import {
   Camera,
   RotateCcw,
   UsersRound,
+  Building2,
+  Timer,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import toast from 'react-hot-toast'
@@ -41,6 +43,12 @@ interface Conversation {
   contact_name: string
   contact_phone: string
   contact_avatar_url?: string
+  customer_company_id?: string
+  customer_company_name?: string
+  first_response_due_at?: string
+  resolution_due_at?: string
+  first_response_at?: string
+  resolved_at?: string
   last_message_preview: string
   last_message_at: string
   unread_count: number
@@ -49,6 +57,7 @@ interface Conversation {
   assigned_to_name?: string
   channel_name?: string
   team_id?: string
+  created_at: string
 }
 
 interface Message {
@@ -85,6 +94,11 @@ interface TeamItem {
   member_count: number
 }
 
+interface CustomerCompany {
+  id: string
+  name: string
+}
+
 export default function ConversationsPage() {
   const { user } = useAuthStore()
   const searchParams = useSearchParams()
@@ -108,6 +122,7 @@ export default function ConversationsPage() {
   // Data for modals
   const [users, setUsers] = useState<UserItem[]>([])
   const [teams, setTeams] = useState<TeamItem[]>([])
+  const [companies, setCompanies] = useState<CustomerCompany[]>([])
 
   // Audio recording
   const [isRecording, setIsRecording] = useState(false)
@@ -143,6 +158,7 @@ export default function ConversationsPage() {
     fetchUsers()
     fetchTeams()
     fetchQuickReplies()
+    fetchCompanies()
   }, [filter, statusFilter, searchParams])
 
   useEffect(() => {
@@ -370,11 +386,35 @@ export default function ConversationsPage() {
     } catch {}
   }
 
+  const fetchCompanies = async () => {
+    try {
+      const response = await api.get('/customer-companies')
+      setCompanies(response.data.companies || [])
+    } catch {}
+  }
+
   const fetchQuickReplies = async () => {
     try {
       const response = await api.get('/quick-replies')
       setQuickReplies(response.data.quick_replies || [])
     } catch {}
+  }
+
+  const linkCompanyToConversation = async (companyId: string) => {
+    if (!selectedConv) return
+    try {
+      await api.put(`/conversations/${selectedConv.id}/customer-company`, {
+        customer_company_id: companyId || null,
+      })
+      const refreshed = await api.get(`/conversations/${selectedConv.id}`)
+      const updated = refreshed.data as Conversation
+      setSelectedConv(updated)
+      setConversations((prev) => prev.map((conv) => (conv.id === selectedConv.id ? updated : conv)))
+      await fetchConversations()
+      toast.success(companyId ? 'Empresa vinculada ao atendimento' : 'Empresa removida do atendimento')
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao vincular empresa')
+    }
   }
 
   // Auto-refresh messages when chat is open (fallback for WebSocket)
@@ -979,7 +1019,7 @@ export default function ConversationsPage() {
             </div>
           )}
           {/* Chat Header */}
-          <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+          <div className="bg-white border-b border-gray-200 px-6 py-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between dark:bg-gray-900 dark:border-gray-800">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center overflow-hidden">
                 {selectedConv.contact_avatar_url ? (
@@ -999,10 +1039,27 @@ export default function ConversationsPage() {
                   {selectedConv.contact_name || selectedConv.contact_phone}
                 </h3>
                 <p className="text-xs text-gray-500">{selectedConv.contact_phone}</p>
+                {selectedConv.customer_company_name && (
+                  <p className="mt-0.5 flex items-center gap-1 text-xs text-primary-600 dark:text-primary-300">
+                    <Building2 size={12} />
+                    {selectedConv.customer_company_name}
+                  </p>
+                )}
               </div>
             </div>
 
-            <div className="flex items-center gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={selectedConv.customer_company_id || ''}
+                onChange={(e) => linkCompanyToConversation(e.target.value)}
+                className="min-w-[210px] rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 focus:border-primary-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                title="Vincular empresa"
+              >
+                <option value="">Sem empresa vinculada</option>
+                {companies.map((company) => (
+                  <option key={company.id} value={company.id}>{company.name}</option>
+                ))}
+              </select>
               {/* Open Chat / Assign to me */}
               {!selectedConv.assigned_to && (
                 <button
@@ -1076,6 +1133,8 @@ export default function ConversationsPage() {
               </button>
             </div>
           </div>
+
+          <ConversationSLABar conversation={selectedConv} />
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
@@ -1690,6 +1749,65 @@ export default function ConversationsPage() {
   )
 }
 
+
+function ConversationSLABar({ conversation }: { conversation: Conversation }) {
+  const [now, setNow] = useState(Date.now())
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  if (!conversation.customer_company_id || (!conversation.first_response_due_at && !conversation.resolution_due_at)) {
+    return null
+  }
+
+  const renderItem = (label: string, dueAt?: string, doneAt?: string) => {
+    if (!dueAt) return null
+    const start = new Date(conversation.created_at).getTime()
+    const due = new Date(dueAt).getTime()
+    const done = doneAt ? new Date(doneAt).getTime() : null
+    const end = done || now
+    const total = Math.max(due - start, 1)
+    const used = Math.max(end - start, 0)
+    const percent = Math.min(Math.round((used / total) * 100), 100)
+    const breached = !done && now > due
+    const doneBreached = Boolean(done && done > due)
+    const remainingMs = due - now
+    const minutes = Math.abs(Math.ceil(remainingMs / 60000))
+    const status = done
+      ? doneBreached ? 'Concluído fora do SLA' : 'Concluído dentro do SLA'
+      : breached ? `Estourou há ${minutes} min` : `${minutes} min restantes`
+
+    return (
+      <div className="min-w-[220px] flex-1">
+        <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+          <span className="font-medium text-gray-700 dark:text-gray-200">{label}</span>
+          <span className={breached || doneBreached ? 'text-red-600' : 'text-green-600'}>{status}</span>
+        </div>
+        <div className="h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
+          <div
+            className={clsx('h-full rounded-full transition-all', breached || doneBreached ? 'bg-red-500' : 'bg-green-500')}
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="border-b border-gray-200 bg-white px-6 py-3 dark:border-gray-800 dark:bg-gray-900">
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+          <Timer size={16} />
+          SLA da empresa
+        </div>
+        {renderItem('Primeira resposta', conversation.first_response_due_at, conversation.first_response_at)}
+        {renderItem('Resolução', conversation.resolution_due_at, conversation.resolved_at)}
+      </div>
+    </div>
+  )
+}
 
 // Contact Panel with Tags and Funnel
 function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, onUnassign }: { conversation: Conversation; users: UserItem[]; teams: TeamItem[]; onAssignUser: (userId: string) => void; onAssignTeam: (teamId: string) => void; onUnassign: () => void }) {

@@ -11,6 +11,8 @@ interface Contact {
   name?: string
   phone?: string
   email?: string
+  customer_company_id?: string
+  customer_company_name?: string
   company_name?: string
   position?: string
   city?: string
@@ -18,6 +20,12 @@ interface Contact {
   avatar_url?: string
   tags?: Array<{ id: string; name: string; color: string }>
   created_at: string
+}
+
+interface CustomerCompany {
+  id: string
+  name: string
+  cnpj?: string
 }
 
 export default function ContactsPage() {
@@ -28,9 +36,11 @@ export default function ContactsPage() {
   const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editingContact, setEditingContact] = useState<Contact | null>(null)
+  const [companies, setCompanies] = useState<CustomerCompany[]>([])
 
   useEffect(() => {
     fetchContacts()
+    fetchCompanies()
   }, [search])
 
   const fetchContacts = async () => {
@@ -43,6 +53,13 @@ export default function ContactsPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const fetchCompanies = async () => {
+    try {
+      const response = await api.get('/customer-companies')
+      setCompanies(response.data.companies || [])
+    } catch {}
   }
 
   const deleteContact = async (id: string) => {
@@ -141,7 +158,7 @@ export default function ContactsPage() {
                 </td>
                 <td className="px-6 py-4 text-sm text-gray-600">{contact.phone || '-'}</td>
                 <td className="px-6 py-4 text-sm text-gray-600">{contact.email || '-'}</td>
-                <td className="px-6 py-4 text-sm text-gray-600">{contact.company_name || '-'}</td>
+                <td className="px-6 py-4 text-sm text-gray-600">{contact.customer_company_name || contact.company_name || '-'}</td>
                 <td className="px-6 py-4">
                   {contact.origin && (
                     <span className="badge badge-blue">{contact.origin}</span>
@@ -186,6 +203,7 @@ export default function ContactsPage() {
       {showForm && (
         <ContactFormModal
           contact={editingContact}
+          companies={companies}
           onClose={() => { setShowForm(false); setEditingContact(null) }}
           onSaved={() => { setShowForm(false); setEditingContact(null); fetchContacts() }}
         />
@@ -196,10 +214,12 @@ export default function ContactsPage() {
 
 function ContactFormModal({
   contact,
+  companies,
   onClose,
   onSaved,
 }: {
   contact: Contact | null
+  companies: CustomerCompany[]
   onClose: () => void
   onSaved: () => void
 }) {
@@ -207,6 +227,7 @@ function ContactFormModal({
     name: contact?.name || '',
     phone: contact?.phone || '',
     email: contact?.email || '',
+    customer_company_id: contact?.customer_company_id || '',
     company_name: contact?.company_name || '',
     position: contact?.position || '',
     city: contact?.city || '',
@@ -278,13 +299,20 @@ function ContactFormModal({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Empresa</label>
-              <input
-                type="text"
-                value={form.company_name}
-                onChange={(e) => setForm({ ...form, company_name: e.target.value })}
+              <label className="block text-sm font-medium text-gray-700 mb-1">Empresa vinculada</label>
+              <select
+                value={form.customer_company_id}
+                onChange={(e) => {
+                  const selected = companies.find((company) => company.id === e.target.value)
+                  setForm({ ...form, customer_company_id: e.target.value, company_name: selected?.name || form.company_name })
+                }}
                 className="input"
-              />
+              >
+                <option value="">Sem empresa</option>
+                {companies.map((company) => (
+                  <option key={company.id} value={company.id}>{company.name}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Cargo</label>
