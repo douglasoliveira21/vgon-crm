@@ -5,9 +5,11 @@ type Theme = 'light' | 'dark'
 interface AppearanceState {
   theme: Theme
   sidebarPinned: boolean
+  sidebarHovered: boolean
   setTheme: (theme: Theme) => void
   toggleTheme: () => void
   setSidebarPinned: (pinned: boolean) => void
+  setSidebarHovered: (hovered: boolean) => void
   initAppearance: () => void
 }
 
@@ -29,6 +31,7 @@ const applyTheme = (theme: Theme) => {
 export const useAppearanceStore = create<AppearanceState>((set, get) => ({
   theme: getStoredTheme(),
   sidebarPinned: getStoredPinned(),
+  sidebarHovered: false,
   setTheme: (theme) => {
     localStorage.setItem('theme', theme)
     applyTheme(theme)
@@ -44,6 +47,7 @@ export const useAppearanceStore = create<AppearanceState>((set, get) => ({
     localStorage.setItem('sidebar_pinned', String(pinned))
     set({ sidebarPinned: pinned })
   },
+  setSidebarHovered: (hovered) => set({ sidebarHovered: hovered }),
   initAppearance: () => {
     const theme = getStoredTheme()
     const sidebarPinned = getStoredPinned()

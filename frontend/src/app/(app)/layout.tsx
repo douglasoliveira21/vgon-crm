@@ -9,7 +9,7 @@ import Sidebar from '@/components/layout/sidebar'
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const { isAuthenticated, checkAuth } = useAuthStore()
-  const { sidebarPinned, initAppearance } = useAppearanceStore()
+  const { sidebarPinned, sidebarHovered, initAppearance } = useAppearanceStore()
 
   useEffect(() => {
     initAppearance()
@@ -28,7 +28,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
       <Sidebar />
-      <main className={`${sidebarPinned ? 'ml-64' : 'ml-20'} min-h-screen transition-all duration-300`}>
+      <main className={`${sidebarPinned || sidebarHovered ? 'ml-64' : 'ml-20'} min-h-screen transition-all duration-300`}>
         {children}
       </main>
     </div>

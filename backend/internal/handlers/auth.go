@@ -9,6 +9,7 @@ import (
 
 	"github.com/evocrm/backend/internal/services"
 	"github.com/gofiber/fiber/v2"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func AuthLogin(svc *services.Container) fiber.Handler {
@@ -195,5 +196,52 @@ func UploadCurrentUserAvatar(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
 		}
 		return c.JSON(user)
+	}
+}
+
+func UpdateCurrentUserPassword(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userID := c.Locals("user_id").(string)
+		companyID := c.Locals("company_id").(string)
+
+		var body struct {
+			CurrentPassword string `json:"current_password"`
+			NewPassword     string `json:"new_password"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
+		}
+		if body.CurrentPassword == "" || body.NewPassword == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Current and new password are required"})
+		}
+		if len(body.NewPassword) < 8 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "New password must be at least 8 characters"})
+		}
+
+		var passwordHash string
+		err := svc.DB.QueryRow(`
+			SELECT password_hash FROM users WHERE id = $1 AND company_id = $2
+		`, userID, companyID).Scan(&passwordHash)
+		if err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(body.CurrentPassword)); err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Current password is incorrect"})
+		}
+
+		newHash, err := bcrypt.GenerateFromPassword([]byte(body.NewPassword), bcrypt.DefaultCost)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to hash password"})
+		}
+
+		_, err = svc.DB.Exec(`
+			UPDATE users SET password_hash = $1, updated_at = NOW()
+			WHERE id = $2 AND company_id = $3
+		`, string(newHash), userID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"message": "Password updated"})
 	}
 }

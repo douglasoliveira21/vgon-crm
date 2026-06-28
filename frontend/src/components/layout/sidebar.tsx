@@ -56,7 +56,7 @@ const resolveImage = (url?: string) => {
 export default function Sidebar() {
   const pathname = usePathname()
   const { user, logout, updateStatus } = useAuthStore()
-  const { sidebarPinned, setSidebarPinned, theme, toggleTheme } = useAppearanceStore()
+  const { sidebarPinned, setSidebarPinned, setSidebarHovered, theme, toggleTheme } = useAppearanceStore()
   const expandedClass = sidebarPinned ? 'w-64' : 'w-20 hover:w-64'
   const showTextClass = sidebarPinned ? 'opacity-100' : 'opacity-0 group-hover/sidebar:opacity-100'
   const currentStatus = user?.availability_status || (user?.is_online ? 'online' : 'offline')
@@ -64,6 +64,8 @@ export default function Sidebar() {
 
   return (
     <aside
+      onMouseEnter={() => setSidebarHovered(true)}
+      onMouseLeave={() => setSidebarHovered(false)}
       className={clsx(
         'group/sidebar fixed left-0 top-0 z-50 flex h-full flex-col border-r transition-all duration-300',
         expandedClass,

@@ -2,8 +2,9 @@
 
 import { useRef, useState } from 'react'
 import { useAuthStore } from '@/store/auth'
+import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { Camera, Circle, Mail, Phone, Save, User } from 'lucide-react'
+import { Camera, Circle, KeyRound, Mail, Phone, Save, User } from 'lucide-react'
 
 const resolveImage = (url?: string) => {
   if (!url) return ''
@@ -22,6 +23,10 @@ export default function ProfilePage() {
   const [phone, setPhone] = useState(user?.phone || '')
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [savingPassword, setSavingPassword] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const saveProfile = async () => {
@@ -54,6 +59,37 @@ export default function ProfilePage() {
   }
 
   const currentStatus = user?.availability_status || (user?.is_online ? 'online' : 'offline')
+
+  const changePassword = async () => {
+    if (!currentPassword || !newPassword) {
+      toast.error('Informe a senha atual e a nova senha')
+      return
+    }
+    if (newPassword.length < 8) {
+      toast.error('A nova senha precisa ter pelo menos 8 caracteres')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error('A confirmação não confere com a nova senha')
+      return
+    }
+
+    setSavingPassword(true)
+    try {
+      await api.put('/me/password', {
+        current_password: currentPassword,
+        new_password: newPassword,
+      })
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      toast.success('Senha alterada')
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao alterar senha')
+    } finally {
+      setSavingPassword(false)
+    }
+  }
 
   return (
     <div className="mx-auto max-w-5xl p-6">
@@ -151,6 +187,49 @@ export default function ProfilePage() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="card p-6">
+            <div className="mb-5 flex items-center gap-3">
+              <KeyRound size={20} className="text-gray-400" />
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Trocar senha</h2>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Senha atual</label>
+                <input
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  className="input"
+                  placeholder="Digite a senha atual"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Nova senha</label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="input"
+                  placeholder="Mínimo 8 caracteres"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Confirmar senha</label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="input"
+                  placeholder="Repita a nova senha"
+                />
+              </div>
+            </div>
+            <button onClick={changePassword} disabled={savingPassword} className="btn-primary mt-5">
+              <Save size={16} />
+              {savingPassword ? 'Alterando...' : 'Alterar senha'}
+            </button>
           </div>
         </div>
       </div>
