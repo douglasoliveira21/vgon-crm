@@ -331,7 +331,6 @@ type DashboardStats struct {
 	MyConversations      int     `json:"my_conversations"`
 	ActiveDeals          int     `json:"active_deals"`
 	TotalDealsValue      float64 `json:"total_deals_value"`
-	CallsToday           int     `json:"calls_today"`
 	AvgResponseTime      float64 `json:"avg_response_time"`
 	ConnectedChannels    int     `json:"connected_channels"`
 }

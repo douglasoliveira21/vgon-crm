@@ -6,7 +6,6 @@ import {
   MessageSquare,
   TrendingUp,
   DollarSign,
-  Phone,
   Users,
   Clock,
   CheckCircle,
@@ -111,7 +110,7 @@ export default function MetricsPage() {
       </div>
 
       {/* Main Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <MetricCard
           label="Atendimentos"
           value={metrics.total_conversations || 0}
@@ -132,13 +131,6 @@ export default function MetricsPage() {
           icon={<DollarSign size={20} />}
           color="purple"
           change="+23%"
-        />
-        <MetricCard
-          label="Chamadas"
-          value={metrics.total_calls || 0}
-          icon={<Phone size={20} />}
-          color="orange"
-          change="+12%"
         />
       </div>
 

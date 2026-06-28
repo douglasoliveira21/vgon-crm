@@ -28,9 +28,6 @@ func GetDashboard(svc *services.Container) fiber.Handler {
 		// Total deals value
 		svc.DB.QueryRow("SELECT COALESCE(SUM(value), 0) FROM deals WHERE company_id = $1 AND status = 'open'", companyID).Scan(&stats.TotalDealsValue)
 
-		// Calls today
-		svc.DB.QueryRow("SELECT COUNT(*) FROM calls WHERE company_id = $1 AND created_at >= CURRENT_DATE", companyID).Scan(&stats.CallsToday)
-
 		// Connected channels
 		svc.DB.QueryRow("SELECT COUNT(*) FROM channels WHERE company_id = $1 AND status = 'connected'", companyID).Scan(&stats.ConnectedChannels)
 

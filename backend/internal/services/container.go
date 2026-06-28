@@ -19,7 +19,6 @@ type Container struct {
 	Message   *MessageService
 	Contact   *ContactService
 	Bot       *BotEngine
-	Asterisk  *AsteriskService
 	GLPI      *GLPIService
 	GLPIFlow  *GLPIFlowEngine
 }
@@ -38,7 +37,6 @@ func NewContainer(db *sql.DB, rdb *redis.Client, cfg *config.Config, wsHub *webs
 	container.Message = NewMessageService(db, rdb, wsHub)
 	container.Contact = NewContactService(db)
 	container.Bot = NewBotEngine(db, wsHub, container.Evolution)
-	container.Asterisk = NewAsteriskService(db, wsHub, cfg)
 	container.GLPI = NewGLPIService(cfg.GLPIBaseURL, cfg.GLPIAppToken)
 	container.GLPIFlow = NewGLPIFlowEngine(db, wsHub, container.Evolution, container.GLPI, cfg.GLPIUserToken)
 

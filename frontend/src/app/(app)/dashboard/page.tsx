@@ -8,7 +8,6 @@ import {
   Clock,
   UserCheck,
   TrendingUp,
-  Phone,
   Wifi,
   WifiOff,
   Plus,
@@ -23,7 +22,6 @@ interface DashboardData {
     my_conversations: number
     active_deals: number
     total_deals_value: number
-    calls_today: number
     connected_channels: number
     avg_response_time: number
   }
@@ -215,7 +213,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Quick Actions */}
-      <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
         <Link href="/conversations" className="card p-4 hover:shadow-md transition-shadow flex items-center gap-4">
           <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
             <MessageSquare size={20} className="text-blue-600" />
@@ -236,15 +234,6 @@ export default function DashboardPage() {
           </div>
         </Link>
 
-        <Link href="/calls" className="card p-4 hover:shadow-md transition-shadow flex items-center gap-4">
-          <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-            <Phone size={20} className="text-purple-600" />
-          </div>
-          <div>
-            <p className="font-medium text-gray-900">Chamadas</p>
-            <p className="text-sm text-gray-500">{stats?.calls_today || 0} hoje</p>
-          </div>
-        </Link>
       </div>
     </div>
   )

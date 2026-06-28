@@ -688,7 +688,6 @@ func GetMetrics(svc *services.Container) fiber.Handler {
 		var totalMessages int
 		var dealsWonValue, dealsOpenValue float64
 		var dealsWonCount int
-		var totalCalls int
 		var totalContacts int
 
 		// Conversations metrics
@@ -704,9 +703,6 @@ func GetMetrics(svc *services.Container) fiber.Handler {
 		svc.DB.QueryRow("SELECT COALESCE(SUM(value), 0) FROM deals WHERE company_id = $1 AND status = 'open'", companyID).Scan(&dealsOpenValue)
 		svc.DB.QueryRow("SELECT COUNT(*) FROM deals WHERE company_id = $1 AND status = 'won'", companyID).Scan(&dealsWonCount)
 
-		// Calls
-		svc.DB.QueryRow("SELECT COUNT(*) FROM calls WHERE company_id = $1", companyID).Scan(&totalCalls)
-
 		// Contacts
 		svc.DB.QueryRow("SELECT COUNT(*) FROM contacts WHERE company_id = $1", companyID).Scan(&totalContacts)
 
@@ -718,7 +714,6 @@ func GetMetrics(svc *services.Container) fiber.Handler {
 			"deals_won_value":        dealsWonValue,
 			"deals_open_value":       dealsOpenValue,
 			"deals_won_count":        dealsWonCount,
-			"total_calls":            totalCalls,
 			"total_contacts":         totalContacts,
 		}
 

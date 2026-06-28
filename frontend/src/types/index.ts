@@ -242,7 +242,6 @@ export interface DashboardStats {
   my_conversations: number
   active_deals: number
   total_deals_value: number
-  calls_today: number
   avg_response_time: number
   connected_channels: number
 }
