@@ -74,11 +74,23 @@ export default function Sidebar() {
         'border-dark-700 bg-dark-900 dark:border-gray-800 dark:bg-gray-950'
       )}
     >
-      <div className="flex h-[82px] items-center gap-3 border-b border-dark-700 px-4 dark:border-gray-800">
-        <img src="/favicon.png" alt="VGON Chat" className="h-10 w-10 rounded-xl object-cover" />
-        <div className={clsx('min-w-0 transition-opacity duration-200', showTextClass)}>
-          <img src="/logo-white.png" alt="VGON Chat" className="h-9 w-auto max-w-[150px] object-contain" />
-        </div>
+      <div className="flex h-[82px] items-center border-b border-dark-700 px-4 dark:border-gray-800">
+        <img
+          src="/favicon.png"
+          alt="VGON Chat"
+          className={clsx(
+            'object-contain transition-all duration-200',
+            sidebarPinned ? 'hidden' : 'h-10 w-10 rounded-xl group-hover/sidebar:hidden'
+          )}
+        />
+        <img
+          src="/logo-white.png"
+          alt="VGON Chat"
+          className={clsx(
+            'h-10 w-auto max-w-[180px] object-contain transition-all duration-200',
+            sidebarPinned ? 'block' : 'hidden group-hover/sidebar:block'
+          )}
+        />
       </div>
 
       <div className="flex items-center justify-between gap-2 px-4 py-3">
