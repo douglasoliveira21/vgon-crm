@@ -6,8 +6,8 @@ import { Providers } from '@/components/providers'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'EvoCRM Pro - CRM Omnichannel',
-  description: 'Sistema CRM completo com integração WhatsApp via Evolution API',
+  title: 'crmvgon - CRM de atendimento',
+  description: 'crmvgon centraliza conversas, contatos, Gmail, Outlook e canais de atendimento em um CRM.',
 }
 
 export default function RootLayout({

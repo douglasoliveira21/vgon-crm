@@ -1,8 +1,8 @@
 import Link from 'next/link'
 
 export const metadata = {
-  title: 'Politica de Privacidade | VGON CRM',
-  description: 'Politica de privacidade do aplicativo VGON CRM.',
+  title: 'Politica de Privacidade | crmvgon',
+  description: 'Politica de privacidade do aplicativo crmvgon.',
 }
 
 export default function PrivacyPolicyPage() {
@@ -11,7 +11,7 @@ export default function PrivacyPolicyPage() {
       <div className="mx-auto max-w-4xl px-6 py-12">
         <div className="mb-8">
           <Link href="/login" className="text-sm font-medium text-primary-600 hover:text-primary-700">
-            VGON CRM
+            crmvgon
           </Link>
           <h1 className="mt-4 text-3xl font-bold">Politica de Privacidade</h1>
           <p className="mt-2 text-sm text-gray-500">Ultima atualizacao: 28 de junho de 2026</p>
@@ -19,7 +19,7 @@ export default function PrivacyPolicyPage() {
 
         <section className="space-y-6 rounded-xl bg-white p-8 shadow-sm border border-gray-100">
           <p>
-            Esta Politica de Privacidade explica como o VGON CRM coleta, usa, armazena e protege
+            Esta Politica de Privacidade explica como o crmvgon coleta, usa, armazena e protege
             informacoes dos usuarios e dos contatos atendidos pela plataforma.
           </p>
 
@@ -35,7 +35,7 @@ export default function PrivacyPolicyPage() {
           <div>
             <h2 className="text-xl font-semibold">2. Integracao com e-mail, Gmail e Outlook</h2>
             <p className="mt-2 text-gray-700">
-              Quando o usuario conecta uma conta de e-mail ao VGON CRM, o sistema pode solicitar
+              Quando o usuario conecta uma conta de e-mail ao crmvgon, o sistema pode solicitar
               permissoes para ler mensagens recebidas e enviar respostas em nome da conta conectada.
               Essas permissoes sao usadas somente para exibir e responder e-mails dentro das
               conversas do CRM.
@@ -45,9 +45,9 @@ export default function PrivacyPolicyPage() {
           <div>
             <h2 className="text-xl font-semibold">3. Uso de dados do Google</h2>
             <p className="mt-2 text-gray-700">
-              O uso e a transferencia de informacoes recebidas das APIs do Google pelo VGON CRM
+              O uso e a transferencia de informacoes recebidas das APIs do Google pelo crmvgon
               obedecem a Politica de Dados de Usuario dos Servicos de API do Google, incluindo os
-              requisitos de Uso Limitado. O VGON CRM nao vende dados do Gmail, nao usa dados do
+              requisitos de Uso Limitado. O crmvgon nao vende dados do Gmail, nao usa dados do
               Gmail para publicidade e nao usa dados do Gmail para treinar modelos de inteligencia
               artificial.
             </p>

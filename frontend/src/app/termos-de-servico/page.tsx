@@ -1,8 +1,8 @@
 import Link from 'next/link'
 
 export const metadata = {
-  title: 'Termos de Servico | VGON CRM',
-  description: 'Termos de servico do aplicativo VGON CRM.',
+  title: 'Termos de Servico | crmvgon',
+  description: 'Termos de servico do aplicativo crmvgon.',
 }
 
 export default function TermsOfServicePage() {
@@ -11,7 +11,7 @@ export default function TermsOfServicePage() {
       <div className="mx-auto max-w-4xl px-6 py-12">
         <div className="mb-8">
           <Link href="/login" className="text-sm font-medium text-primary-600 hover:text-primary-700">
-            VGON CRM
+            crmvgon
           </Link>
           <h1 className="mt-4 text-3xl font-bold">Termos de Servico</h1>
           <p className="mt-2 text-sm text-gray-500">Ultima atualizacao: 28 de junho de 2026</p>
@@ -19,14 +19,14 @@ export default function TermsOfServicePage() {
 
         <section className="space-y-6 rounded-xl bg-white p-8 shadow-sm border border-gray-100">
           <p>
-            Estes Termos de Servico regulam o uso do VGON CRM, plataforma de atendimento e gestao
+            Estes Termos de Servico regulam o uso do crmvgon, plataforma de atendimento e gestao
             de conversas, contatos, canais e integracoes.
           </p>
 
           <div>
             <h2 className="text-xl font-semibold">1. Aceite dos termos</h2>
             <p className="mt-2 text-gray-700">
-              Ao acessar ou utilizar o VGON CRM, o usuario declara que leu, compreendeu e concorda
+              Ao acessar ou utilizar o crmvgon, o usuario declara que leu, compreendeu e concorda
               com estes termos e com a Politica de Privacidade.
             </p>
           </div>
@@ -34,7 +34,7 @@ export default function TermsOfServicePage() {
           <div>
             <h2 className="text-xl font-semibold">2. Uso permitido</h2>
             <p className="mt-2 text-gray-700">
-              O VGON CRM deve ser usado para fins legitimos de atendimento, relacionamento com
+              O crmvgon deve ser usado para fins legitimos de atendimento, relacionamento com
               clientes, organizacao comercial e comunicacao autorizada. O usuario e responsavel
               pelo conteudo enviado pela plataforma e pelas integracoes conectadas.
             </p>
@@ -52,7 +52,7 @@ export default function TermsOfServicePage() {
           <div>
             <h2 className="text-xl font-semibold">4. Permissoes de e-mail</h2>
             <p className="mt-2 text-gray-700">
-              Ao conectar uma conta Gmail ou Outlook, o usuario autoriza o VGON CRM a ler e-mails
+              Ao conectar uma conta Gmail ou Outlook, o usuario autoriza o crmvgon a ler e-mails
               recebidos e enviar respostas conforme necessario para o atendimento dentro da
               plataforma. O usuario pode revogar o acesso a qualquer momento nas configuracoes da
               conta Google ou Microsoft.
@@ -80,7 +80,7 @@ export default function TermsOfServicePage() {
           <div>
             <h2 className="text-xl font-semibold">7. Limitacao de responsabilidade</h2>
             <p className="mt-2 text-gray-700">
-              Na maxima extensao permitida pela lei, o VGON CRM nao se responsabiliza por perdas
+              Na maxima extensao permitida pela lei, o crmvgon nao se responsabiliza por perdas
               indiretas, lucros cessantes, indisponibilidade de provedores externos ou uso indevido
               da plataforma pelo usuario.
             </p>

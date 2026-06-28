@@ -7,18 +7,19 @@ export default function Home() {
       <section className="border-b border-gray-100 bg-gradient-to-b from-blue-50 to-white">
         <div className="mx-auto max-w-6xl px-6 py-16">
           <div className="max-w-3xl">
-            <p className="text-sm font-semibold uppercase tracking-wide text-primary-600">crmvgon</p>
+            <p className="text-sm font-semibold uppercase tracking-wide text-primary-600">Aplicativo crmvgon</p>
             <h1 className="mt-4 text-4xl font-bold tracking-tight text-gray-950 sm:text-5xl">
-              crmvgon e um CRM de atendimento para centralizar conversas com clientes.
+              crmvgon
             </h1>
             <p className="mt-5 text-lg leading-8 text-gray-600">
-              O aplicativo ajuda empresas a organizar contatos, equipes, conversas e canais de atendimento em um unico painel.
+              crmvgon e um aplicativo de CRM de atendimento que ajuda empresas a organizar contatos, equipes,
+              conversas e canais de atendimento em um unico painel.
               Com a integracao de e-mail, usuarios autorizados podem conectar Gmail ou Outlook para ler mensagens recebidas,
               responder clientes pelo CRM e manter o historico do atendimento em conversas.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link href="/login" className="btn-primary">
-                Acessar o CRM
+                Acessar o crmvgon
               </Link>
               <Link href="/politica-de-privacidade" className="btn-secondary">
                 Politica de Privacidade
