@@ -421,6 +421,61 @@ func execIfTableExists(tx *sql.Tx, tableName string, query string, args ...inter
 	return err
 }
 
+func quoteIdentifier(identifier string) string {
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
+}
+
+func cleanupUserReferences(tx *sql.Tx, userID string) error {
+	rows, err := tx.Query(`
+		SELECT
+			kcu.table_schema,
+			kcu.table_name,
+			kcu.column_name,
+			COALESCE(c.is_nullable = 'YES', false) AS is_nullable
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+			ON tc.constraint_name = kcu.constraint_name
+			AND tc.table_schema = kcu.table_schema
+		JOIN information_schema.constraint_column_usage ccu
+			ON ccu.constraint_name = tc.constraint_name
+			AND ccu.table_schema = tc.table_schema
+		JOIN information_schema.columns c
+			ON c.table_schema = kcu.table_schema
+			AND c.table_name = kcu.table_name
+			AND c.column_name = kcu.column_name
+		WHERE tc.constraint_type = 'FOREIGN KEY'
+			AND ccu.table_schema = 'public'
+			AND ccu.table_name = 'users'
+			AND ccu.column_name = 'id'
+			AND kcu.table_schema = 'public'
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var schemaName, tableName, columnName string
+		var isNullable bool
+		if err := rows.Scan(&schemaName, &tableName, &columnName, &isNullable); err != nil {
+			return err
+		}
+
+		qualifiedTable := quoteIdentifier(schemaName) + "." + quoteIdentifier(tableName)
+		quotedColumn := quoteIdentifier(columnName)
+		if isNullable {
+			_, err = tx.Exec("UPDATE "+qualifiedTable+" SET "+quotedColumn+" = NULL WHERE "+quotedColumn+" = $1", userID)
+		} else {
+			_, err = tx.Exec("DELETE FROM "+qualifiedTable+" WHERE "+quotedColumn+" = $1", userID)
+		}
+		if err != nil {
+			return err
+		}
+	}
+
+	return rows.Err()
+}
+
 // AdminGetTenantUsers returns all users for a specific tenant
 func AdminGetTenantUsers(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
@@ -655,15 +710,6 @@ func AdminDeleteUser(svc *services.Container) fiber.Handler {
 		cleanupStatements := []string{
 			`DELETE FROM message_attachments WHERE message_id IN (SELECT id FROM messages WHERE company_id = $2 AND sender_type = 'user' AND sender_id = $1::uuid)`,
 			`DELETE FROM messages WHERE company_id = $2 AND sender_type = 'user' AND sender_id = $1::uuid`,
-			`DELETE FROM conversation_notes WHERE user_id = $1`,
-			`DELETE FROM audit_logs WHERE user_id = $1`,
-			`DELETE FROM internal_announcements WHERE author_id = $1`,
-			`UPDATE contacts SET assigned_to = NULL WHERE assigned_to = $1`,
-			`UPDATE conversations SET assigned_to = NULL WHERE assigned_to = $1`,
-			`UPDATE deals SET assigned_to = NULL WHERE assigned_to = $1`,
-			`UPDATE quick_replies SET created_by = NULL WHERE created_by = $1`,
-			`UPDATE campaigns SET created_by = NULL WHERE created_by = $1`,
-			`UPDATE calls SET user_id = NULL WHERE user_id = $1`,
 		}
 
 		for _, stmt := range cleanupStatements {
@@ -678,18 +724,8 @@ func AdminDeleteUser(svc *services.Container) fiber.Handler {
 			}
 		}
 
-		optionalCleanup := []struct {
-			table string
-			query string
-		}{
-			{"password_reset_tokens", `DELETE FROM password_reset_tokens WHERE user_id = $1`},
-			{"phone_extensions", `UPDATE phone_extensions SET user_id = NULL WHERE user_id = $1`},
-			{"call_records", `UPDATE call_records SET user_id = NULL WHERE user_id = $1`},
-		}
-		for _, cleanup := range optionalCleanup {
-			if err = execIfTableExists(tx, cleanup.table, cleanup.query, userID); err != nil {
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to clean optional user history"})
-			}
+		if err = cleanupUserReferences(tx, userID); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to clean user references"})
 		}
 
 		result, err := tx.Exec("DELETE FROM users WHERE id = $1", userID)
