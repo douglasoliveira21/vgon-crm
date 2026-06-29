@@ -116,7 +116,7 @@ func (s *MessageService) SaveAndSendMessage(companyID, userID string, req *SendT
 }
 
 // GetConversations returns conversations for a company
-func (s *MessageService) GetConversations(companyID string, status string, assignedTo string, teamID string, channelID string, unassigned bool, limit, offset int) ([]models.Conversation, error) {
+func (s *MessageService) GetConversations(companyID string, status string, assignedTo string, teamID string, channelID string, unassigned bool, limit, offset int, conversationIDs ...string) ([]models.Conversation, error) {
 	if limit == 0 {
 		limit = 50
 	}
@@ -129,16 +129,23 @@ func (s *MessageService) GetConversations(companyID string, status string, assig
 			   COALESCE(c.customer_company_id, co.customer_company_id) as customer_company_id,
 			   cc.name as customer_company_name,
 			   c.first_response_due_at, c.resolution_due_at, c.first_response_at, c.resolved_at,
-			   u.name as assigned_to_name, ch.name as channel_name
+			   u.name as assigned_to_name, t.name as team_name, ch.name as channel_name
 		FROM conversations c
 		LEFT JOIN contacts co ON c.contact_id = co.id
 		LEFT JOIN customer_companies cc ON COALESCE(c.customer_company_id, co.customer_company_id) = cc.id
 		LEFT JOIN users u ON c.assigned_to = u.id
+		LEFT JOIN teams t ON c.team_id = t.id
 		LEFT JOIN channels ch ON c.channel_id = ch.id
 		WHERE c.company_id = $1
 	`
 	args := []interface{}{companyID}
 	argIdx := 2
+
+	if len(conversationIDs) > 0 && conversationIDs[0] != "" {
+		query += fmt.Sprintf(" AND c.id = $%d", argIdx)
+		args = append(args, conversationIDs[0])
+		argIdx++
+	}
 
 	if status != "" {
 		// Support comma-separated status values
@@ -200,7 +207,7 @@ func (s *MessageService) GetConversations(companyID string, status string, assig
 			&conv.ContactName, &conv.ContactPhone, &conv.ContactAvatarURL,
 			&conv.CustomerCompanyID, &conv.CustomerCompanyName,
 			&conv.FirstResponseDueAt, &conv.ResolutionDueAt, &conv.FirstResponseAt, &conv.ResolvedAt,
-			&conv.AssignedToName, &conv.ChannelName,
+			&conv.AssignedToName, &conv.TeamName, &conv.ChannelName,
 		)
 		if err != nil {
 			continue
@@ -209,6 +216,17 @@ func (s *MessageService) GetConversations(companyID string, status string, assig
 	}
 
 	return conversations, nil
+}
+
+func (s *MessageService) GetConversationByID(companyID, conversationID string) (*models.Conversation, error) {
+	conversations, err := s.GetConversations(companyID, "", "", "", "", false, 1, 0, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	if len(conversations) == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return &conversations[0], nil
 }
 
 // AssignConversation assigns a conversation to a user
@@ -234,12 +252,18 @@ func (s *MessageService) AssignConversation(conversationID, userID, companyID st
 func (s *MessageService) TransferConversation(conversationID, companyID string, toUserID *string, toTeamID *string) error {
 	if toUserID != nil {
 		_, err := s.db.Exec(`
-			UPDATE conversations SET assigned_to = $1, updated_at = NOW()
+			UPDATE conversations SET assigned_to = $1, status = 'in_progress', updated_at = NOW()
 			WHERE id = $2 AND company_id = $3
 		`, *toUserID, conversationID, companyID)
 		if err != nil {
 			return err
 		}
+
+		s.wsHub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
+			"id":          conversationID,
+			"assigned_to": *toUserID,
+			"status":      "in_progress",
+		})
 	}
 
 	if toTeamID != nil {
@@ -250,6 +274,12 @@ func (s *MessageService) TransferConversation(conversationID, companyID string, 
 		if err != nil {
 			return err
 		}
+
+		s.wsHub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
+			"id":          conversationID,
+			"team_id":     *toTeamID,
+			"assigned_to": nil,
+		})
 	}
 
 	return nil

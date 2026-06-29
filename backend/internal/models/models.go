@@ -158,6 +158,7 @@ type Conversation struct {
 	FirstResponseAt     *time.Time `json:"first_response_at,omitempty"`
 	ResolvedAt          *time.Time `json:"resolved_at,omitempty"`
 	AssignedToName      *string    `json:"assigned_to_name,omitempty"`
+	TeamName            *string    `json:"team_name,omitempty"`
 	ChannelName         *string    `json:"channel_name,omitempty"`
 	CreatedAt           time.Time  `json:"created_at"`
 	UpdatedAt           time.Time  `json:"updated_at"`

@@ -57,6 +57,7 @@ interface Conversation {
   assigned_to_name?: string
   channel_name?: string
   team_id?: string
+  team_name?: string
   created_at: string
 }
 
@@ -594,9 +595,16 @@ export default function ConversationsPage() {
   // Transfer conversation
   const transferToUser = async (userId: string) => {
     if (!selectedConv) return
+    const selectedUser = users.find((u) => u.id === userId)
     try {
       await api.post(`/conversations/${selectedConv.id}/transfer`, { user_id: userId })
       toast.success('Conversa transferida')
+      setSelectedConv({
+        ...selectedConv,
+        assigned_to: userId,
+        assigned_to_name: selectedUser?.name || 'Atendente selecionado',
+        status: 'in_progress',
+      })
       setShowTransferModal(false)
       fetchConversations()
     } catch {
@@ -606,9 +614,17 @@ export default function ConversationsPage() {
 
   const transferToTeam = async (teamId: string) => {
     if (!selectedConv) return
+    const selectedTeam = teams.find((t) => t.id === teamId)
     try {
       await api.post(`/conversations/${selectedConv.id}/transfer`, { team_id: teamId })
       toast.success('Conversa transferida para o time')
+      setSelectedConv({
+        ...selectedConv,
+        team_id: teamId,
+        team_name: selectedTeam?.name || 'Time selecionado',
+        assigned_to: undefined,
+        assigned_to_name: undefined,
+      })
       setShowTransferModal(false)
       fetchConversations()
     } catch {
@@ -1836,8 +1852,20 @@ function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, 
     }
   }
 
+  const assignedUserName = conversation.assigned_to_name || users.find((u) => u.id === conversation.assigned_to)?.name
+  const assignedTeamName = conversation.team_name || teams.find((t) => t.id === conversation.team_id)?.name
+  const statusLabel =
+    conversation.status === 'open' ? 'Aberta' :
+    conversation.status === 'pending' ? 'Pendente' :
+    conversation.status === 'resolved' ? 'Resolvida' :
+    conversation.status === 'in_progress' ? 'Em atendimento' : conversation.status
+  const statusClass =
+    conversation.status === 'open' ? 'badge-green' :
+    conversation.status === 'in_progress' ? 'badge-blue' :
+    conversation.status === 'pending' ? 'badge-yellow' : 'badge-gray'
+
   return (
-    <div className="w-72 border-l border-gray-200 bg-white p-4 overflow-y-auto hidden xl:block">
+    <div className="hidden w-80 overflow-y-auto border-l border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 xl:block">
       {/* Avatar and name */}
       <div className="text-center mb-4">
         <div className="w-14 h-14 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-2 overflow-hidden">
@@ -1853,42 +1881,35 @@ function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, 
             </span>
           )}
         </div>
-        <h3 className="font-semibold text-gray-900 text-sm">{conversation.contact_name}</h3>
-        <p className="text-xs text-gray-500">{conversation.contact_phone}</p>
+        <h3 className="font-semibold text-gray-900 text-sm dark:text-white">{conversation.contact_name}</h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400">{conversation.contact_phone}</p>
       </div>
 
       <div className="space-y-4">
         {/* Status */}
-        <div>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-950">
           <label className="text-xs font-medium text-gray-400 uppercase">Status</label>
-          <p className="text-sm mt-1">
-            <span className={`badge ${
-              conversation.status === 'open' ? 'badge-green' :
-              conversation.status === 'in_progress' ? 'badge-blue' :
-              conversation.status === 'pending' ? 'badge-yellow' : 'badge-gray'
-            }`}>
-              {conversation.status === 'open' && 'Aberta'}
-              {conversation.status === 'pending' && 'Pendente'}
-              {conversation.status === 'resolved' && 'Resolvida'}
-              {conversation.status === 'in_progress' && 'Em atendimento'}
-            </span>
+          <p className="text-sm mt-2">
+            <span className={`badge ${statusClass}`}>{statusLabel}</span>
           </p>
         </div>
 
-        {conversation.assigned_to_name && (
-          <div>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-950">
+          <div className="flex items-center justify-between gap-2">
             <label className="text-xs font-medium text-gray-400 uppercase">Atendente</label>
-            <div className="flex items-center justify-between mt-1">
-              <p className="text-sm text-gray-700">{conversation.assigned_to_name}</p>
+            {assignedUserName && (
               <button
                 onClick={onUnassign}
                 className="text-xs text-red-500 hover:text-red-700 font-medium"
               >
                 Desatribuir
               </button>
-            </div>
+            )}
           </div>
-        )}
+          <p className="mt-2 text-sm font-semibold text-gray-900 dark:text-white">
+            {assignedUserName || 'Sem atendente atribuido'}
+          </p>
+        </div>
 
         {/* Assign to User */}
         <div>
@@ -1898,9 +1919,12 @@ function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, 
               onClick={() => { setShowAssignUser(!showAssignUser); setShowAssignTeam(false) }}
               className="text-xs text-primary-600 hover:text-primary-700"
             >
-              {showAssignUser ? 'Fechar' : 'Selecionar'}
+              {showAssignUser ? 'Fechar' : assignedUserName ? 'Trocar' : 'Selecionar'}
             </button>
           </div>
+          <p className="mb-2 rounded-lg bg-gray-50 px-3 py-2 text-sm font-medium text-gray-800 dark:bg-gray-950 dark:text-gray-100">
+            {assignedUserName || 'Nenhum tecnico selecionado'}
+          </p>
           {showAssignUser && (
             <div className="p-2 bg-gray-50 rounded-lg space-y-1 max-h-40 overflow-y-auto">
               {users.map(u => (
@@ -1931,9 +1955,12 @@ function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, 
               onClick={() => { setShowAssignTeam(!showAssignTeam); setShowAssignUser(false) }}
               className="text-xs text-primary-600 hover:text-primary-700"
             >
-              {showAssignTeam ? 'Fechar' : 'Selecionar'}
+              {showAssignTeam ? 'Fechar' : assignedTeamName ? 'Trocar' : 'Selecionar'}
             </button>
           </div>
+          <p className="mb-2 rounded-lg bg-gray-50 px-3 py-2 text-sm font-medium text-gray-800 dark:bg-gray-950 dark:text-gray-100">
+            {assignedTeamName || 'Nenhum time selecionado'}
+          </p>
           {showAssignTeam && (
             <div className="p-2 bg-gray-50 rounded-lg space-y-1 max-h-40 overflow-y-auto">
               {teams.map(t => (

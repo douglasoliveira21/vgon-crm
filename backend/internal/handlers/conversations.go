@@ -133,18 +133,15 @@ func GetConversation(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 		conversationID := c.Params("id")
 
-		conversations, err := svc.Message.GetConversations(companyID, "", "", "", "", false, 1, 0)
+		conversation, err := svc.Message.GetConversationByID(companyID, conversationID)
 		if err != nil {
+			if err == sql.ErrNoRows {
+				return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Conversation not found"})
+			}
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		for _, conv := range conversations {
-			if conv.ID == conversationID {
-				return c.JSON(conv)
-			}
-		}
-
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Conversation not found"})
+		return c.JSON(conversation)
 	}
 }
 
