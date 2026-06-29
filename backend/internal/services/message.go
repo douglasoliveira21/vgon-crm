@@ -249,7 +249,7 @@ func (s *MessageService) AssignConversation(conversationID, userID, companyID st
 }
 
 // TransferConversation transfers a conversation to another user or team
-func (s *MessageService) TransferConversation(conversationID, companyID string, toUserID *string, toTeamID *string) error {
+func (s *MessageService) TransferConversation(conversationID, companyID string, toUserID *string, toTeamID *string, clearTeam bool) error {
 	if toUserID != nil {
 		_, err := s.db.Exec(`
 			UPDATE conversations SET assigned_to = $1, status = 'in_progress', updated_at = NOW()
@@ -279,6 +279,21 @@ func (s *MessageService) TransferConversation(conversationID, companyID string, 
 			"id":          conversationID,
 			"team_id":     *toTeamID,
 			"assigned_to": nil,
+		})
+	}
+
+	if clearTeam {
+		_, err := s.db.Exec(`
+			UPDATE conversations SET team_id = NULL, updated_at = NOW()
+			WHERE id = $1 AND company_id = $2
+		`, conversationID, companyID)
+		if err != nil {
+			return err
+		}
+
+		s.wsHub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
+			"id":      conversationID,
+			"team_id": nil,
 		})
 	}
 

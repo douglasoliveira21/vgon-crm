@@ -189,14 +189,15 @@ func TransferConversation(svc *services.Container) fiber.Handler {
 		conversationID := c.Params("id")
 
 		var body struct {
-			UserID *string `json:"user_id"`
-			TeamID *string `json:"team_id"`
+			UserID    *string `json:"user_id"`
+			TeamID    *string `json:"team_id"`
+			ClearTeam bool    `json:"clear_team"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
 		}
 
-		if err := svc.Message.TransferConversation(conversationID, companyID, body.UserID, body.TeamID); err != nil {
+		if err := svc.Message.TransferConversation(conversationID, companyID, body.UserID, body.TeamID, body.ClearTeam); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 

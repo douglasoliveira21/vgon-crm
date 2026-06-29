@@ -95,6 +95,14 @@ interface TeamItem {
   member_count: number
 }
 
+interface ContactDeal {
+  id: string
+  title: string
+  status: string
+  funnel_name?: string
+  stage_name?: string
+}
+
 interface CustomerCompany {
   id: string
   name: string
@@ -733,6 +741,18 @@ export default function ConversationsPage() {
     if (!dateStr) return ''
     const date = new Date(dateStr)
     return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  }
+
+  const unassignTeam = async () => {
+    if (!selectedConv) return
+    try {
+      await api.post(`/conversations/${selectedConv.id}/transfer`, { clear_team: true })
+      toast.success('Time desatribuido')
+      setSelectedConv({ ...selectedConv, team_id: undefined, team_name: undefined })
+      fetchConversations()
+    } catch {
+      toast.error('Erro ao desatribuir time')
+    }
   }
 
   const resolveAvatar = (url?: string) => {
@@ -1534,7 +1554,7 @@ export default function ConversationsPage() {
 
       {/* Right Panel - Contact */}
       {selectedConv && (
-        <ContactPanel conversation={selectedConv} users={users} teams={teams} onAssignUser={transferToUser} onAssignTeam={transferToTeam} onUnassign={unassignConversation} />
+        <ContactPanel conversation={selectedConv} users={users} teams={teams} onAssignUser={transferToUser} onAssignTeam={transferToTeam} onUnassign={unassignConversation} onUnassignTeam={unassignTeam} />
       )}
 
       {/* Transfer Modal */}
@@ -1796,24 +1816,36 @@ function ConversationSLABar({ conversation }: { conversation: Conversation }) {
 }
 
 // Contact Panel with Tags and Funnel
-function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, onUnassign }: { conversation: Conversation; users: UserItem[]; teams: TeamItem[]; onAssignUser: (userId: string) => void; onAssignTeam: (teamId: string) => void; onUnassign: () => void }) {
+function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, onUnassign, onUnassignTeam }: { conversation: Conversation; users: UserItem[]; teams: TeamItem[]; onAssignUser: (userId: string) => void; onAssignTeam: (teamId: string) => void; onUnassign: () => void; onUnassignTeam: () => void }) {
   const [tags, setTags] = useState<Array<{id: string; name: string; color: string}>>([])
   const [contactTags, setContactTags] = useState<Array<{id: string; name: string; color: string}>>([])
   const [funnels, setFunnels] = useState<Array<{id: string; name: string; stages: Array<{id: string; name: string}>}>>([])
+  const [contactDeals, setContactDeals] = useState<ContactDeal[]>([])
   const [showTagSelect, setShowTagSelect] = useState(false)
   const [showFunnelSelect, setShowFunnelSelect] = useState(false)
   const [showAssignUser, setShowAssignUser] = useState(false)
   const [showAssignTeam, setShowAssignTeam] = useState(false)
 
+  const loadContactPanelData = async () => {
+    if (!conversation.contact_id) {
+      setContactTags([])
+      setContactDeals([])
+      return
+    }
+
+    const [contactRes, dealsRes] = await Promise.all([
+      api.get(`/contacts/${conversation.contact_id}`).catch(() => null),
+      api.get('/deals', { params: { contact_id: conversation.contact_id } }).catch(() => null),
+    ])
+
+    setContactTags(contactRes?.data?.tags || [])
+    setContactDeals((dealsRes?.data?.deals || []).filter((deal: ContactDeal) => deal.status === 'open'))
+  }
+
   useEffect(() => {
     api.get('/tags').then(res => setTags(res.data.tags || [])).catch(() => {})
     api.get('/funnels').then(res => setFunnels(res.data.funnels || [])).catch(() => {})
-    // Fetch contact tags
-    if (conversation.contact_id) {
-      api.get(`/contacts/${conversation.contact_id}`).then(res => {
-        setContactTags(res.data.tags || [])
-      }).catch(() => {})
-    }
+    loadContactPanelData()
   }, [conversation.id])
 
   const addTag = async (tagId: string) => {
@@ -1821,6 +1853,7 @@ function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, 
       await api.post(`/contacts/${conversation.contact_id}/tags`, { tag_id: tagId })
       const tag = tags.find(t => t.id === tagId)
       if (tag) setContactTags(prev => [...prev, tag])
+      await loadContactPanelData()
       toast.success('Tag adicionada')
       setShowTagSelect(false)
     } catch {
@@ -1832,6 +1865,7 @@ function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, 
     try {
       await api.delete(`/contacts/${conversation.contact_id}/tags/${tagId}`)
       setContactTags(prev => prev.filter(t => t.id !== tagId))
+      await loadContactPanelData()
       toast.success('Tag removida')
     } catch {}
   }
@@ -1845,10 +1879,22 @@ function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, 
         value: 0,
         contact_id: conversation.contact_id || '',
       })
+      await loadContactPanelData()
       toast.success('Adicionado ao funil!')
       setShowFunnelSelect(false)
     } catch {
       toast.error('Erro ao adicionar ao funil')
+    }
+  }
+
+  const removeFromFunnel = async (dealId: string) => {
+    try {
+      await api.put(`/deals/${dealId}`, { status: 'lost', loss_reason: 'Removido do atendimento' })
+      setContactDeals(prev => prev.filter(deal => deal.id !== dealId))
+      await loadContactPanelData()
+      toast.success('Funil removido')
+    } catch {
+      toast.error('Erro ao remover do funil')
     }
   }
 
@@ -1895,6 +1941,11 @@ function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, 
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-950">
+          <label className="text-xs font-medium text-gray-400 uppercase">Canal</label>
+          <p className="mt-2 text-sm font-semibold text-gray-900 dark:text-white">{conversation.channel_name || 'WhatsApp'}</p>
+        </div>
+
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-950">
           <div className="flex items-center justify-between gap-2">
             <label className="text-xs font-medium text-gray-400 uppercase">Atendente</label>
             {assignedUserName && (
@@ -1915,12 +1966,19 @@ function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, 
         <div>
           <div className="flex items-center justify-between mb-2">
             <label className="text-xs font-medium text-gray-400 uppercase">Atribuir a Técnico</label>
-            <button
-              onClick={() => { setShowAssignUser(!showAssignUser); setShowAssignTeam(false) }}
-              className="text-xs text-primary-600 hover:text-primary-700"
-            >
-              {showAssignUser ? 'Fechar' : assignedUserName ? 'Trocar' : 'Selecionar'}
-            </button>
+            <div className="flex items-center gap-2">
+              {assignedUserName && (
+                <button onClick={onUnassign} className="text-xs font-medium text-red-500 hover:text-red-700">
+                  Desatribuir
+                </button>
+              )}
+              <button
+                onClick={() => { setShowAssignUser(!showAssignUser); setShowAssignTeam(false) }}
+                className="text-xs text-primary-600 hover:text-primary-700"
+              >
+                {showAssignUser ? 'Fechar' : assignedUserName ? 'Trocar' : 'Selecionar'}
+              </button>
+            </div>
           </div>
           <p className="mb-2 rounded-lg bg-gray-50 px-3 py-2 text-sm font-medium text-gray-800 dark:bg-gray-950 dark:text-gray-100">
             {assignedUserName || 'Nenhum tecnico selecionado'}
@@ -1951,12 +2009,19 @@ function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, 
         <div>
           <div className="flex items-center justify-between mb-2">
             <label className="text-xs font-medium text-gray-400 uppercase">Atribuir a Time</label>
-            <button
-              onClick={() => { setShowAssignTeam(!showAssignTeam); setShowAssignUser(false) }}
-              className="text-xs text-primary-600 hover:text-primary-700"
-            >
-              {showAssignTeam ? 'Fechar' : assignedTeamName ? 'Trocar' : 'Selecionar'}
-            </button>
+            <div className="flex items-center gap-2">
+              {assignedTeamName && (
+                <button onClick={onUnassignTeam} className="text-xs font-medium text-red-500 hover:text-red-700">
+                  Desatribuir
+                </button>
+              )}
+              <button
+                onClick={() => { setShowAssignTeam(!showAssignTeam); setShowAssignUser(false) }}
+                className="text-xs text-primary-600 hover:text-primary-700"
+              >
+                {showAssignTeam ? 'Fechar' : assignedTeamName ? 'Trocar' : 'Selecionar'}
+              </button>
+            </div>
           </div>
           <p className="mb-2 rounded-lg bg-gray-50 px-3 py-2 text-sm font-medium text-gray-800 dark:bg-gray-950 dark:text-gray-100">
             {assignedTeamName || 'Nenhum time selecionado'}
@@ -1981,11 +2046,6 @@ function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, 
               )}
             </div>
           )}
-        </div>
-
-        <div>
-          <label className="text-xs font-medium text-gray-400 uppercase">Canal</label>
-          <p className="text-sm text-gray-700 mt-1">{conversation.channel_name || 'WhatsApp'}</p>
         </div>
 
         {/* Tags */}
@@ -2072,6 +2132,32 @@ function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, 
               )}
             </div>
           )}
+
+          <div className="mt-2 space-y-2">
+            {contactDeals.map((deal) => (
+              <div key={deal.id} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-800 dark:bg-gray-950">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+                      {deal.funnel_name || 'Funil'}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {deal.stage_name || 'Etapa'} · {deal.title}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => removeFromFunnel(deal.id)}
+                    className="shrink-0 text-xs font-medium text-red-500 hover:text-red-700"
+                  >
+                    Remover
+                  </button>
+                </div>
+              </div>
+            ))}
+            {contactDeals.length === 0 && !showFunnelSelect && (
+              <p className="text-xs text-gray-400">Sem funil vinculado</p>
+            )}
+          </div>
         </div>
       </div>
     </div>

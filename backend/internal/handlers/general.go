@@ -336,13 +336,15 @@ func GetDeals(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 		funnelID := c.Query("funnel_id")
 		stageID := c.Query("stage_id")
+		contactID := c.Query("contact_id")
 
 		query := `
-			SELECT d.id, d.title, d.value, d.status, d.stage_id,
-				   c.name as contact_name, u.name as assigned_to_name, fs.name as stage_name
+			SELECT d.id, d.title, d.value, d.status, d.funnel_id, d.stage_id,
+				   c.name as contact_name, u.name as assigned_to_name, f.name as funnel_name, fs.name as stage_name
 			FROM deals d
 			LEFT JOIN contacts c ON d.contact_id = c.id
 			LEFT JOIN users u ON d.assigned_to = u.id
+			LEFT JOIN funnels f ON d.funnel_id = f.id
 			LEFT JOIN funnel_stages fs ON d.stage_id = fs.id
 			WHERE d.company_id = $1
 		`
@@ -357,6 +359,12 @@ func GetDeals(svc *services.Container) fiber.Handler {
 		if stageID != "" {
 			query += " AND d.stage_id = $" + string(rune('0'+idx))
 			args = append(args, stageID)
+			idx++
+		}
+		if contactID != "" {
+			query += " AND d.contact_id = $" + string(rune('0'+idx))
+			args = append(args, contactID)
+			idx++
 		}
 
 		query += " ORDER BY d.created_at DESC"
@@ -369,14 +377,14 @@ func GetDeals(svc *services.Container) fiber.Handler {
 
 		var deals []map[string]interface{}
 		for rows.Next() {
-			var id, title, status, stageIDVal string
+			var id, title, status, funnelIDVal, stageIDVal string
 			var value float64
-			var contactName, assignedToName, stageName *string
-			rows.Scan(&id, &title, &value, &status, &stageIDVal, &contactName, &assignedToName, &stageName)
+			var contactName, assignedToName, funnelName, stageName *string
+			rows.Scan(&id, &title, &value, &status, &funnelIDVal, &stageIDVal, &contactName, &assignedToName, &funnelName, &stageName)
 			deals = append(deals, map[string]interface{}{
 				"id": id, "title": title, "value": value, "status": status,
-				"stage_id": stageIDVal, "contact_name": contactName,
-				"assigned_to_name": assignedToName, "stage_name": stageName,
+				"funnel_id": funnelIDVal, "stage_id": stageIDVal, "contact_name": contactName,
+				"assigned_to_name": assignedToName, "funnel_name": funnelName, "stage_name": stageName,
 			})
 		}
 
@@ -433,15 +441,15 @@ func UpdateDeal(svc *services.Container) fiber.Handler {
 		dealID := c.Params("id")
 
 		var body struct {
-			Title      string  `json:"title"`
-			Value      float64 `json:"value"`
-			Status     string  `json:"status"`
-			LossReason string  `json:"loss_reason"`
+			Title      string   `json:"title"`
+			Value      *float64 `json:"value"`
+			Status     string   `json:"status"`
+			LossReason string   `json:"loss_reason"`
 		}
 		c.BodyParser(&body)
 
 		svc.DB.Exec(`
-			UPDATE deals SET title = COALESCE(NULLIF($1, ''), title), value = $2, 
+			UPDATE deals SET title = COALESCE(NULLIF($1, ''), title), value = COALESCE($2, value),
 			status = COALESCE(NULLIF($3, ''), status), loss_reason = NULLIF($4, ''), updated_at = NOW()
 			WHERE id = $5 AND company_id = $6
 		`, body.Title, body.Value, body.Status, body.LossReason, dealID, companyID)
