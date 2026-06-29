@@ -327,7 +327,7 @@ func UpdateTenant(svc *services.Container) fiber.Handler {
 	}
 }
 
-// DeleteTenant permanently deletes a tenant and all company data via cascades.
+// DeleteTenant permanently deletes a tenant and all company data.
 func DeleteTenant(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		tenantID := c.Params("id")
@@ -347,8 +347,18 @@ func DeleteTenant(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load tenant"})
 		}
 
+		if err = cleanupForeignKeyReferences(tx, "companies", tenantID); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error":   "Failed to clean tenant references",
+				"details": err.Error(),
+			})
+		}
+
 		if _, err = tx.Exec("DELETE FROM companies WHERE id = $1", tenantID); err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete tenant data"})
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error":   "Failed to delete tenant data",
+				"details": err.Error(),
+			})
 		}
 
 		if err = tx.Commit(); err != nil {
@@ -425,7 +435,7 @@ func quoteIdentifier(identifier string) string {
 	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
 }
 
-func cleanupUserReferences(tx *sql.Tx, userID string) error {
+func cleanupForeignKeyReferences(tx *sql.Tx, referencedTable string, referencedID string) error {
 	rows, err := tx.Query(`
 		SELECT
 			kcu.table_schema,
@@ -445,10 +455,11 @@ func cleanupUserReferences(tx *sql.Tx, userID string) error {
 			AND c.column_name = kcu.column_name
 		WHERE tc.constraint_type = 'FOREIGN KEY'
 			AND ccu.table_schema = 'public'
-			AND ccu.table_name = 'users'
+			AND ccu.table_name = $1
 			AND ccu.column_name = 'id'
 			AND kcu.table_schema = 'public'
-	`)
+			AND NOT (kcu.table_schema = 'public' AND kcu.table_name = $1)
+	`, referencedTable)
 	if err != nil {
 		return err
 	}
@@ -464,16 +475,20 @@ func cleanupUserReferences(tx *sql.Tx, userID string) error {
 		qualifiedTable := quoteIdentifier(schemaName) + "." + quoteIdentifier(tableName)
 		quotedColumn := quoteIdentifier(columnName)
 		if isNullable {
-			_, err = tx.Exec("UPDATE "+qualifiedTable+" SET "+quotedColumn+" = NULL WHERE "+quotedColumn+" = $1", userID)
+			_, err = tx.Exec("UPDATE "+qualifiedTable+" SET "+quotedColumn+" = NULL WHERE "+quotedColumn+" = $1", referencedID)
 		} else {
-			_, err = tx.Exec("DELETE FROM "+qualifiedTable+" WHERE "+quotedColumn+" = $1", userID)
+			_, err = tx.Exec("DELETE FROM "+qualifiedTable+" WHERE "+quotedColumn+" = $1", referencedID)
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("%s.%s.%s: %w", schemaName, tableName, columnName, err)
 		}
 	}
 
 	return rows.Err()
+}
+
+func cleanupUserReferences(tx *sql.Tx, userID string) error {
+	return cleanupForeignKeyReferences(tx, "users", userID)
 }
 
 // AdminGetTenantUsers returns all users for a specific tenant
@@ -720,17 +735,26 @@ func AdminDeleteUser(svc *services.Container) fiber.Handler {
 				_, execErr = tx.Exec(stmt, userID)
 			}
 			if execErr != nil {
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to clean user history"})
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+					"error":   "Failed to clean user history",
+					"details": execErr.Error(),
+				})
 			}
 		}
 
 		if err = cleanupUserReferences(tx, userID); err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to clean user references"})
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error":   "Failed to clean user references",
+				"details": err.Error(),
+			})
 		}
 
 		result, err := tx.Exec("DELETE FROM users WHERE id = $1", userID)
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete user"})
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error":   "Failed to delete user",
+				"details": err.Error(),
+			})
 		}
 		rowsAffected, _ := result.RowsAffected()
 		if rowsAffected == 0 {
