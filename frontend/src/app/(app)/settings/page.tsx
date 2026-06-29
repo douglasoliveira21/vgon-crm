@@ -171,7 +171,7 @@ function NotificationAlertEvents() {
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Eventos de alerta para conversas</h2>
       </div>
       <p className="text-xs text-gray-400 mb-4">
-        O som será emitido apenas quando a janela do navegador não estiver ativa.
+        Os alertas são emitidos para novas mensagens conforme as regras abaixo, inclusive com a aba em segundo plano quando permitido pelo navegador.
       </p>
 
       <div className="space-y-3">
@@ -220,6 +220,8 @@ function NotificationAlertEvents() {
 
 function NotificationSoundSettings() {
   const [enabled, setEnabled] = useState(true)
+  const [browserEnabled, setBrowserEnabled] = useState(true)
+  const [browserPermission, setBrowserPermission] = useState<'default' | 'granted' | 'denied' | 'unsupported'>('unsupported')
   const [sound, setSound] = useState('notification-1')
   const [volume, setVolume] = useState(50)
 
@@ -236,14 +238,17 @@ function NotificationSoundSettings() {
     try {
       const settings = JSON.parse(localStorage.getItem('notification_settings') || '{}')
       if (settings.enabled !== undefined) setEnabled(settings.enabled)
+      if (settings.browserEnabled !== undefined) setBrowserEnabled(settings.browserEnabled)
       if (settings.sound) setSound(settings.sound)
       if (settings.volume !== undefined) setVolume(settings.volume)
+      setBrowserPermission('Notification' in window ? Notification.permission : 'unsupported')
     } catch {}
   }, [])
 
-  const saveSettings = (newEnabled: boolean, newSound: string, newVolume: number) => {
+  const saveSettings = (newEnabled: boolean, newSound: string, newVolume: number, newBrowserEnabled = browserEnabled) => {
     localStorage.setItem('notification_settings', JSON.stringify({
       enabled: newEnabled,
+      browserEnabled: newBrowserEnabled,
       sound: newSound,
       volume: newVolume,
     }))
@@ -253,6 +258,31 @@ function NotificationSoundSettings() {
     setEnabled(val)
     saveSettings(val, sound, volume)
     toast.success(val ? 'Som de notificação ativado' : 'Som de notificação desativado')
+  }
+
+  const toggleBrowserEnabled = async (val: boolean) => {
+    if (!('Notification' in window)) {
+      setBrowserPermission('unsupported')
+      toast.error('Este navegador não suporta notificações.')
+      return
+    }
+
+    let permission = Notification.permission
+    if (val && permission === 'default') {
+      permission = await Notification.requestPermission()
+    }
+
+    setBrowserPermission(permission)
+    if (val && permission !== 'granted') {
+      setBrowserEnabled(false)
+      saveSettings(enabled, sound, volume, false)
+      toast.error('Permita as notificações do navegador para receber alertas fora da aba.')
+      return
+    }
+
+    setBrowserEnabled(val)
+    saveSettings(enabled, sound, volume, val)
+    toast.success(val ? 'Notificações do navegador ativadas' : 'Notificações do navegador desativadas')
   }
 
   const changeSound = (newSound: string) => {
@@ -301,6 +331,22 @@ function NotificationSoundSettings() {
           />
         </label>
 
+        <label className="flex items-center justify-between">
+          <div>
+            <span className="text-sm font-medium text-gray-700">Notificação do navegador</span>
+            <p className="text-xs text-gray-400">
+              Exibir alerta do sistema quando o navegador estiver minimizado ou em outra aba.
+              {browserPermission === 'denied' && ' Permissão bloqueada no navegador.'}
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            checked={browserEnabled && browserPermission !== 'denied' && browserPermission !== 'unsupported'}
+            onChange={(e) => toggleBrowserEnabled(e.target.checked)}
+            disabled={browserPermission === 'denied' || browserPermission === 'unsupported'}
+            className="rounded border-gray-300 w-5 h-5 text-primary-600 disabled:opacity-50"
+          />
+        </label>
         {enabled && (
           <>
             <div>

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -326,25 +327,35 @@ func UpdateTenant(svc *services.Container) fiber.Handler {
 	}
 }
 
-// DeleteTenant deactivates a tenant (soft delete)
+// DeleteTenant permanently deletes a tenant and all company data via cascades.
 func DeleteTenant(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		tenantID := c.Params("id")
 
-		result, err := svc.DB.Exec("UPDATE companies SET is_active = false, updated_at = NOW() WHERE id = $1", tenantID)
+		tx, err := svc.DB.Begin()
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to deactivate tenant"})
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to start delete transaction"})
 		}
+		defer tx.Rollback()
 
-		rowsAffected, _ := result.RowsAffected()
-		if rowsAffected == 0 {
+		var companyName string
+		err = tx.QueryRow("SELECT name FROM companies WHERE id = $1", tenantID).Scan(&companyName)
+		if err == sql.ErrNoRows {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Tenant not found"})
 		}
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load tenant"})
+		}
 
-		// Deactivate all users of this tenant
-		svc.DB.Exec("UPDATE users SET is_active = false WHERE company_id = $1", tenantID)
+		if _, err = tx.Exec("DELETE FROM companies WHERE id = $1", tenantID); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete tenant data"})
+		}
 
-		return c.JSON(fiber.Map{"message": "Tenant deactivated successfully"})
+		if err = tx.Commit(); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to commit tenant deletion"})
+		}
+
+		return c.JSON(fiber.Map{"message": "Tenant permanently deleted", "name": companyName})
 	}
 }
 
@@ -396,6 +407,18 @@ func GetAdminStats(svc *services.Container) fiber.Handler {
 // itoa converts int to string for query parameter placeholders
 func itoa(i int) string {
 	return fmt.Sprintf("%d", i)
+}
+
+func execIfTableExists(tx *sql.Tx, tableName string, query string, args ...interface{}) error {
+	var exists bool
+	if err := tx.QueryRow("SELECT to_regclass($1) IS NOT NULL", "public."+tableName).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	_, err := tx.Exec(query, args...)
+	return err
 }
 
 // AdminGetTenantUsers returns all users for a specific tenant
@@ -592,16 +615,87 @@ func AdminUpdateUser(svc *services.Container) fiber.Handler {
 	}
 }
 
-// AdminDeleteUser deactivates a user
+// AdminDeleteUser permanently deletes a user and user-owned history.
 func AdminDeleteUser(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		userID := c.Params("userId")
 
-		_, err := svc.DB.Exec("UPDATE users SET is_active = false, updated_at = NOW() WHERE id = $1", userID)
+		var companyID string
+		var isSuperAdmin bool
+		err := svc.DB.QueryRow(`
+			SELECT company_id, COALESCE(is_super_admin, false)
+			FROM users
+			WHERE id = $1
+		`, userID).Scan(&companyID, &isSuperAdmin)
+		if err == sql.ErrNoRows {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
+		}
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to deactivate user"})
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load user"})
+		}
+		if isSuperAdmin {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Super admin users cannot be deleted from tenant management"})
 		}
 
-		return c.JSON(fiber.Map{"message": "User deactivated"})
+		tx, err := svc.DB.Begin()
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to start delete transaction"})
+		}
+		defer tx.Rollback()
+
+		cleanupStatements := []string{
+			`DELETE FROM message_attachments WHERE message_id IN (SELECT id FROM messages WHERE company_id = $2 AND sender_type = 'user' AND sender_id = $1::uuid)`,
+			`DELETE FROM messages WHERE company_id = $2 AND sender_type = 'user' AND sender_id = $1::uuid`,
+			`DELETE FROM conversation_notes WHERE user_id = $1`,
+			`DELETE FROM audit_logs WHERE user_id = $1`,
+			`DELETE FROM internal_announcements WHERE author_id = $1`,
+			`UPDATE contacts SET assigned_to = NULL WHERE assigned_to = $1`,
+			`UPDATE conversations SET assigned_to = NULL WHERE assigned_to = $1`,
+			`UPDATE deals SET assigned_to = NULL WHERE assigned_to = $1`,
+			`UPDATE quick_replies SET created_by = NULL WHERE created_by = $1`,
+			`UPDATE campaigns SET created_by = NULL WHERE created_by = $1`,
+			`UPDATE calls SET user_id = NULL WHERE user_id = $1`,
+		}
+
+		for _, stmt := range cleanupStatements {
+			var execErr error
+			if strings.Contains(stmt, "$2") {
+				_, execErr = tx.Exec(stmt, userID, companyID)
+			} else {
+				_, execErr = tx.Exec(stmt, userID)
+			}
+			if execErr != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to clean user history"})
+			}
+		}
+
+		optionalCleanup := []struct {
+			table string
+			query string
+		}{
+			{"password_reset_tokens", `DELETE FROM password_reset_tokens WHERE user_id = $1`},
+			{"phone_extensions", `UPDATE phone_extensions SET user_id = NULL WHERE user_id = $1`},
+			{"call_records", `UPDATE call_records SET user_id = NULL WHERE user_id = $1`},
+		}
+		for _, cleanup := range optionalCleanup {
+			if err = execIfTableExists(tx, cleanup.table, cleanup.query, userID); err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to clean optional user history"})
+			}
+		}
+
+		result, err := tx.Exec("DELETE FROM users WHERE id = $1", userID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete user"})
+		}
+		rowsAffected, _ := result.RowsAffected()
+		if rowsAffected == 0 {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
+		}
+
+		if err = tx.Commit(); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to commit user deletion"})
+		}
+
+		return c.JSON(fiber.Map{"message": "User permanently deleted"})
 	}
 }

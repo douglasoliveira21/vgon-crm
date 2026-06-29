@@ -32,9 +32,9 @@ const getMessagePreview = (msg: IncomingMessage) => {
   if (msg.content) return msg.content
   if (msg.message_type === 'image') return 'Imagem recebida'
   if (msg.message_type === 'gif') return 'GIF recebido'
-  if (msg.message_type === 'audio') return 'Audio recebido'
-  if (msg.message_type === 'video') return 'Video recebido'
-  return 'Midia recebida'
+  if (msg.message_type === 'audio') return 'Áudio recebido'
+  if (msg.message_type === 'video') return 'Vídeo recebido'
+  return 'Mídia recebida'
 }
 
 const playNotificationSound = () => {
@@ -45,8 +45,33 @@ const playNotificationSound = () => {
     const soundFile = settings.sound || 'notification-1'
     const volume = settings.volume != null ? settings.volume / 100 : 0.5
     const audio = new Audio(`/sounds/${soundFile}.wav`)
-    audio.volume = volume
+    audio.volume = Math.min(Math.max(volume, 0), 1)
+    audio.preload = 'auto'
     audio.play().catch(() => {})
+  } catch {}
+}
+
+const showBrowserNotification = (msg: IncomingMessage, preview: string) => {
+  try {
+    const settings = getJsonSetting('notification_settings')
+    if (settings.browserEnabled === false) return
+    if (!('Notification' in window) || Notification.permission !== 'granted') return
+
+    const notification = new Notification('Nova mensagem no VGON Chat', {
+      body: preview,
+      icon: '/favicon.png',
+      badge: '/favicon.png',
+      tag: msg.conversation_id,
+      renotify: true,
+      silent: false,
+      requireInteraction: document.visibilityState !== 'visible',
+    })
+
+    notification.onclick = () => {
+      window.focus()
+      window.location.href = `/conversations?conversation=${msg.conversation_id}`
+      notification.close()
+    }
   } catch {}
 }
 
@@ -57,6 +82,9 @@ export function GlobalNotifications() {
 
   useEffect(() => {
     if (!isAuthenticated) return
+
+    const settings = getJsonSetting('notification_settings')
+    if (settings.browserEnabled === false) return
 
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().catch(() => {})
@@ -103,18 +131,7 @@ export function GlobalNotifications() {
         duration: 5000,
       })
 
-      if ('Notification' in window && Notification.permission === 'granted') {
-        const notification = new Notification('Nova mensagem no VGON Chat', {
-          body: preview,
-          icon: '/favicon.png',
-          tag: msg.conversation_id,
-        })
-        notification.onclick = () => {
-          window.focus()
-          window.location.href = '/conversations'
-        }
-      }
-
+      showBrowserNotification(msg, preview)
       playNotificationSound()
     }
 

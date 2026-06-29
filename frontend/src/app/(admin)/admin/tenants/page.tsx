@@ -9,7 +9,7 @@ import {
   Plus,
   Search,
   Edit,
-  Power,
+  Trash2,
   Users,
   MessageSquare,
   X,
@@ -142,15 +142,15 @@ export default function TenantsPage() {
     }
   }
 
-  const handleDeactivate = async (tenant: Tenant) => {
-    if (!confirm(`Deseja realmente desativar a empresa "${tenant.name}"?`)) return
+  const handleDelete = async (tenant: Tenant) => {
+    if (!confirm(`Excluir permanentemente a empresa "${tenant.name}"? Isso remove usuários, conversas, mensagens, canais e históricos. Esta ação não pode ser desfeita.`)) return
 
     try {
       await api.delete(`/admin/tenants/${tenant.id}`)
-      toast.success('Empresa desativada com sucesso!')
+      toast.success('Empresa excluída permanentemente!')
       fetchTenants()
     } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Erro ao desativar empresa')
+      toast.error(error.response?.data?.error || 'Erro ao excluir empresa')
     }
   }
 
@@ -308,15 +308,13 @@ export default function TenantsPage() {
                       >
                         <Edit className="w-4 h-4" />
                       </button>
-                      {tenant.is_active && (
-                        <button
-                          onClick={() => handleDeactivate(tenant)}
-                          className="p-2 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded-lg transition-colors"
-                          title="Desativar"
-                        >
-                          <Power className="w-4 h-4" />
-                        </button>
-                      )}
+                      <button
+                        onClick={() => handleDelete(tenant)}
+                        className="p-2 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded-lg transition-colors"
+                        title="Excluir permanentemente"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </td>
                 </tr>

@@ -10,7 +10,7 @@ import {
   Plus,
   Edit,
   Key,
-  Power,
+  Trash2,
   X,
   Building2,
   MessageSquare,
@@ -134,14 +134,14 @@ export default function TenantUsersPage() {
     }
   }
 
-  const handleDeactivateUser = async (user: TenantUser) => {
-    if (!confirm(`Desativar o usuário "${user.name}"?`)) return
+  const handleDeleteUser = async (user: TenantUser) => {
+    if (!confirm(`Excluir permanentemente o usuário "${user.name}" e seus históricos vinculados? Esta ação não pode ser desfeita.`)) return
     try {
       await api.delete(`/admin/users/${user.id}`)
-      toast.success('Usuário desativado')
+      toast.success('Usuário excluído permanentemente')
       fetchUsers()
-    } catch {
-      toast.error('Erro ao desativar')
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao excluir usuário')
     }
   }
 
@@ -275,15 +275,13 @@ export default function TenantUsersPage() {
                       >
                         <Key className="w-4 h-4" />
                       </button>
-                      {user.is_active && (
-                        <button
-                          onClick={() => handleDeactivateUser(user)}
-                          className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded"
-                          title="Desativar"
-                        >
-                          <Power className="w-4 h-4" />
-                        </button>
-                      )}
+                      <button
+                        onClick={() => handleDeleteUser(user)}
+                        className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded"
+                        title="Excluir permanentemente"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </td>
                 </tr>
