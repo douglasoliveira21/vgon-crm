@@ -98,6 +98,61 @@ func getNodeConfig(node BotNode) map[string]interface{} {
 	return node.Data
 }
 
+func getNumber(value interface{}) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case json.Number:
+		n, err := v.Float64()
+		return n, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func getStringList(value interface{}) []string {
+	switch items := value.(type) {
+	case []string:
+		return items
+	case []interface{}:
+		values := make([]string, 0, len(items))
+		for _, item := range items {
+			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
+				values = append(values, strings.TrimSpace(text))
+			}
+		}
+		return values
+	default:
+		return nil
+	}
+}
+
+func toInterfaceList(values []string) []interface{} {
+	items := make([]interface{}, 0, len(values))
+	for _, value := range values {
+		items = append(items, value)
+	}
+	return items
+}
+
+func appendOptionsToMessage(message string, options []string) string {
+	if len(options) == 0 {
+		return message
+	}
+	var builder strings.Builder
+	builder.WriteString(strings.TrimSpace(message))
+	for i, option := range options {
+		builder.WriteString(fmt.Sprintf("\n%d. %s", i+1, option))
+	}
+	return builder.String()
+}
+
 func normalizeTriggerType(triggerType string) string {
 	if strings.HasPrefix(triggerType, "trigger_") {
 		return triggerType
@@ -182,6 +237,33 @@ func findStartNode(nodes []BotNode, edges []BotEdge, triggerType string) *BotNod
 		}
 	}
 	return &nodes[0]
+}
+
+func findNextNodeByPosition(current BotNode, nodes []BotNode, visited map[string]bool) *BotNode {
+	currentX := current.Position["x"]
+	currentY := current.Position["y"]
+	bestScore := 1.0e18
+	var best *BotNode
+
+	for i := range nodes {
+		candidate := nodes[i]
+		if candidate.ID == current.ID || visited[candidate.ID] || strings.HasPrefix(getNodeType(candidate), "trigger") {
+			continue
+		}
+
+		dx := candidate.Position["x"] - currentX
+		dy := candidate.Position["y"] - currentY
+		score := dx*dx + dy*dy
+		if dx < -40 {
+			score += 1000000
+		}
+		if score < bestScore {
+			bestScore = score
+			best = &nodes[i]
+		}
+	}
+
+	return best
 }
 
 // TriggerBot checks if any bot flow should be triggered for a new message
@@ -340,7 +422,14 @@ func (e *BotEngine) executeFlow(flowID, triggerType, companyID, conversationID, 
 
 		nextID := nextBySource[node.ID]
 		if nextID == "" {
-			break
+			nextNode := findNextNodeByPosition(node, nodes, visited)
+			if nextNode == nil {
+				break
+			}
+			log.Printf("[BOT] Flow %s using position fallback from node %s to node %s", flowID, node.ID, nextNode.ID)
+			current = nextNode
+			time.Sleep(1 * time.Second)
+			continue
 		}
 		nextNode, ok := nodesByID[nextID]
 		if !ok {
@@ -430,23 +519,46 @@ func (e *BotEngine) executeNode(node BotNode, companyID, conversationID, contact
 			node.Data["message"] = msg
 		}
 		return e.nodeSendMessage(node, companyID, conversationID, instanceName, phone)
-	case "ask_question", "ask_text", "ask_options":
+	case "send_buttons", "send_list":
+		msg, _ := config["message"].(string)
+		if msg == "" {
+			msg = "Escolha uma opcao:"
+		}
+		if nodeType == "send_buttons" {
+			msg = appendOptionsToMessage(msg, getStringList(config["buttons"]))
+		} else {
+			msg = appendOptionsToMessage(msg, getStringList(config["options"]))
+		}
+		node.Data["message"] = msg
+		return e.nodeSendMessage(node, companyID, conversationID, instanceName, phone)
+	case "ask_question", "ask_text", "ask_options", "ask_email", "ask_phone":
 		q, _ := config["question"].(string)
 		if q == "" {
 			q, _ = node.Data["question"].(string)
 		}
+		if q == "" && nodeType == "ask_email" {
+			q = "Qual e o seu e-mail?"
+		}
+		if q == "" && nodeType == "ask_phone" {
+			q = "Qual e o seu telefone?"
+		}
 		if q != "" {
 			node.Data["question"] = q
 		}
+		if len(getStringList(config["options"])) > 0 {
+			node.Data["options"] = toInterfaceList(getStringList(config["options"]))
+		}
 		return e.nodeAskQuestion(node, companyID, conversationID, instanceName, phone)
+	case "condition", "condition_business_hours", "condition_contact_field", "condition_tag":
+		return nil
 	case "delay", "wait_seconds", "wait_minutes", "wait_hours":
-		if secs, ok := config["seconds"].(float64); ok {
+		if secs, ok := getNumber(config["seconds"]); ok {
 			node.Data["seconds"] = secs
 		}
-		if mins, ok := config["minutes"].(float64); ok {
+		if mins, ok := getNumber(config["minutes"]); ok {
 			node.Data["seconds"] = mins * 60
 		}
-		if hrs, ok := config["hours"].(float64); ok {
+		if hrs, ok := getNumber(config["hours"]); ok {
 			node.Data["seconds"] = hrs * 3600
 		}
 		return e.nodeDelay(node)
@@ -495,7 +607,12 @@ func (e *BotEngine) nodeSendMessage(node BotNode, companyID, conversationID, ins
 	// Send via WhatsApp
 	var externalID string
 	if instanceName != "" && phone != "" {
-		externalID, _ = e.evo.SendTextMessage(instanceName, phone, message)
+		var err error
+		externalID, err = e.evo.SendTextMessage(instanceName, phone, message)
+		if err != nil {
+			log.Printf("[BOT] Failed to send message to %s via %s: %v", phone, instanceName, err)
+			return err
+		}
 		log.Printf("[BOT] Sent message to %s via %s", phone, instanceName)
 	} else {
 		log.Printf("[BOT] Cannot send - instanceName='%s' phone='%s'", instanceName, phone)
@@ -559,7 +676,12 @@ func (e *BotEngine) nodeAskQuestion(node BotNode, companyID, conversationID, ins
 	// Send via WhatsApp
 	var externalID string
 	if instanceName != "" && phone != "" {
-		externalID, _ = e.evo.SendTextMessage(instanceName, phone, message)
+		var err error
+		externalID, err = e.evo.SendTextMessage(instanceName, phone, message)
+		if err != nil {
+			log.Printf("[BOT] Failed to send question to %s via %s: %v", phone, instanceName, err)
+			return err
+		}
 	}
 
 	// Save message
