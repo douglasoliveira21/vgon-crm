@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import toast from 'react-hot-toast'
 import { Eye, EyeOff, Mail, MessageSquare, ShieldCheck, Users } from 'lucide-react'
+import api from '@/lib/api'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -13,6 +14,8 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [isSendingReset, setIsSendingReset] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -23,6 +26,21 @@ export default function LoginPage() {
       toast.success('Login realizado!')
     } catch (error: any) {
       toast.error(error.message)
+    }
+  }
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsSendingReset(true)
+
+    try {
+      await api.post('/auth/forgot-password', { email })
+      toast.success('Se o e-mail existir, enviamos o link de recuperacao.')
+      setShowForgotPassword(false)
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Nao foi possivel enviar o e-mail de recuperacao')
+    } finally {
+      setIsSendingReset(false)
     }
   }
 
@@ -68,12 +86,16 @@ export default function LoginPage() {
             </div>
 
             <div className="rounded-2xl border border-gray-100 bg-white p-8 shadow-xl shadow-gray-200/70">
-              <h2 className="text-2xl font-bold text-gray-950">Entrar no crmvgon</h2>
+              <h2 className="text-2xl font-bold text-gray-950">
+                {showForgotPassword ? 'Recuperar senha' : 'Entrar no crmvgon'}
+              </h2>
               <p className="mt-2 text-sm leading-6 text-gray-500">
-                Acesse sua área segura para gerenciar conversas, contatos e canais de atendimento.
+                {showForgotPassword
+                  ? 'Informe seu e-mail de acesso para receber um link seguro de redefinicao de senha.'
+                  : 'Acesse sua area segura para gerenciar conversas, contatos e canais de atendimento.'}
               </p>
 
-              <form onSubmit={handleSubmit} className="mt-7 space-y-5">
+              <form onSubmit={showForgotPassword ? handleForgotPassword : handleSubmit} className="mt-7 space-y-5">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
                     E-mail
@@ -88,10 +110,20 @@ export default function LoginPage() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    Senha
-                  </label>
+                {!showForgotPassword && (
+                  <div>
+                    <div className="mb-1.5 flex items-center justify-between gap-3">
+                      <label className="block text-sm font-medium text-gray-700">
+                        Senha
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowForgotPassword(true)}
+                        className="text-sm font-medium text-primary-600 hover:text-primary-700"
+                      >
+                        Esqueceu a senha?
+                      </button>
+                    </div>
                   <div className="relative">
                     <input
                       type={showPassword ? 'text' : 'password'}
@@ -111,15 +143,28 @@ export default function LoginPage() {
                       {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                     </button>
                   </div>
-                </div>
+                  </div>
+                )}
 
                 <button
                   type="submit"
-                  disabled={isLoading}
+                  disabled={isLoading || isSendingReset}
                   className="w-full rounded-lg bg-primary-600 py-3 font-medium text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {isLoading ? 'Entrando...' : 'Entrar'}
+                  {showForgotPassword
+                    ? (isSendingReset ? 'Enviando...' : 'Enviar link de recuperacao')
+                    : (isLoading ? 'Entrando...' : 'Entrar')}
                 </button>
+
+                {showForgotPassword && (
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotPassword(false)}
+                    className="w-full rounded-lg border border-gray-200 bg-white py-3 font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                  >
+                    Voltar para o login
+                  </button>
+                )}
               </form>
 
               <p className="mt-6 text-center text-xs leading-5 text-gray-500">

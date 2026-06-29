@@ -74,6 +74,43 @@ func AuthRefresh(svc *services.Container) fiber.Handler {
 	}
 }
 
+func AuthForgotPassword(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		var req services.ForgotPasswordRequest
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
+		}
+
+		req.Email = strings.TrimSpace(req.Email)
+		if req.Email == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Email is required"})
+		}
+
+		if err := svc.Auth.RequestPasswordReset(&req); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{
+			"message": "If this email exists, a password reset link was sent",
+		})
+	}
+}
+
+func AuthResetPassword(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		var req services.ResetPasswordRequest
+		if err := c.BodyParser(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
+		}
+
+		if err := svc.Auth.ResetPassword(&req); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.JSON(fiber.Map{"message": "Password updated"})
+	}
+}
+
 func GetCurrentUser(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		userID := c.Locals("user_id").(string)

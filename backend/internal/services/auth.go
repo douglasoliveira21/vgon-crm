@@ -1,9 +1,14 @@
 package services
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"html"
+	"net/smtp"
 	"strings"
 	"time"
 
@@ -33,6 +38,16 @@ type RegisterRequest struct {
 	Name        string `json:"name"`
 	Email       string `json:"email"`
 	Password    string `json:"password"`
+}
+
+type ForgotPasswordRequest struct {
+	Email string `json:"email"`
+}
+
+type ResetPasswordRequest struct {
+	Token       string `json:"token"`
+	Password    string `json:"password"`
+	NewPassword string `json:"new_password"`
 }
 
 type AuthResponse struct {
@@ -217,6 +232,178 @@ func (s *AuthService) RefreshToken(refreshTokenStr string) (*AuthResponse, error
 		AccessToken:  accessToken,
 		RefreshToken: newRefreshToken,
 	}, nil
+}
+
+func (s *AuthService) RequestPasswordReset(req *ForgotPasswordRequest) error {
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if email == "" {
+		return fmt.Errorf("email is required")
+	}
+
+	var userID, name, userEmail string
+	err := s.db.QueryRow(`
+		SELECT id, name, email
+		FROM users
+		WHERE LOWER(email) = $1 AND is_active = true
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, email).Scan(&userID, &name, &userEmail)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("database error: %w", err)
+	}
+
+	if s.cfg.SMTPHost == "" || s.cfg.SMTPUser == "" || s.cfg.SMTPPass == "" || s.cfg.SMTPFrom == "" {
+		return fmt.Errorf("smtp is not configured")
+	}
+
+	token, tokenHash, err := generatePasswordResetToken()
+	if err != nil {
+		return fmt.Errorf("failed to generate reset token: %w", err)
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
+		UPDATE password_reset_tokens
+		SET used_at = NOW()
+		WHERE user_id = $1 AND used_at IS NULL
+	`, userID)
+	if err != nil {
+		return fmt.Errorf("failed to invalidate old reset tokens: %w", err)
+	}
+
+	_, err = tx.Exec(`
+		INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at)
+		VALUES ($1, $2, $3, $4)
+	`, uuid.New().String(), userID, tokenHash, time.Now().Add(time.Hour))
+	if err != nil {
+		return fmt.Errorf("failed to save reset token: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit reset token: %w", err)
+	}
+
+	resetLink := strings.TrimRight(s.cfg.FrontendURL, "/") + "/reset-password?token=" + token
+	if err := s.sendPasswordResetEmail(userEmail, name, resetLink); err != nil {
+		return fmt.Errorf("failed to send reset email: %w", err)
+	}
+
+	return nil
+}
+
+func (s *AuthService) ResetPassword(req *ResetPasswordRequest) error {
+	token := strings.TrimSpace(req.Token)
+	password := req.NewPassword
+	if password == "" {
+		password = req.Password
+	}
+	if token == "" || password == "" {
+		return fmt.Errorf("token and password are required")
+	}
+	if len(password) < 8 {
+		return fmt.Errorf("password must be at least 8 characters")
+	}
+
+	tokenHash := hashPasswordResetToken(token)
+	newHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var tokenID, userID string
+	err = tx.QueryRow(`
+		SELECT id, user_id
+		FROM password_reset_tokens
+		WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
+		LIMIT 1
+	`, tokenHash).Scan(&tokenID, &userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("invalid or expired reset token")
+	}
+	if err != nil {
+		return fmt.Errorf("database error: %w", err)
+	}
+
+	_, err = tx.Exec(`
+		UPDATE users
+		SET password_hash = $1, updated_at = NOW()
+		WHERE id = $2 AND is_active = true
+	`, string(newHash), userID)
+	if err != nil {
+		return fmt.Errorf("failed to update password: %w", err)
+	}
+
+	_, err = tx.Exec("UPDATE password_reset_tokens SET used_at = NOW() WHERE id = $1", tokenID)
+	if err != nil {
+		return fmt.Errorf("failed to mark reset token as used: %w", err)
+	}
+
+	_, err = tx.Exec("DELETE FROM refresh_tokens WHERE user_id = $1", userID)
+	if err != nil {
+		return fmt.Errorf("failed to invalidate sessions: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+func generatePasswordResetToken() (string, string, error) {
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", "", err
+	}
+	token := hex.EncodeToString(bytes)
+	return token, hashPasswordResetToken(token), nil
+}
+
+func hashPasswordResetToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *AuthService) sendPasswordResetEmail(to, name, resetLink string) error {
+	host := s.cfg.SMTPHost
+	port := s.cfg.SMTPPort
+	from := s.cfg.SMTPFrom
+	auth := smtp.PlainAuth("", s.cfg.SMTPUser, s.cfg.SMTPPass, host)
+
+	displayName := strings.TrimSpace(name)
+	if displayName == "" {
+		displayName = to
+	}
+
+	subject := "Recuperacao de senha - crmvgon"
+	body := fmt.Sprintf(`
+		<p>Ola, %s.</p>
+		<p>Recebemos uma solicitacao para redefinir sua senha no crmvgon.</p>
+		<p><a href="%s">Clique aqui para criar uma nova senha</a>.</p>
+		<p>Este link expira em 1 hora. Se voce nao solicitou a troca, ignore este e-mail.</p>
+	`, html.EscapeString(displayName), html.EscapeString(resetLink))
+
+	message := strings.Join([]string{
+		"From: crmvgon <" + from + ">",
+		"To: " + to,
+		"Subject: " + subject,
+		"MIME-Version: 1.0",
+		"Content-Type: text/html; charset=UTF-8",
+		"",
+		body,
+	}, "\r\n")
+
+	return smtp.SendMail(host+":"+port, auth, from, []string{to}, []byte(message))
 }
 
 func (s *AuthService) GetUserByID(userID string) (*models.User, error) {

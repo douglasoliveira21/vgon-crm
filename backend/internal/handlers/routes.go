@@ -30,6 +30,8 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	auth.Post("/login", AuthLogin(svc))
 	auth.Post("/register", AuthRegister(svc))
 	auth.Post("/refresh", AuthRefresh(svc))
+	auth.Post("/forgot-password", AuthForgotPassword(svc))
+	auth.Post("/reset-password", AuthResetPassword(svc))
 
 	// ============================================
 	// Webhook Routes (public - from Evolution API) - MUST be before protected routes
