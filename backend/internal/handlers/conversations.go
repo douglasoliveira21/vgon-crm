@@ -276,6 +276,30 @@ func MarkConversationRead(svc *services.Container) fiber.Handler {
 	}
 }
 
+func MarkConversationUnread(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		conversationID := c.Params("id")
+
+		_, err := svc.DB.Exec(`
+			UPDATE conversations
+			SET unread_count = (
+				SELECT COUNT(*) FROM messages
+				WHERE conversation_id = $1 AND company_id = $2 AND sender_type = 'contact' AND is_private = false
+			), updated_at = NOW()
+			WHERE id = $1 AND company_id = $2
+		`, conversationID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		var unreadCount int
+		_ = svc.DB.QueryRow("SELECT unread_count FROM conversations WHERE id = $1 AND company_id = $2", conversationID, companyID).Scan(&unreadCount)
+
+		return c.JSON(fiber.Map{"message": "Marked as unread", "unread_count": unreadCount})
+	}
+}
+
 func GetConversationMessages(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)

@@ -17,6 +17,7 @@ import {
   UserPlus,
   Tag,
   ArrowRightLeft,
+  ChevronRight,
   CheckCheck,
   Check,
   CheckCircle,
@@ -33,6 +34,8 @@ import {
   UsersRound,
   Building2,
   Timer,
+  MailOpen,
+  Trash2,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import toast from 'react-hot-toast'
@@ -150,6 +153,7 @@ export default function ConversationsPage() {
 
   // Context menu & reply
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; message: Message } | null>(null)
+  const [conversationContextMenu, setConversationContextMenu] = useState<{ x: number; y: number; conversation: Conversation } | null>(null)
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
@@ -698,27 +702,9 @@ export default function ConversationsPage() {
     setShowMentionModal(false)
   }
 
-  // Call
   const makeCall = async () => {
-    if (!selectedConv) return
-    try {
-      // Register call in system
-      toast.success('Chamada registrada. Abra o WhatsApp para ligar.')
-      setShowCallModal(false)
-    } catch {
-      toast.error('Erro ao registrar chamada')
-    }
+    setShowCallModal(false)
   }
-
-  // Mark as read (when opening conversation)
-  useEffect(() => {
-    if (selectedConv && selectedConv.unread_count > 0) {
-      // Mark messages as read by opening the conversation
-      setConversations((prev) =>
-        prev.map((c) => (c.id === selectedConv.id ? { ...c, unread_count: 0 } : c))
-      )
-    }
-  }, [selectedConv])
 
   const scrollToBottom = () => {
     setTimeout(() => {
@@ -872,10 +858,20 @@ export default function ConversationsPage() {
   // Context menu (right click on message)
   const handleMessageContextMenu = (e: React.MouseEvent, msg: Message) => {
     e.preventDefault()
+    setConversationContextMenu(null)
     setContextMenu({ x: e.clientX, y: e.clientY, message: msg })
   }
 
-  const closeContextMenu = () => setContextMenu(null)
+  const handleConversationContextMenu = (e: React.MouseEvent, conversation: Conversation) => {
+    e.preventDefault()
+    setContextMenu(null)
+    setConversationContextMenu({ x: e.clientX, y: e.clientY, conversation })
+  }
+
+  const closeContextMenu = () => {
+    setContextMenu(null)
+    setConversationContextMenu(null)
+  }
 
   // Reply to message
   const replyToMessage = (msg: Message) => {
@@ -894,6 +890,84 @@ export default function ConversationsPage() {
       toast.success('Mensagem apagada')
     } catch {
       toast.error('Erro ao apagar mensagem')
+    }
+  }
+
+  const archiveConversationFromMenu = async (conversation: Conversation) => {
+    closeContextMenu()
+    if (!confirm('Excluir este chat da lista? O historico sera mantido.')) return
+
+    try {
+      await api.post(`/conversations/${conversation.id}/close`)
+      setConversations((prev) => prev.filter((c) => c.id !== conversation.id))
+      if (selectedConv?.id === conversation.id) {
+        setSelectedConv(null)
+        setMessages([])
+      }
+      fetchTabUnreadCounts()
+      toast.success('Chat removido da lista')
+    } catch {
+      toast.error('Erro ao remover chat')
+    }
+  }
+
+  const markConversationUnreadFromMenu = async (conversation: Conversation) => {
+    closeContextMenu()
+    try {
+      const response = await api.post(`/conversations/${conversation.id}/unread`)
+      const unreadCount = response.data.unread_count || 0
+      setConversations((prev) =>
+        prev.map((c) => (c.id === conversation.id ? { ...c, unread_count: unreadCount } : c))
+      )
+      if (selectedConv?.id === conversation.id) {
+        setSelectedConv({ ...selectedConv, unread_count: unreadCount })
+      }
+      fetchTabUnreadCounts()
+      toast.success('Chat marcado como nao lido')
+    } catch {
+      toast.error('Erro ao marcar como nao lido')
+    }
+  }
+
+  const transferConversationFromMenuToUser = async (conversation: Conversation, userId: string) => {
+    const selectedUser = users.find((u) => u.id === userId)
+    closeContextMenu()
+    try {
+      await api.post(`/conversations/${conversation.id}/transfer`, { user_id: userId })
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === conversation.id
+            ? { ...c, assigned_to: userId, assigned_to_name: selectedUser?.name || 'Atendente selecionado', status: 'in_progress' }
+            : c
+        )
+      )
+      if (selectedConv?.id === conversation.id) {
+        setSelectedConv({ ...selectedConv, assigned_to: userId, assigned_to_name: selectedUser?.name || 'Atendente selecionado', status: 'in_progress' })
+      }
+      toast.success('Chat transferido')
+    } catch {
+      toast.error('Erro ao transferir')
+    }
+  }
+
+  const transferConversationFromMenuToTeam = async (conversation: Conversation, teamId: string) => {
+    const selectedTeam = teams.find((t) => t.id === teamId)
+    closeContextMenu()
+    try {
+      await api.post(`/conversations/${conversation.id}/transfer`, { team_id: teamId })
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === conversation.id
+            ? { ...c, team_id: teamId, team_name: selectedTeam?.name || 'Time selecionado', assigned_to: undefined, assigned_to_name: undefined }
+            : c
+        )
+      )
+      if (selectedConv?.id === conversation.id) {
+        setSelectedConv({ ...selectedConv, team_id: teamId, team_name: selectedTeam?.name || 'Time selecionado', assigned_to: undefined, assigned_to_name: undefined })
+      }
+      toast.success('Chat transferido para o time')
+    } catch {
+      toast.error('Erro ao transferir')
     }
   }
 
@@ -959,7 +1033,11 @@ export default function ConversationsPage() {
           {conversations.map((conv) => (
             <button
               key={conv.id}
-              onClick={() => selectConversation(conv)}
+              onClick={() => {
+                setConversationContextMenu(null)
+                selectConversation(conv)
+              }}
+              onContextMenu={(e) => handleConversationContextMenu(e, conv)}
               className={clsx(
                 'w-full p-4 flex items-start gap-3 border-b border-gray-50 hover:bg-gray-50 transition-colors text-left',
                 selectedConv?.id === conv.id && 'bg-primary-50 border-l-2 border-l-primary-500'
@@ -1077,14 +1155,6 @@ export default function ConversationsPage() {
                   Abrir Chat
                 </button>
               )}
-              {/* Call */}
-              <button
-                onClick={() => setShowCallModal(true)}
-                className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg"
-                title="Ligar"
-              >
-                <Phone size={18} />
-              </button>
               {/* Assign to me (if already assigned to someone else) */}
               {selectedConv.assigned_to && selectedConv.assigned_to !== user?.id && (
                 <button
@@ -1692,6 +1762,78 @@ export default function ConversationsPage() {
                 🗑️ Apagar mensagem
               </button>
             )}
+          </div>
+          <div className="fixed inset-0 -z-10" onClick={closeContextMenu} />
+        </div>
+      )}
+
+      {/* Conversation Context Menu (right click on chat) */}
+      {conversationContextMenu && (
+        <div
+          className="fixed z-50"
+          style={{ top: conversationContextMenu.y, left: conversationContextMenu.x }}
+        >
+          <div className="min-w-[250px] rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-800 dark:bg-gray-900">
+            <button
+              onClick={() => archiveConversationFromMenu(conversationContextMenu.conversation)}
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+            >
+              <Trash2 size={16} />
+              Excluir chat da lista
+            </button>
+            <button
+              onClick={() => markConversationUnreadFromMenu(conversationContextMenu.conversation)}
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              <MailOpen size={16} />
+              Marcar como nao lida
+            </button>
+
+            <div className="group relative">
+              <button className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
+                <ArrowRightLeft size={16} />
+                Transferir para atendente
+                <ChevronRight size={15} className="ml-auto" />
+              </button>
+              <div className="invisible absolute left-full top-0 max-h-72 min-w-[230px] overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100 dark:border-gray-800 dark:bg-gray-900">
+                {users.map((u) => (
+                  <button
+                    key={u.id}
+                    onClick={() => transferConversationFromMenuToUser(conversationContextMenu.conversation, u.id)}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-100 text-xs font-semibold text-primary-700">
+                      {u.name.charAt(0)}
+                    </span>
+                    <span className="truncate">{u.name}</span>
+                    {u.is_online && <span className="ml-auto h-2 w-2 rounded-full bg-green-500" />}
+                  </button>
+                ))}
+                {users.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">Nenhum atendente</p>}
+              </div>
+            </div>
+
+            <div className="group relative">
+              <button className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
+                <UsersRound size={16} />
+                Transferir para time
+                <ChevronRight size={15} className="ml-auto" />
+              </button>
+              <div className="invisible absolute left-full top-0 max-h-72 min-w-[230px] overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100 dark:border-gray-800 dark:bg-gray-900">
+                {teams.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => transferConversationFromMenuToTeam(conversationContextMenu.conversation, t.id)}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+                  >
+                    <UsersRound size={15} className="text-orange-500" />
+                    <span className="truncate">{t.name}</span>
+                    <span className="ml-auto text-xs text-gray-400">{t.member_count}</span>
+                  </button>
+                ))}
+                {teams.length === 0 && <p className="px-3 py-2 text-xs text-gray-400">Nenhum time</p>}
+              </div>
+            </div>
           </div>
           <div className="fixed inset-0 -z-10" onClick={closeContextMenu} />
         </div>
