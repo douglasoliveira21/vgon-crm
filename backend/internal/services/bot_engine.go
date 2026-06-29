@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,6 +31,159 @@ type BotNode struct {
 	Data     map[string]interface{} `json:"data"`
 }
 
+type BotEdge struct {
+	ID           string `json:"id"`
+	Source       string `json:"source"`
+	Target       string `json:"target"`
+	SourceHandle string `json:"sourceHandle"`
+	TargetHandle string `json:"targetHandle"`
+	Label        string `json:"label"`
+}
+
+func parseBotNodes(raw json.RawMessage) ([]BotNode, error) {
+	var nodes []BotNode
+	if len(raw) == 0 {
+		return nodes, nil
+	}
+	if err := json.Unmarshal(raw, &nodes); err == nil {
+		return nodes, nil
+	}
+
+	var encoded string
+	if err := json.Unmarshal(raw, &encoded); err != nil {
+		return nil, err
+	}
+	if encoded == "" {
+		return nodes, nil
+	}
+	if err := json.Unmarshal([]byte(encoded), &nodes); err != nil {
+		return nil, err
+	}
+	return nodes, nil
+}
+
+func parseBotEdges(raw json.RawMessage) ([]BotEdge, error) {
+	var edges []BotEdge
+	if len(raw) == 0 {
+		return edges, nil
+	}
+	if err := json.Unmarshal(raw, &edges); err == nil {
+		return edges, nil
+	}
+
+	var encoded string
+	if err := json.Unmarshal(raw, &encoded); err != nil {
+		return nil, err
+	}
+	if encoded == "" {
+		return edges, nil
+	}
+	if err := json.Unmarshal([]byte(encoded), &edges); err != nil {
+		return nil, err
+	}
+	return edges, nil
+}
+
+func getNodeType(node BotNode) string {
+	if nt, ok := node.Data["nodeType"].(string); ok && nt != "" {
+		return nt
+	}
+	return node.Type
+}
+
+func getNodeConfig(node BotNode) map[string]interface{} {
+	if config, ok := node.Data["config"].(map[string]interface{}); ok && config != nil {
+		return config
+	}
+	return node.Data
+}
+
+func normalizeTriggerType(triggerType string) string {
+	if strings.HasPrefix(triggerType, "trigger_") {
+		return triggerType
+	}
+	switch triggerType {
+	case "new_conversation", "keyword", "off_hours", "tag_added":
+		return "trigger_" + triggerType
+	default:
+		return triggerType
+	}
+}
+
+func getTriggerConfigString(nodes []BotNode, triggerType, key string) string {
+	triggerType = normalizeTriggerType(triggerType)
+	for _, node := range nodes {
+		if getNodeType(node) != triggerType {
+			continue
+		}
+		if value, ok := getNodeConfig(node)[key].(string); ok {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func triggerMatchesChannel(nodes []BotNode, channelID string) bool {
+	configuredChannelID := getTriggerConfigString(nodes, "trigger_inbox_message", "channel_id")
+	if configuredChannelID == "" {
+		return true
+	}
+	return channelID != "" && configuredChannelID == channelID
+}
+
+func buildNextNodeMap(edges []BotEdge) map[string]string {
+	sort.SliceStable(edges, func(i, j int) bool {
+		if edges[i].Source != edges[j].Source {
+			return edges[i].Source < edges[j].Source
+		}
+		if edges[i].SourceHandle != edges[j].SourceHandle {
+			return edges[i].SourceHandle < edges[j].SourceHandle
+		}
+		if edges[i].Label != edges[j].Label {
+			return edges[i].Label < edges[j].Label
+		}
+		return edges[i].ID < edges[j].ID
+	})
+
+	nextBySource := make(map[string]string, len(edges))
+	for _, edge := range edges {
+		if edge.Source == "" || edge.Target == "" {
+			continue
+		}
+		if _, exists := nextBySource[edge.Source]; !exists {
+			nextBySource[edge.Source] = edge.Target
+		}
+	}
+	return nextBySource
+}
+
+func findStartNode(nodes []BotNode, edges []BotEdge, triggerType string) *BotNode {
+	triggerType = normalizeTriggerType(triggerType)
+	incoming := map[string]bool{}
+	for _, edge := range edges {
+		if edge.Target != "" {
+			incoming[edge.Target] = true
+		}
+	}
+
+	for i := range nodes {
+		if getNodeType(nodes[i]) == triggerType {
+			return &nodes[i]
+		}
+	}
+	for i := range nodes {
+		if strings.HasPrefix(getNodeType(nodes[i]), "trigger") {
+			return &nodes[i]
+		}
+	}
+	for i := range nodes {
+		if !incoming[nodes[i].ID] {
+			return &nodes[i]
+		}
+	}
+	return &nodes[0]
+}
+
 // TriggerBot checks if any bot flow should be triggered for a new message
 func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, message, instanceName, phone string) {
 	// Find active flows for this company
@@ -37,6 +191,7 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 		SELECT id, trigger_type, trigger_value, nodes, edges
 		FROM bot_flows
 		WHERE company_id = $1 AND is_active = true
+		ORDER BY created_at ASC
 	`, companyID)
 	if err != nil {
 		return
@@ -48,7 +203,15 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 		var triggerValue *string
 		var nodesJSON, edgesJSON json.RawMessage
 
-		rows.Scan(&flowID, &triggerType, &triggerValue, &nodesJSON, &edgesJSON)
+		if err := rows.Scan(&flowID, &triggerType, &triggerValue, &nodesJSON, &edgesJSON); err != nil {
+			continue
+		}
+
+		nodes, err := parseBotNodes(nodesJSON)
+		if err != nil || len(nodes) == 0 {
+			log.Printf("[BOT] Failed to parse nodes for flow %s: %v", flowID, err)
+			continue
+		}
 
 		// Check if this flow should trigger
 		shouldTrigger := false
@@ -61,8 +224,15 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 			shouldTrigger = msgCount <= 1
 
 		case "keyword", "trigger_keyword":
-			if triggerValue != nil && *triggerValue != "" {
-				keywords := strings.Split(*triggerValue, ",")
+			keywordsValue := ""
+			if triggerValue != nil {
+				keywordsValue = *triggerValue
+			}
+			if keywordsValue == "" {
+				keywordsValue = getTriggerConfigString(nodes, "trigger_keyword", "keywords")
+			}
+			if keywordsValue != "" {
+				keywords := strings.Split(keywordsValue, ",")
 				msgLower := strings.ToLower(message)
 				for _, kw := range keywords {
 					if strings.Contains(msgLower, strings.TrimSpace(strings.ToLower(kw))) {
@@ -77,61 +247,76 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 			shouldTrigger = hour < 8 || hour >= 18
 
 		case "trigger_inbox_message":
-			// Always trigger for inbox message (channel filtering done later)
-			shouldTrigger = true
+			shouldTrigger = triggerMatchesChannel(nodes, channelID)
 
 		case "tag_added", "trigger_tag_added":
 			shouldTrigger = false
 		}
 
 		if shouldTrigger {
-			// Check if bot is already running for this conversation
-			var execCount int
-			e.db.QueryRow("SELECT COUNT(*) FROM bot_executions WHERE conversation_id = $1 AND status = 'running'", conversationID).Scan(&execCount)
-			if execCount > 0 {
-				continue // Don't start another bot
+			if !e.reserveExecution(flowID, conversationID, contactID) {
+				continue
 			}
 
-			go e.executeFlow(flowID, companyID, conversationID, contactID, instanceName, phone, nodesJSON)
+			go e.executeFlow(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone, nodesJSON, edgesJSON)
 			return // Only trigger first matching flow
 		}
 	}
 }
 
 // executeFlow runs a bot flow
-func (e *BotEngine) executeFlow(flowID, companyID, conversationID, contactID, instanceName, phone string, nodesJSON json.RawMessage) {
-	var nodes []BotNode
-
-	// Try direct unmarshal
-	if err := json.Unmarshal(nodesJSON, &nodes); err != nil {
-		// Might be a double-encoded string - try unwrapping
-		var nodesStr string
-		if err2 := json.Unmarshal(nodesJSON, &nodesStr); err2 == nil {
-			if err3 := json.Unmarshal([]byte(nodesStr), &nodes); err3 != nil {
-				log.Printf("[BOT] Failed to parse nodes for flow %s: %v", flowID, err3)
-				return
-			}
-		} else {
-			log.Printf("[BOT] Failed to parse nodes for flow %s: %v", flowID, err)
-			return
-		}
+func (e *BotEngine) executeFlow(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone string, nodesJSON, edgesJSON json.RawMessage) {
+	nodes, err := parseBotNodes(nodesJSON)
+	if err != nil {
+		log.Printf("[BOT] Failed to parse nodes for flow %s: %v", flowID, err)
+		e.finishLatestExecution(flowID, conversationID, "error")
+		return
 	}
-
 	if len(nodes) == 0 {
+		e.finishLatestExecution(flowID, conversationID, "completed")
 		return
 	}
 
-	// Create execution record
-	execID := uuid.New().String()
-	e.db.Exec(`
-		INSERT INTO bot_executions (id, flow_id, conversation_id, contact_id, status)
-		VALUES ($1, $2, $3, $4, 'running')
-	`, execID, flowID, conversationID, contactID)
+	edges, err := parseBotEdges(edgesJSON)
+	if err != nil {
+		log.Printf("[BOT] Failed to parse edges for flow %s: %v", flowID, err)
+	}
+
+	var execID string
+	err = e.db.QueryRow(`
+		SELECT id
+		FROM bot_executions
+		WHERE flow_id = $1 AND conversation_id = $2 AND status = 'running'
+		ORDER BY started_at DESC
+		LIMIT 1
+	`, flowID, conversationID).Scan(&execID)
+	if err != nil {
+		log.Printf("[BOT] Missing running execution for flow %s conversation %s", flowID, conversationID)
+		return
+	}
 
 	log.Printf("[BOT] Starting flow %s for conversation %s", flowID, conversationID)
 
-	// Execute nodes sequentially
-	for i, node := range nodes {
+	nodesByID := make(map[string]BotNode, len(nodes))
+	for _, node := range nodes {
+		nodesByID[node.ID] = node
+	}
+
+	nextBySource := buildNextNodeMap(edges)
+	current := findStartNode(nodes, edges, triggerType)
+	visited := map[string]bool{}
+	steps := 0
+	maxSteps := len(nodes) + len(edges) + 5
+
+	for current != nil && steps < maxSteps {
+		steps++
+		node := *current
+		if visited[node.ID] {
+			log.Printf("[BOT] Stopping flow %s because node %s would repeat", flowID, node.ID)
+			break
+		}
+		visited[node.ID] = true
+
 		// Check if bot was paused (human took over)
 		var status string
 		e.db.QueryRow("SELECT status FROM bot_executions WHERE id = $1", execID).Scan(&status)
@@ -147,12 +332,23 @@ func (e *BotEngine) executeFlow(flowID, companyID, conversationID, contactID, in
 		}
 
 		// Update current node
-		e.db.Exec("UPDATE bot_executions SET current_node_id = $1 WHERE id = $2", node.ID, execID)
+		e.db.Exec(`
+			UPDATE bot_executions
+			SET context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('current_node_id', $1)
+			WHERE id = $2
+		`, node.ID, execID)
 
-		// Small delay between nodes
-		if i < len(nodes)-1 {
-			time.Sleep(1 * time.Second)
+		nextID := nextBySource[node.ID]
+		if nextID == "" {
+			break
 		}
+		nextNode, ok := nodesByID[nextID]
+		if !ok {
+			log.Printf("[BOT] Flow %s points to missing node %s", flowID, nextID)
+			break
+		}
+		current = &nextNode
+		time.Sleep(1 * time.Second)
 	}
 
 	// Mark execution as completed
@@ -160,19 +356,69 @@ func (e *BotEngine) executeFlow(flowID, companyID, conversationID, contactID, in
 	log.Printf("[BOT] Flow %s completed for conversation %s", flowID, conversationID)
 }
 
+func (e *BotEngine) reserveExecution(flowID, conversationID, contactID string) bool {
+	tx, err := e.db.Begin()
+	if err != nil {
+		log.Printf("[BOT] Failed to start execution transaction: %v", err)
+		return false
+	}
+	defer tx.Rollback()
+
+	// Serializes bot starts per conversation and avoids duplicate executions when webhooks arrive together.
+	if _, err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext($1))", conversationID); err != nil {
+		log.Printf("[BOT] Failed to acquire execution lock: %v", err)
+		return false
+	}
+
+	var execCount int
+	if err := tx.QueryRow(`
+		SELECT COUNT(*)
+		FROM bot_executions
+		WHERE conversation_id = $1 AND status = 'running'
+	`, conversationID).Scan(&execCount); err != nil {
+		log.Printf("[BOT] Failed to check running executions: %v", err)
+		return false
+	}
+	if execCount > 0 {
+		return false
+	}
+
+	_, err = tx.Exec(`
+		INSERT INTO bot_executions (id, flow_id, conversation_id, contact_id, status)
+		VALUES ($1, $2, $3, $4, 'running')
+	`, uuid.New().String(), flowID, conversationID, contactID)
+	if err != nil {
+		log.Printf("[BOT] Failed to reserve execution: %v", err)
+		return false
+	}
+
+	return tx.Commit() == nil
+}
+
+func (e *BotEngine) finishLatestExecution(flowID, conversationID, status string) {
+	if status == "" {
+		status = "completed"
+	}
+	e.db.Exec(`
+		UPDATE bot_executions
+		SET status = $1, completed_at = NOW()
+		WHERE id = (
+			SELECT id
+			FROM bot_executions
+			WHERE flow_id = $2 AND conversation_id = $3 AND status = 'running'
+			ORDER BY started_at DESC
+			LIMIT 1
+		)
+	`, status, flowID, conversationID)
+}
+
 // executeNode processes a single node
 func (e *BotEngine) executeNode(node BotNode, companyID, conversationID, contactID, instanceName, phone string) error {
 	// Get the actual node type from data.nodeType (React Flow format)
-	nodeType := node.Type
-	if nt, ok := node.Data["nodeType"].(string); ok && nt != "" {
-		nodeType = nt
-	}
+	nodeType := getNodeType(node)
 
 	// Get config from data.config
-	config, _ := node.Data["config"].(map[string]interface{})
-	if config == nil {
-		config = node.Data
-	}
+	config := getNodeConfig(node)
 
 	switch nodeType {
 	case "send_message", "send_text":

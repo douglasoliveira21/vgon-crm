@@ -325,11 +325,13 @@ export default function FlowEditorPage() {
     }
     setSaving(true)
     try {
+      const triggerNode = nodes.find(n => n.data?.nodeType?.startsWith('trigger'))
+      const triggerConfig = triggerNode?.data?.config || {}
       const payload = {
         name,
         description,
-        trigger_type: nodes.find(n => n.data?.nodeType?.startsWith('trigger'))?.data?.nodeType || 'trigger_new_conversation',
-        trigger_value: '',
+        trigger_type: triggerNode?.data?.nodeType || 'trigger_new_conversation',
+        trigger_value: triggerConfig.keywords || triggerConfig.channel_id || '',
         is_active: isActive,
         nodes: nodes,
         edges: edges,
