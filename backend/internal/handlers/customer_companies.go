@@ -173,30 +173,59 @@ func LookupCNPJ(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "CNPJ inválido"})
 		}
 		client := http.Client{Timeout: 12 * time.Second}
-		resp, err := client.Get("https://brasilapi.com.br/api/cnpj/v1/" + cnpj)
+		data, source, err := lookupCNPJData(client, cnpj)
 		if err != nil {
-			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Falha ao consultar CNPJ"})
+			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": err.Error()})
 		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return c.Status(resp.StatusCode).JSON(fiber.Map{"error": "CNPJ não encontrado"})
-		}
-		var data map[string]interface{}
-		if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Resposta inválida da API de CNPJ"})
-		}
+
 		return c.JSON(fiber.Map{
 			"cnpj":       formatCNPJ(cnpj),
-			"name":       coalesceString(data["nome_fantasia"], data["razao_social"]),
-			"trade_name": coalesceString(data["nome_fantasia"]),
-			"legal_name": coalesceString(data["razao_social"]),
+			"name":       coalesceString(data["nome_fantasia"], data["fantasia"], data["razao_social"], data["nome"]),
+			"trade_name": coalesceString(data["nome_fantasia"], data["fantasia"]),
+			"legal_name": coalesceString(data["razao_social"], data["nome"]),
 			"email":      coalesceString(data["email"]),
-			"phone":      coalesceString(data["ddd_telefone_1"]),
+			"phone":      coalesceString(data["ddd_telefone_1"], data["telefone"]),
 			"city":       coalesceString(data["municipio"]),
 			"state":      coalesceString(data["uf"]),
 			"address":    strings.TrimSpace(fmt.Sprintf("%s, %s - %s", coalesceString(data["logradouro"]), coalesceString(data["numero"]), coalesceString(data["bairro"]))),
+			"source":     source,
 		})
 	}
+}
+
+func lookupCNPJData(client http.Client, cnpj string) (map[string]interface{}, string, error) {
+	if data, statusCode, err := fetchCNPJJSON(client, "https://brasilapi.com.br/api/cnpj/v1/"+cnpj); err == nil && statusCode == http.StatusOK {
+		return data, "brasilapi", nil
+	}
+
+	data, statusCode, err := fetchCNPJJSON(client, "https://www.receitaws.com.br/v1/cnpj/"+cnpj)
+	if err != nil {
+		return nil, "", fmt.Errorf("Falha ao consultar CNPJ")
+	}
+	if statusCode == http.StatusOK && strings.ToUpper(coalesceString(data["status"])) != "ERROR" {
+		return data, "receitaws", nil
+	}
+	if statusCode == http.StatusNotFound || strings.ToUpper(coalesceString(data["status"])) == "ERROR" {
+		return nil, "", fmt.Errorf("CNPJ não encontrado")
+	}
+	if statusCode == http.StatusTooManyRequests {
+		return nil, "", fmt.Errorf("Limite de consultas de CNPJ atingido. Tente novamente em alguns minutos")
+	}
+	return nil, "", fmt.Errorf("Serviço de CNPJ indisponível no momento")
+}
+
+func fetchCNPJJSON(client http.Client, url string) (map[string]interface{}, int, error) {
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	var data map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return data, resp.StatusCode, nil
 }
 
 func ExportCustomerCompanySLAReport(svc *services.Container) fiber.Handler {
