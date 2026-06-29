@@ -151,15 +151,35 @@ export default function ConversationsPage() {
   const [showQuickReplies, setShowQuickReplies] = useState(false)
   const [quickReplyFilter, setQuickReplyFilter] = useState('')
   const [selectedQuickReplyIndex, setSelectedQuickReplyIndex] = useState(0)
+  const channelFilter = searchParams.get('channel') || ''
+  const conversationsAbortRef = useRef<AbortController | null>(null)
+  const tabCountsAbortRef = useRef<AbortController | null>(null)
+  const conversationsRequestRef = useRef(0)
+  const tabCountsRequestRef = useRef(0)
+  const conversationsDebounceRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
-    fetchConversations()
+    if (conversationsDebounceRef.current) {
+      clearTimeout(conversationsDebounceRef.current)
+    }
+    conversationsDebounceRef.current = setTimeout(() => {
+      fetchConversations()
+    }, 250)
+
+    return () => {
+      if (conversationsDebounceRef.current) {
+        clearTimeout(conversationsDebounceRef.current)
+      }
+    }
+  }, [filter, statusFilter, channelFilter, user?.id])
+
+  useEffect(() => {
     fetchTabUnreadCounts()
     fetchUsers()
     fetchTeams()
     fetchQuickReplies()
     fetchCompanies()
-  }, [filter, statusFilter, searchParams])
+  }, [channelFilter, user?.id])
 
   useEffect(() => {
     const handleNewMessage = (data: Message) => {
@@ -314,9 +334,15 @@ export default function ConversationsPage() {
   }
 
   const fetchConversations = async () => {
+    conversationsAbortRef.current?.abort()
+    const controller = new AbortController()
+    conversationsAbortRef.current = controller
+    const requestId = ++conversationsRequestRef.current
+    setLoading(true)
+
     try {
       const params: any = {}
-      const channelParam = searchParams.get('channel')
+      const channelParam = channelFilter
       if (channelParam) params.channel = channelParam
 
       // Tab filter
@@ -344,22 +370,33 @@ export default function ConversationsPage() {
         delete params.status
       }
 
-      const response = await api.get('/conversations', { params })
-      setConversations(response.data.conversations || [])
-    } catch (error) {
+      const response = await api.get('/conversations', { params, signal: controller.signal })
+      if (requestId === conversationsRequestRef.current) {
+        setConversations(response.data.conversations || [])
+      }
+    } catch (error: any) {
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') return
       console.error('Error fetching conversations:', error)
     } finally {
-      setLoading(false)
+      if (requestId === conversationsRequestRef.current) {
+        setLoading(false)
+      }
     }
   }
 
   const fetchTabUnreadCounts = async () => {
+    tabCountsAbortRef.current?.abort()
+    const controller = new AbortController()
+    tabCountsAbortRef.current = controller
+    const requestId = ++tabCountsRequestRef.current
+
     try {
       const [mineRes, unassignedRes, allRes] = await Promise.all([
-        api.get('/conversations', { params: { assigned_to: user?.id, status: 'open,in_progress,pending', channel: searchParams.get('channel') || undefined } }),
-        api.get('/conversations', { params: { unassigned: 'true', status: 'open,in_progress,pending', channel: searchParams.get('channel') || undefined } }),
-        api.get('/conversations', { params: { status: 'open,in_progress,pending', channel: searchParams.get('channel') || undefined } }),
+        api.get('/conversations', { params: { assigned_to: user?.id, status: 'open,in_progress,pending', channel: channelFilter || undefined }, signal: controller.signal }),
+        api.get('/conversations', { params: { unassigned: 'true', status: 'open,in_progress,pending', channel: channelFilter || undefined }, signal: controller.signal }),
+        api.get('/conversations', { params: { status: 'open,in_progress,pending', channel: channelFilter || undefined }, signal: controller.signal }),
       ])
+      if (requestId !== tabCountsRequestRef.current) return
       const mineConvs: Conversation[] = mineRes.data.conversations || []
       const unassignedConvs: Conversation[] = unassignedRes.data.conversations || []
       const allConvs: Conversation[] = allRes.data.conversations || []
@@ -369,7 +406,9 @@ export default function ConversationsPage() {
         unassigned: unassignedConvs.reduce((sum, c) => sum + (c.unread_count || 0), 0),
         all: allConvs.reduce((sum, c) => sum + (c.unread_count || 0), 0),
       })
-    } catch {}
+    } catch (error: any) {
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') return
+    }
   }
 
   const fetchUsers = async () => {

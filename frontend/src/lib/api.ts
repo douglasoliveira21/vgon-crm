@@ -24,7 +24,15 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config
 
+    if (error.response?.status === 429) {
+      return Promise.reject(error)
+    }
+
     if (error.response?.status === 401 && !originalRequest._retry) {
+      if (originalRequest.url?.includes('/auth/login') || originalRequest.url?.includes('/auth/refresh')) {
+        return Promise.reject(error)
+      }
+
       originalRequest._retry = true
 
       const refreshToken = localStorage.getItem('refresh_token')
@@ -40,7 +48,11 @@ api.interceptors.response.use(
 
           originalRequest.headers.Authorization = `Bearer ${access_token}`
           return api(originalRequest)
-        } catch {
+        } catch (refreshError: any) {
+          if (refreshError.response?.status === 429) {
+            return Promise.reject(refreshError)
+          }
+
           localStorage.removeItem('access_token')
           localStorage.removeItem('refresh_token')
           window.location.href = '/login'
