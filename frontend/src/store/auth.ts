@@ -32,7 +32,7 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  isAuthenticated: typeof window !== 'undefined' && !!localStorage.getItem('access_token'),
+  isAuthenticated: false,
   isLoading: false,
 
   login: async (email: string, password: string) => {
@@ -117,6 +117,8 @@ export const useAuthStore = create<AuthState>((set) => ({
         localStorage.removeItem('refresh_token')
         set({ user: null, isAuthenticated: false })
       })
+    } else {
+      set({ user: null, isAuthenticated: false })
     }
   },
 }))
