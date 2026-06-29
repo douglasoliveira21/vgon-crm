@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react'
 import { useAuthStore } from '@/store/auth'
 import { useAppearanceStore } from '@/store/appearance'
 import {
@@ -24,6 +25,9 @@ import {
   PinOff,
   Moon,
   Sun,
+  UserCircle,
+  ShieldCheck,
+  ChevronUp,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
@@ -41,7 +45,6 @@ const menuItems = [
   { label: 'Métricas', href: '/metrics', icon: BarChart3 },
   { label: 'Widget', href: '/widget', icon: Globe },
   { label: 'Respostas Rápidas', href: '/quick-replies', icon: Zap },
-  { label: 'Configurações', href: '/settings', icon: Settings },
 ]
 
 const statusMeta = {
@@ -59,10 +62,28 @@ export default function Sidebar() {
   const pathname = usePathname()
   const { user, logout, updateStatus } = useAuthStore()
   const { sidebarPinned, setSidebarPinned, setSidebarHovered, theme, toggleTheme } = useAppearanceStore()
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const profileMenuRef = useRef<HTMLDivElement>(null)
   const expandedClass = sidebarPinned ? 'w-64' : 'w-20 hover:w-64'
   const showTextClass = sidebarPinned ? 'opacity-100' : 'opacity-0 group-hover/sidebar:opacity-100'
   const currentStatus = user?.availability_status || (user?.is_online ? 'online' : 'offline')
   const currentStatusMeta = statusMeta[currentStatus] || statusMeta.offline
+  const profileMenuItems = [
+    { label: 'Perfil', href: '/profile', icon: UserCircle, show: true },
+    { label: 'Configurações', href: '/settings', icon: Settings, show: true },
+    { label: 'Super Admin', href: '/admin', icon: ShieldCheck, show: !!user?.is_super_admin },
+  ]
+
+  useEffect(() => {
+    const closeMenu = (event: MouseEvent) => {
+      if (!profileMenuRef.current?.contains(event.target as Node)) {
+        setProfileMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', closeMenu)
+    return () => document.removeEventListener('mousedown', closeMenu)
+  }, [])
 
   return (
     <aside
@@ -142,7 +163,32 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="border-t border-dark-700 p-3 dark:border-gray-800">
+      <div ref={profileMenuRef} className="relative border-t border-dark-700 p-3 dark:border-gray-800">
+        {profileMenuOpen && (
+          <div
+            className={clsx(
+              'absolute bottom-full left-3 right-3 mb-2 overflow-hidden rounded-lg border border-white/10 bg-dark-800 py-1 shadow-xl',
+              sidebarPinned ? 'block' : 'hidden group-hover/sidebar:block'
+            )}
+          >
+            {profileMenuItems.filter((item) => item.show).map((item) => {
+              const Icon = item.icon
+
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setProfileMenuOpen(false)}
+                  className="flex items-center gap-3 px-3 py-2.5 text-sm text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+                >
+                  <Icon size={17} className="shrink-0" />
+                  <span>{item.label}</span>
+                </Link>
+              )
+            })}
+          </div>
+        )}
+
         <div className={clsx('mb-3 transition-opacity duration-200', showTextClass)}>
           <label className="mb-1 block text-xs font-medium text-gray-500">Status do atendente</label>
           <select
@@ -157,7 +203,12 @@ export default function Sidebar() {
         </div>
 
         <div className="flex items-center gap-3">
-          <Link href="/profile" title="Meu perfil" className="relative shrink-0">
+          <button
+            type="button"
+            onClick={() => setProfileMenuOpen((open) => !open)}
+            title="Menu do usuário"
+            className="relative shrink-0"
+          >
             {user?.avatar_url ? (
               <img src={resolveImage(user.avatar_url)} alt={user.name} className="h-10 w-10 rounded-full object-cover" />
             ) : (
@@ -166,12 +217,25 @@ export default function Sidebar() {
               </div>
             )}
             <span className={clsx('absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-dark-900', currentStatusMeta.dot)} />
-          </Link>
+          </button>
 
-          <Link href="/profile" className={clsx('min-w-0 flex-1 transition-opacity duration-200', showTextClass)}>
+          <button
+            type="button"
+            onClick={() => setProfileMenuOpen((open) => !open)}
+            className={clsx('min-w-0 flex-1 text-left transition-opacity duration-200', showTextClass)}
+          >
             <p className="truncate text-sm font-medium text-white">{user?.name || 'Usuário'}</p>
             <p className="truncate text-xs text-gray-500">{currentStatusMeta.label} • {user?.role_name || 'Atendente'}</p>
-          </Link>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setProfileMenuOpen((open) => !open)}
+            className={clsx('text-gray-400 transition-colors hover:text-white', sidebarPinned ? 'block' : 'hidden group-hover/sidebar:block')}
+            title={profileMenuOpen ? 'Fechar menu do usuário' : 'Abrir menu do usuário'}
+          >
+            <ChevronUp size={18} className={clsx('transition-transform', profileMenuOpen && 'rotate-180')} />
+          </button>
 
           <button
             onClick={logout}
