@@ -62,7 +62,6 @@ const showBrowserNotification = (msg: IncomingMessage, preview: string) => {
       icon: '/favicon.png',
       badge: '/favicon.png',
       tag: msg.conversation_id,
-      renotify: true,
       silent: false,
       requireInteraction: document.visibilityState !== 'visible',
     })
