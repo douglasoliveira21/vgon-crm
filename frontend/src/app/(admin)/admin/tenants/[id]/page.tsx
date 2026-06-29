@@ -24,6 +24,7 @@ interface TenantUser {
   is_active: boolean
   is_online: boolean
   role_name: string
+  is_super_admin: boolean
   created_at: string
 }
 
@@ -61,9 +62,9 @@ export default function TenantUsersPage() {
   const [selectedUser, setSelectedUser] = useState<TenantUser | null>(null)
 
   // Forms
-  const [createForm, setCreateForm] = useState({ name: '', email: '', password: '', role: 'agent' })
+  const [createForm, setCreateForm] = useState({ name: '', email: '', password: '', role: 'agent', is_super_admin: false })
   const [newPassword, setNewPassword] = useState('')
-  const [editForm, setEditForm] = useState({ name: '', email: '' })
+  const [editForm, setEditForm] = useState({ name: '', email: '', is_super_admin: false })
 
   useEffect(() => {
     fetchTenantDetails()
@@ -101,7 +102,7 @@ export default function TenantUsersPage() {
       await api.post(`/admin/tenants/${tenantId}/users`, createForm)
       toast.success('Usuário criado com sucesso!')
       setShowCreateUser(false)
-      setCreateForm({ name: '', email: '', password: '', role: 'agent' })
+      setCreateForm({ name: '', email: '', password: '', role: 'agent', is_super_admin: false })
       fetchUsers()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Erro ao criar usuário')
@@ -153,7 +154,7 @@ export default function TenantUsersPage() {
 
   const openEditUser = (user: TenantUser) => {
     setSelectedUser(user)
-    setEditForm({ name: user.name, email: user.email })
+    setEditForm({ name: user.name, email: user.email, is_super_admin: !!user.is_super_admin })
     setShowEditUser(true)
   }
 
@@ -251,6 +252,11 @@ export default function TenantUsersPage() {
                     <span className="px-2 py-0.5 rounded-full text-xs bg-gray-700 text-gray-300">
                       {user.role_name || 'Agente'}
                     </span>
+                    {user.is_super_admin && (
+                      <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-purple-500/20 text-purple-300">
+                        Super Admin
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-3 text-center">
                     <span className={`px-2 py-0.5 rounded-full text-xs ${
@@ -346,6 +352,18 @@ export default function TenantUsersPage() {
                   <option value="admin">Administrador</option>
                 </select>
               </div>
+              <label className="flex items-center justify-between rounded-lg border border-purple-500/20 bg-purple-500/10 px-4 py-3">
+                <div>
+                  <span className="text-sm font-medium text-purple-200">Super admin</span>
+                  <p className="text-xs text-purple-200/70">Permite acessar o painel /admin e gerenciar todos os tenants.</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={createForm.is_super_admin}
+                  onChange={(e) => setCreateForm({ ...createForm, is_super_admin: e.target.checked })}
+                  className="h-5 w-5 rounded border-gray-600 bg-gray-900 text-purple-600"
+                />
+              </label>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowCreateUser(false)} className="flex-1 px-4 py-2.5 border border-gray-600 text-gray-400 rounded-lg hover:text-white">
                   Cancelar
@@ -421,6 +439,18 @@ export default function TenantUsersPage() {
                   className="w-full px-4 py-2.5 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
                 />
               </div>
+              <label className="flex items-center justify-between rounded-lg border border-purple-500/20 bg-purple-500/10 px-4 py-3">
+                <div>
+                  <span className="text-sm font-medium text-purple-200">Super admin</span>
+                  <p className="text-xs text-purple-200/70">Permite acessar o painel /admin e gerenciar todos os tenants.</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={editForm.is_super_admin}
+                  onChange={(e) => setEditForm({ ...editForm, is_super_admin: e.target.checked })}
+                  className="h-5 w-5 rounded border-gray-600 bg-gray-900 text-purple-600"
+                />
+              </label>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowEditUser(false)} className="flex-1 px-4 py-2.5 border border-gray-600 text-gray-400 rounded-lg hover:text-white">
                   Cancelar

@@ -427,7 +427,7 @@ func AdminGetTenantUsers(svc *services.Container) fiber.Handler {
 		tenantID := c.Params("id")
 
 		rows, err := svc.DB.Query(`
-			SELECT u.id, u.name, u.email, u.is_active, u.is_online, COALESCE(r.name, '') as role_name, u.created_at
+			SELECT u.id, u.name, u.email, u.is_active, u.is_online, COALESCE(u.is_super_admin, false), COALESCE(r.name, '') as role_name, u.created_at
 			FROM users u
 			LEFT JOIN roles r ON u.role_id = r.id
 			WHERE u.company_id = $1
@@ -439,19 +439,20 @@ func AdminGetTenantUsers(svc *services.Container) fiber.Handler {
 		defer rows.Close()
 
 		type UserRow struct {
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			Email     string `json:"email"`
-			IsActive  bool   `json:"is_active"`
-			IsOnline  bool   `json:"is_online"`
-			RoleName  string `json:"role_name"`
-			CreatedAt string `json:"created_at"`
+			ID           string `json:"id"`
+			Name         string `json:"name"`
+			Email        string `json:"email"`
+			IsActive     bool   `json:"is_active"`
+			IsOnline     bool   `json:"is_online"`
+			IsSuperAdmin bool   `json:"is_super_admin"`
+			RoleName     string `json:"role_name"`
+			CreatedAt    string `json:"created_at"`
 		}
 
 		users := []UserRow{}
 		for rows.Next() {
 			var u UserRow
-			rows.Scan(&u.ID, &u.Name, &u.Email, &u.IsActive, &u.IsOnline, &u.RoleName, &u.CreatedAt)
+			rows.Scan(&u.ID, &u.Name, &u.Email, &u.IsActive, &u.IsOnline, &u.IsSuperAdmin, &u.RoleName, &u.CreatedAt)
 			users = append(users, u)
 		}
 
@@ -465,10 +466,11 @@ func AdminCreateTenantUser(svc *services.Container) fiber.Handler {
 		tenantID := c.Params("id")
 
 		var req struct {
-			Name     string `json:"name"`
-			Email    string `json:"email"`
-			Password string `json:"password"`
-			Role     string `json:"role"` // admin, agent, supervisor
+			Name         string `json:"name"`
+			Email        string `json:"email"`
+			Password     string `json:"password"`
+			Role         string `json:"role"` // admin, agent, supervisor
+			IsSuperAdmin bool   `json:"is_super_admin"`
 		}
 		if err := c.BodyParser(&req); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
@@ -513,9 +515,9 @@ func AdminCreateTenantUser(svc *services.Container) fiber.Handler {
 
 		userID := uuid.New().String()
 		_, err = svc.DB.Exec(`
-			INSERT INTO users (id, company_id, role_id, name, email, password_hash)
-			VALUES ($1, $2, $3, $4, $5, $6)
-		`, userID, tenantID, roleID, req.Name, strings.ToLower(req.Email), string(hashedPassword))
+			INSERT INTO users (id, company_id, role_id, name, email, password_hash, is_super_admin)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`, userID, tenantID, roleID, req.Name, strings.ToLower(req.Email), string(hashedPassword), req.IsSuperAdmin)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create user: " + err.Error()})
 		}
@@ -525,6 +527,7 @@ func AdminCreateTenantUser(svc *services.Container) fiber.Handler {
 			"name":  req.Name,
 			"email": req.Email,
 			"role":  roleSlug,
+			"is_super_admin": req.IsSuperAdmin,
 		})
 	}
 }
@@ -570,9 +573,10 @@ func AdminUpdateUser(svc *services.Container) fiber.Handler {
 		userID := c.Params("userId")
 
 		var req struct {
-			Name     string `json:"name"`
-			Email    string `json:"email"`
-			IsActive *bool  `json:"is_active"`
+			Name         string `json:"name"`
+			Email        string `json:"email"`
+			IsActive     *bool  `json:"is_active"`
+			IsSuperAdmin *bool  `json:"is_super_admin"`
 		}
 		if err := c.BodyParser(&req); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
@@ -595,6 +599,11 @@ func AdminUpdateUser(svc *services.Container) fiber.Handler {
 		if req.IsActive != nil {
 			updates = append(updates, "is_active = $"+itoa(argIdx))
 			args = append(args, *req.IsActive)
+			argIdx++
+		}
+		if req.IsSuperAdmin != nil {
+			updates = append(updates, "is_super_admin = $"+itoa(argIdx))
+			args = append(args, *req.IsSuperAdmin)
 			argIdx++
 		}
 
