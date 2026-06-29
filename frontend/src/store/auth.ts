@@ -111,7 +111,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       wsService.connect(token)
       api.get('/me').then((response) => {
         set({ user: response.data, isAuthenticated: true })
-      }).catch(() => {
+      }).catch((error) => {
+        if (error.response?.status === 429) return
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token')
         set({ user: null, isAuthenticated: false })

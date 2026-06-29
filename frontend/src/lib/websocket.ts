@@ -6,8 +6,22 @@ class WebSocketService {
   private reconnectAttempts = 0
   private maxReconnectAttempts = 50
   private reconnectDelay = 2000
+  private currentToken: string | null = null
+  private intentionalClose = false
 
   connect(token: string) {
+    if (this.ws && this.currentToken === token && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+      return
+    }
+
+    if (this.ws) {
+      this.intentionalClose = true
+      this.ws.onclose = null
+      this.ws.close()
+    }
+
+    this.intentionalClose = false
+    this.currentToken = token
     const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001'
     this.ws = new WebSocket(`${WS_URL}/ws?token=${token}`)
 
@@ -28,6 +42,10 @@ class WebSocketService {
 
     this.ws.onclose = () => {
       console.log('WebSocket disconnected')
+      if (this.intentionalClose) {
+        this.intentionalClose = false
+        return
+      }
       this.attemptReconnect(token)
     }
 
@@ -78,9 +96,12 @@ class WebSocketService {
 
   disconnect() {
     if (this.ws) {
+      this.intentionalClose = true
+      this.ws.onclose = null
       this.ws.close()
       this.ws = null
     }
+    this.currentToken = null
   }
 }
 

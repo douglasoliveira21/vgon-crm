@@ -225,10 +225,7 @@ export default function ConversationsPage() {
           return prev
         })
 
-        // Browser notification only when not viewing this chat
-        if (data.sender_type === 'contact') {
-          showNotification(data)
-        }
+        // GlobalNotifications handles browser/toast/sound alerts for all app pages.
       }
     }
 
@@ -266,72 +263,6 @@ export default function ConversationsPage() {
       wsService.off('typing', handleTyping)
     }
   }, [selectedConv])
-
-  // Request notification permission
-  useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission()
-    }
-  }, [])
-
-  const showNotification = (msg: Message) => {
-    // Get notification preferences
-    const notifSettings = JSON.parse(localStorage.getItem('notification_settings') || '{}')
-    const alertEvents = JSON.parse(localStorage.getItem('notification_alert_events') || '{}')
-
-    // Find the conversation this message belongs to
-    const conv = conversations.find(c => c.id === msg.conversation_id)
-
-    // Check if we should alert based on conversation assignment rules
-    const shouldAlert = checkShouldAlert(conv, alertEvents)
-    if (!shouldAlert) return
-
-    // Browser notification (always if permission granted)
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('Nova mensagem', {
-        body: msg.content || 'Mídia recebida',
-        icon: '/favicon.ico',
-      })
-    }
-
-    // Play notification sound
-    // If tab is not active: always play
-    // If tab is active: play only if not viewing this specific conversation
-    if (document.hidden || !selectedConv || selectedConv.id !== msg.conversation_id) {
-      playNotificationSound()
-    }
-  }
-
-  const checkShouldAlert = (conv: Conversation | undefined, alertEvents: any) => {
-    // Default: alert for all if no settings configured
-    const alertMine = alertEvents.assigned_to_me !== false
-    const alertUnassigned = alertEvents.unassigned !== false
-    const alertOthers = alertEvents.assigned_to_others !== false
-
-    // If conversation not in current filtered list, still alert (could be from another tab)
-    if (!conv) return true
-
-    if (conv.assigned_to === user?.id) {
-      return alertMine
-    }
-    if (!conv.assigned_to) {
-      return alertUnassigned
-    }
-    // Assigned to someone else
-    return alertOthers
-  }
-
-  const playNotificationSound = () => {
-    try {
-      const settings = JSON.parse(localStorage.getItem('notification_settings') || '{}')
-      if (settings.enabled === false) return
-      const soundFile = settings.sound || 'notification-1'
-      const volume = settings.volume != null ? settings.volume / 100 : 0.5
-      const audio = new Audio(`/sounds/${soundFile}.wav`)
-      audio.volume = volume
-      audio.play().catch(() => {})
-    } catch {}
-  }
 
   const fetchConversations = async () => {
     conversationsAbortRef.current?.abort()
