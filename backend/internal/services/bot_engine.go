@@ -658,10 +658,10 @@ func (e *BotEngine) executeFlowFrom(flowID, triggerType, companyID, conversation
 }
 
 func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID, instanceName, phone, message string) bool {
-	var execID, flowID, triggerType, waitingNodeID string
+	var execID, flowID, triggerType, waitingNodeID, executionConversationID string
 	var nodesJSON, edgesJSON json.RawMessage
 	err := e.db.QueryRow(`
-		SELECT be.id, bf.id, bf.trigger_type, bf.nodes, bf.edges, COALESCE(be.context ->> 'waiting_node_id', '')
+		SELECT be.id, bf.id, bf.trigger_type, bf.nodes, bf.edges, COALESCE(be.context ->> 'waiting_node_id', ''), be.conversation_id::text
 		FROM bot_executions be
 		JOIN bot_flows bf ON bf.id = be.flow_id
 		WHERE be.conversation_id = $1
@@ -670,16 +670,35 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 			AND bf.is_active = true
 		ORDER BY be.started_at DESC
 		LIMIT 1
-	`, conversationID, companyID).Scan(&execID, &flowID, &triggerType, &nodesJSON, &edgesJSON, &waitingNodeID)
+	`, conversationID, companyID).Scan(&execID, &flowID, &triggerType, &nodesJSON, &edgesJSON, &waitingNodeID, &executionConversationID)
 	if err != nil || waitingNodeID == "" {
 		if err == sql.ErrNoRows {
 			log.Printf("[BOT] No waiting execution for conversation %s", conversationID)
+			err = e.db.QueryRow(`
+				SELECT be.id, bf.id, bf.trigger_type, bf.nodes, bf.edges, COALESCE(be.context ->> 'waiting_node_id', ''), be.conversation_id::text
+				FROM bot_executions be
+				JOIN bot_flows bf ON bf.id = be.flow_id
+				WHERE be.contact_id = $1
+					AND bf.company_id = $2
+					AND be.status = 'waiting'
+					AND bf.is_active = true
+				ORDER BY be.started_at DESC
+				LIMIT 1
+			`, contactID, companyID).Scan(&execID, &flowID, &triggerType, &nodesJSON, &edgesJSON, &waitingNodeID, &executionConversationID)
+			if err == nil && waitingNodeID != "" && executionConversationID != conversationID {
+				log.Printf("[BOT] Resuming waiting execution from conversation %s using response received in conversation %s for contact %s", executionConversationID, conversationID, contactID)
+			}
 		} else {
 			log.Printf("[BOT] Could not load waiting execution for conversation %s: %v", conversationID, err)
 		}
-		return false
+		if err != nil || waitingNodeID == "" {
+			return false
+		}
 	}
-	log.Printf("[BOT] Resuming waiting flow %s for conversation %s with response %q", flowID, conversationID, message)
+	if executionConversationID == "" {
+		executionConversationID = conversationID
+	}
+	log.Printf("[BOT] Resuming waiting flow %s for conversation %s with response %q", flowID, executionConversationID, message)
 
 	nodes, err := parseBotNodes(nodesJSON)
 	if err != nil {
@@ -727,8 +746,8 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 		return true
 	}
 
-	instanceName = e.resolveConversationInstance(companyID, conversationID, instanceName)
-	go e.executeFlowFrom(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone, message, nodesJSON, edgesJSON, nextID)
+	instanceName = e.resolveConversationInstance(companyID, executionConversationID, instanceName)
+	go e.executeFlowFrom(flowID, triggerType, companyID, executionConversationID, contactID, instanceName, phone, message, nodesJSON, edgesJSON, nextID)
 	return true
 }
 
