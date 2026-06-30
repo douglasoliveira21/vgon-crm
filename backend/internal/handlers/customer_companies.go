@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -50,8 +51,9 @@ func ListCustomerCompanies(svc *services.Container) fiber.Handler {
 		search := strings.TrimSpace(c.Query("search"))
 		args := []interface{}{companyID}
 		query := `
-			SELECT id, name, cnpj, trade_name, legal_name, email, phone, city, state, address,
-			       initial_response_sla_minutes, resolution_sla_minutes, is_active, created_at, updated_at
+			SELECT id, COALESCE(name, trade_name, legal_name, 'Empresa'), cnpj, trade_name, legal_name, email, phone, city, state, address,
+			       COALESCE(initial_response_sla_minutes, 30), COALESCE(resolution_sla_minutes, 240),
+			       COALESCE(is_active, true), COALESCE(created_at, NOW()), COALESCE(updated_at, NOW())
 			FROM customer_companies
 			WHERE company_id = $1
 		`
@@ -63,6 +65,7 @@ func ListCustomerCompanies(svc *services.Container) fiber.Handler {
 
 		rows, err := svc.DB.Query(query, args...)
 		if err != nil {
+			log.Printf("[CUSTOMER_COMPANIES] failed to list companies for tenant %s: %v", companyID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 		defer rows.Close()
@@ -72,7 +75,13 @@ func ListCustomerCompanies(svc *services.Container) fiber.Handler {
 			item, err := scanCustomerCompany(rows)
 			if err == nil {
 				items = append(items, item)
+			} else {
+				log.Printf("[CUSTOMER_COMPANIES] failed to scan company for tenant %s: %v", companyID, err)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("[CUSTOMER_COMPANIES] failed to read companies for tenant %s: %v", companyID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 		return c.JSON(fiber.Map{"companies": items})
 	}

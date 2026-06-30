@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"log"
 	"strings"
 	"time"
 
@@ -105,6 +106,7 @@ func GetConversations(svc *services.Container) fiber.Handler {
 
 		conversations, err := svc.Message.GetConversations(companyID, status, assignedTo, teamID, channelID, unassigned == "true", limit, offset)
 		if err != nil {
+			log.Printf("[CONVERSATIONS] failed to list conversations for company %s: %v", companyID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
@@ -121,6 +123,7 @@ func GetMyConversations(svc *services.Container) fiber.Handler {
 
 		conversations, err := svc.Message.GetConversations(companyID, "", userID, "", "", false, limit, offset)
 		if err != nil {
+			log.Printf("[CONVERSATIONS] failed to list user conversations for company %s user %s: %v", companyID, userID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
@@ -309,6 +312,7 @@ func GetConversationMessages(svc *services.Container) fiber.Handler {
 
 		messages, err := svc.Message.GetConversationMessages(conversationID, companyID, limit, offset)
 		if err != nil {
+			log.Printf("[CONVERSATIONS] failed to list messages for conversation %s company %s: %v", conversationID, companyID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 

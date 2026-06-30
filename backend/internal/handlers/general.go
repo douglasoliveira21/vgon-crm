@@ -22,11 +22,13 @@ func GetTeams(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 
 		rows, err := svc.DB.Query(`
-			SELECT t.id, t.name, t.description, t.distribution_rule, t.is_active,
+			SELECT t.id, COALESCE(t.name, 'Time'), t.description,
+				   COALESCE(t.distribution_rule, 'round-robin'), COALESCE(t.is_active, true),
 				   (SELECT COUNT(*) FROM team_users tu WHERE tu.team_id = t.id) as member_count
-			FROM teams t WHERE t.company_id = $1 ORDER BY t.name
+			FROM teams t WHERE t.company_id = $1 ORDER BY COALESCE(t.name, 'Time')
 		`, companyID)
 		if err != nil {
+			log.Printf("[TEAMS] failed to list teams for company %s: %v", companyID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 		defer rows.Close()
@@ -37,12 +39,19 @@ func GetTeams(svc *services.Container) fiber.Handler {
 			var description *string
 			var isActive bool
 			var memberCount int
-			rows.Scan(&id, &name, &description, &distRule, &isActive, &memberCount)
+			if err := rows.Scan(&id, &name, &description, &distRule, &isActive, &memberCount); err != nil {
+				log.Printf("[TEAMS] failed to scan team for company %s: %v", companyID, err)
+				continue
+			}
 			teams = append(teams, map[string]interface{}{
 				"id": id, "name": name, "description": description,
 				"distribution_rule": distRule, "is_active": isActive,
 				"member_count": memberCount,
 			})
+		}
+		if err := rows.Err(); err != nil {
+			log.Printf("[TEAMS] failed to read teams for company %s: %v", companyID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		return c.JSON(fiber.Map{"teams": teams})
@@ -214,10 +223,11 @@ func GetFunnels(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 
 		rows, err := svc.DB.Query(`
-			SELECT id, name, description, COALESCE(is_default, false), COALESCE(is_active, true) FROM funnels
-			WHERE company_id = $1 ORDER BY created_at
+			SELECT id, COALESCE(name, 'Funil'), description, COALESCE(is_default, false), COALESCE(is_active, true) FROM funnels
+			WHERE company_id = $1 ORDER BY COALESCE(created_at, NOW())
 		`, companyID)
 		if err != nil {
+			log.Printf("[FUNNELS] failed to list funnels for company %s: %v", companyID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 		defer rows.Close()
@@ -232,15 +242,18 @@ func GetFunnels(svc *services.Container) fiber.Handler {
 			}
 
 			// Get stages
-			stageRows, _ := svc.DB.Query(`
-				SELECT fs.id, fs.name, fs.color, fs.position, fs.is_won, fs.is_lost,
+			stageRows, err := svc.DB.Query(`
+				SELECT fs.id, COALESCE(fs.name, 'Etapa'), COALESCE(fs.color, '#3B82F6'), COALESCE(fs.position, 0),
+					   COALESCE(fs.is_won, false), COALESCE(fs.is_lost, false),
 					   (SELECT COUNT(*) FROM deals d WHERE d.stage_id = fs.id AND d.status = 'open') as deal_count,
 					   (SELECT COALESCE(SUM(value), 0) FROM deals d WHERE d.stage_id = fs.id AND d.status = 'open') as deal_value
-				FROM funnel_stages fs WHERE fs.funnel_id = $1 ORDER BY fs.position
+				FROM funnel_stages fs WHERE fs.funnel_id = $1 ORDER BY COALESCE(fs.position, 0)
 			`, id)
 
 			var stages []map[string]interface{}
-			if stageRows != nil {
+			if err != nil {
+				log.Printf("[FUNNELS] failed to list stages for funnel %s: %v", id, err)
+			} else if stageRows != nil {
 				for stageRows.Next() {
 					var sID, sName, sColor string
 					var pos int
@@ -264,6 +277,7 @@ func GetFunnels(svc *services.Container) fiber.Handler {
 			})
 		}
 		if err := rows.Err(); err != nil {
+			log.Printf("[FUNNELS] failed to read funnels for company %s: %v", companyID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
@@ -384,6 +398,7 @@ func GetDeals(svc *services.Container) fiber.Handler {
 
 		rows, err := svc.DB.Query(query, args...)
 		if err != nil {
+			log.Printf("[DEALS] failed to list deals for company %s: %v", companyID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 		defer rows.Close()
@@ -404,6 +419,7 @@ func GetDeals(svc *services.Container) fiber.Handler {
 			})
 		}
 		if err := rows.Err(); err != nil {
+			log.Printf("[DEALS] failed to read deals for company %s: %v", companyID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
