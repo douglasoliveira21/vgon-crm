@@ -864,17 +864,16 @@ func (e *BotEngine) nodeSendMessage(node BotNode, companyID, conversationID, ins
 
 	// Send via WhatsApp
 	var externalID string
-	if instanceName != "" && phone != "" {
-		var err error
-		externalID, err = e.evo.SendTextMessage(instanceName, phone, message)
-		if err != nil {
-			log.Printf("[BOT] Failed to send message to %s via %s: %v", phone, instanceName, err)
-			return err
-		}
-		log.Printf("[BOT] Sent message to %s via %s", phone, instanceName)
-	} else {
-		log.Printf("[BOT] Cannot send - instanceName='%s' phone='%s'", instanceName, phone)
+	if instanceName == "" || phone == "" {
+		return fmt.Errorf("cannot send bot message: instanceName='%s' phone='%s'", instanceName, phone)
 	}
+	var err error
+	externalID, err = e.evo.SendTextMessage(instanceName, phone, message)
+	if err != nil {
+		log.Printf("[BOT] Failed to send message to %s via %s: %v", phone, instanceName, err)
+		return err
+	}
+	log.Printf("[BOT] Sent message to %s via %s", phone, instanceName)
 
 	// Save message
 	msgID := uuid.New().String()
@@ -907,12 +906,13 @@ func (e *BotEngine) nodeSendMedia(config map[string]interface{}, companyID, conv
 	}
 
 	var externalID string
-	if instanceName != "" && phone != "" {
-		var err error
-		externalID, err = e.evo.SendMediaMessage(instanceName, phone, mediaType, mediaURL, e.replaceVariables(caption, companyID, conversationID, phone), fileName)
-		if err != nil {
-			return err
-		}
+	if instanceName == "" || phone == "" {
+		return fmt.Errorf("cannot send bot media: instanceName='%s' phone='%s'", instanceName, phone)
+	}
+	var err error
+	externalID, err = e.evo.SendMediaMessage(instanceName, phone, mediaType, mediaURL, e.replaceVariables(caption, companyID, conversationID, phone), fileName)
+	if err != nil {
+		return err
 	}
 	return e.saveBotMessage(companyID, conversationID, e.replaceVariables(caption, companyID, conversationID, phone), mediaType, mediaURL, externalID)
 }
@@ -924,12 +924,13 @@ func (e *BotEngine) nodeSendAudio(config map[string]interface{}, companyID, conv
 	}
 
 	var externalID string
-	if instanceName != "" && phone != "" {
-		var err error
-		externalID, err = e.evo.SendAudioMessage(instanceName, phone, audioURL)
-		if err != nil {
-			return err
-		}
+	if instanceName == "" || phone == "" {
+		return fmt.Errorf("cannot send bot audio: instanceName='%s' phone='%s'", instanceName, phone)
+	}
+	var err error
+	externalID, err = e.evo.SendAudioMessage(instanceName, phone, audioURL)
+	if err != nil {
+		return err
 	}
 	return e.saveBotMessage(companyID, conversationID, "", "audio", audioURL, externalID)
 }
@@ -937,12 +938,13 @@ func (e *BotEngine) nodeSendAudio(config map[string]interface{}, companyID, conv
 func (e *BotEngine) sendBotText(companyID, conversationID, instanceName, phone, message, messageType string) error {
 	message = e.replaceVariables(message, companyID, conversationID, phone)
 	var externalID string
-	if instanceName != "" && phone != "" {
-		var err error
-		externalID, err = e.evo.SendTextMessage(instanceName, phone, message)
-		if err != nil {
-			return err
-		}
+	if instanceName == "" || phone == "" {
+		return fmt.Errorf("cannot send bot text: instanceName='%s' phone='%s'", instanceName, phone)
+	}
+	var err error
+	externalID, err = e.evo.SendTextMessage(instanceName, phone, message)
+	if err != nil {
+		return err
 	}
 	return e.saveBotMessage(companyID, conversationID, message, messageType, "", externalID)
 }
@@ -1019,13 +1021,14 @@ func (e *BotEngine) nodeAskQuestion(node BotNode, companyID, conversationID, ins
 
 	// Send via WhatsApp
 	var externalID string
-	if instanceName != "" && phone != "" {
-		var err error
-		externalID, err = e.evo.SendTextMessage(instanceName, phone, message)
-		if err != nil {
-			log.Printf("[BOT] Failed to send question to %s via %s: %v", phone, instanceName, err)
-			return err
-		}
+	if instanceName == "" || phone == "" {
+		return fmt.Errorf("cannot send bot question: instanceName='%s' phone='%s'", instanceName, phone)
+	}
+	var err error
+	externalID, err = e.evo.SendTextMessage(instanceName, phone, message)
+	if err != nil {
+		log.Printf("[BOT] Failed to send question to %s via %s: %v", phone, instanceName, err)
+		return err
 	}
 
 	// Save message

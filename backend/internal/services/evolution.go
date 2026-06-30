@@ -235,6 +235,9 @@ func (s *EvolutionService) GetConnectionStatus(instanceName string) (string, err
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("evolution send text returned %d: %s", resp.StatusCode, string(respBody))
+	}
 
 	var result map[string]interface{}
 	if err := json.Unmarshal(respBody, &result); err != nil {
@@ -426,7 +429,7 @@ func (s *EvolutionService) SendTextMessageWithQuote(instanceName, phone, text, q
 		}
 	}
 
-	return "", nil
+	return "", fmt.Errorf("evolution send text did not return message id: %s", string(respBody))
 }
 
 // SendMediaMessage sends a media message via WhatsApp
@@ -456,9 +459,14 @@ func (s *EvolutionService) SendMediaMessage(instanceName, phone, mediaType, medi
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("evolution send media returned %d: %s", resp.StatusCode, string(respBody))
+	}
 
 	var result map[string]interface{}
-	json.Unmarshal(respBody, &result)
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("failed to parse media response: %w", err)
+	}
 
 	if key, ok := result["key"].(map[string]interface{}); ok {
 		if id, ok := key["id"].(string); ok {
@@ -466,7 +474,7 @@ func (s *EvolutionService) SendMediaMessage(instanceName, phone, mediaType, medi
 		}
 	}
 
-	return "", nil
+	return "", fmt.Errorf("evolution send media did not return message id: %s", string(respBody))
 }
 
 // SendAudioMessage sends an audio message via WhatsApp
@@ -493,9 +501,14 @@ func (s *EvolutionService) SendAudioMessage(instanceName, phone, audioURL string
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("evolution send audio returned %d: %s", resp.StatusCode, string(respBody))
+	}
 
 	var result map[string]interface{}
-	json.Unmarshal(respBody, &result)
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("failed to parse audio response: %w", err)
+	}
 
 	if key, ok := result["key"].(map[string]interface{}); ok {
 		if id, ok := key["id"].(string); ok {
@@ -503,7 +516,7 @@ func (s *EvolutionService) SendAudioMessage(instanceName, phone, audioURL string
 		}
 	}
 
-	return "", nil
+	return "", fmt.Errorf("evolution send audio did not return message id: %s", string(respBody))
 }
 
 // SendAudioBase64 sends a base64 encoded audio via WhatsApp
