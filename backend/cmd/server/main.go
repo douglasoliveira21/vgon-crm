@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	_ "time/tzdata"
 
@@ -72,11 +73,14 @@ func main() {
 		Format: "[${time}] ${status} - ${method} ${path} ${latency}\n",
 	}))
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "*",
-		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
+		AllowOrigins:     buildAllowedOrigins(cfg.FrontendURL),
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, X-Requested-With",
 		AllowMethods:     "GET, POST, PUT, DELETE, PATCH, OPTIONS",
 		AllowCredentials: false,
 	}))
+	app.Options("*", func(c *fiber.Ctx) error {
+		return c.SendStatus(fiber.StatusNoContent)
+	})
 
 	// Rate limiting
 	app.Use(middleware.RateLimiter(rdb, cfg.RateLimitMax, cfg.RateLimitWindow))
@@ -108,4 +112,32 @@ func main() {
 		log.Fatalf("Server shutdown failed: %v", err)
 	}
 	log.Println("Server stopped gracefully")
+}
+
+func buildAllowedOrigins(frontendURL string) string {
+	origins := []string{
+		"https://crm.vgon.com.br",
+		"https://www.crm.vgon.com.br",
+		"http://localhost:3000",
+		"http://localhost:3001",
+		"http://127.0.0.1:3000",
+	}
+
+	frontendURL = strings.TrimSpace(frontendURL)
+	if frontendURL != "" {
+		origins = append(origins, strings.TrimRight(frontendURL, "/"))
+	}
+
+	seen := make(map[string]bool, len(origins))
+	unique := make([]string, 0, len(origins))
+	for _, origin := range origins {
+		origin = strings.TrimSpace(strings.TrimRight(origin, "/"))
+		if origin == "" || seen[origin] {
+			continue
+		}
+		seen[origin] = true
+		unique = append(unique, origin)
+	}
+
+	return strings.Join(unique, ",")
 }
