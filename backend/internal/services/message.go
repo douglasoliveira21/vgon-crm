@@ -302,11 +302,25 @@ func (s *MessageService) TransferConversation(conversationID, companyID string, 
 
 // CloseConversation marks a conversation as resolved
 func (s *MessageService) CloseConversation(conversationID, companyID string) error {
-	_, err := s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
 		UPDATE conversations SET status = 'resolved', resolved_at = NOW(), updated_at = NOW()
 		WHERE id = $1 AND company_id = $2
 	`, conversationID, companyID)
-	return err
+	if err != nil {
+		return err
+	}
+
+	if err := clearConversationAutomationState(tx, conversationID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 // ReopenConversation reopens a resolved conversation
@@ -315,5 +329,22 @@ func (s *MessageService) ReopenConversation(conversationID, companyID string) er
 		UPDATE conversations SET status = 'open', resolved_at = NULL, updated_at = NOW()
 		WHERE id = $1 AND company_id = $2
 	`, conversationID, companyID)
+	return err
+}
+
+func clearConversationAutomationState(exec interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+}, conversationID string) error {
+	if _, err := exec.Exec("DELETE FROM glpi_flow_states WHERE conversation_id = $1", conversationID); err != nil {
+		return err
+	}
+	_, err := exec.Exec(`
+		UPDATE bot_executions
+		SET status = 'completed',
+			completed_at = COALESCE(completed_at, NOW()),
+			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('closed_conversation_id', $1::text, 'closed_at', NOW()::text)
+		WHERE conversation_id = $1
+			AND status IN ('running', 'waiting', 'external_wait', 'paused')
+	`, conversationID)
 	return err
 }

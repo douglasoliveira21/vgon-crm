@@ -1672,7 +1672,11 @@ func (e *BotEngine) nodeGLPICheckStatus(companyID, conversationID, contactID, in
 func (e *BotEngine) nodeEnd(node BotNode, companyID, conversationID string) error {
 	closeConv, _ := node.Data["close_conversation"].(bool)
 	if closeConv {
-		e.db.Exec("UPDATE conversations SET status = 'resolved', resolved_at = NOW() WHERE id = $1", conversationID)
+		_, err := e.db.Exec("UPDATE conversations SET status = 'resolved', resolved_at = NOW(), updated_at = NOW() WHERE id = $1 AND company_id = $2", conversationID, companyID)
+		if err != nil {
+			return err
+		}
+		return clearConversationAutomationState(e.db, conversationID)
 	}
 	return nil
 }
