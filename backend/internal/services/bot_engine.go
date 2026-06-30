@@ -1,10 +1,13 @@
 package services
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -153,6 +156,20 @@ func appendOptionsToMessage(message string, options []string) string {
 	return builder.String()
 }
 
+func secondsUntilBusinessHours() float64 {
+	now := time.Now()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, now.Location())
+	end := time.Date(now.Year(), now.Month(), now.Day(), 18, 0, 0, 0, now.Location())
+	if now.Before(start) {
+		return start.Sub(now).Seconds()
+	}
+	if now.Before(end) {
+		return 1
+	}
+	next := start.Add(24 * time.Hour)
+	return next.Sub(now).Seconds()
+}
+
 func normalizeTriggerType(triggerType string) string {
 	if strings.HasPrefix(triggerType, "trigger_") {
 		return triggerType
@@ -210,6 +227,58 @@ func buildNextNodeMap(edges []BotEdge) map[string]string {
 		}
 	}
 	return nextBySource
+}
+
+func buildOutgoingEdges(edges []BotEdge) map[string][]BotEdge {
+	sort.SliceStable(edges, func(i, j int) bool {
+		if edges[i].Source != edges[j].Source {
+			return edges[i].Source < edges[j].Source
+		}
+		if edges[i].SourceHandle != edges[j].SourceHandle {
+			return edges[i].SourceHandle < edges[j].SourceHandle
+		}
+		if edges[i].Label != edges[j].Label {
+			return edges[i].Label < edges[j].Label
+		}
+		return edges[i].ID < edges[j].ID
+	})
+
+	outgoing := map[string][]BotEdge{}
+	for _, edge := range edges {
+		if edge.Source == "" || edge.Target == "" {
+			continue
+		}
+		outgoing[edge.Source] = append(outgoing[edge.Source], edge)
+	}
+	return outgoing
+}
+
+func chooseNextNodeID(node BotNode, outgoing []BotEdge, conditionResult *bool) string {
+	if len(outgoing) == 0 {
+		return ""
+	}
+	if conditionResult == nil || len(outgoing) == 1 {
+		return outgoing[0].Target
+	}
+
+	preferred := []string{"true", "then", "sim", "entao", "então", "yes", "1"}
+	if !*conditionResult {
+		preferred = []string{"false", "else", "nao", "não", "senao", "senão", "no", "2"}
+	}
+
+	for _, edge := range outgoing {
+		text := strings.ToLower(edge.SourceHandle + " " + edge.TargetHandle + " " + edge.Label + " " + edge.ID)
+		for _, token := range preferred {
+			if strings.Contains(text, token) {
+				return edge.Target
+			}
+		}
+	}
+
+	if *conditionResult {
+		return outgoing[0].Target
+	}
+	return outgoing[len(outgoing)-1].Target
 }
 
 func findStartNode(nodes []BotNode, edges []BotEdge, triggerType string) *BotNode {
@@ -340,14 +409,14 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 				continue
 			}
 
-			go e.executeFlow(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone, nodesJSON, edgesJSON)
+			go e.executeFlow(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone, message, nodesJSON, edgesJSON)
 			return // Only trigger first matching flow
 		}
 	}
 }
 
 // executeFlow runs a bot flow
-func (e *BotEngine) executeFlow(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone string, nodesJSON, edgesJSON json.RawMessage) {
+func (e *BotEngine) executeFlow(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone, triggerMessage string, nodesJSON, edgesJSON json.RawMessage) {
 	nodes, err := parseBotNodes(nodesJSON)
 	if err != nil {
 		log.Printf("[BOT] Failed to parse nodes for flow %s: %v", flowID, err)
@@ -384,7 +453,7 @@ func (e *BotEngine) executeFlow(flowID, triggerType, companyID, conversationID, 
 		nodesByID[node.ID] = node
 	}
 
-	nextBySource := buildNextNodeMap(edges)
+	outgoingBySource := buildOutgoingEdges(edges)
 	current := findStartNode(nodes, edges, triggerType)
 	visited := map[string]bool{}
 	steps := 0
@@ -407,6 +476,8 @@ func (e *BotEngine) executeFlow(flowID, triggerType, companyID, conversationID, 
 			return
 		}
 
+		conditionResult := e.evaluateCondition(node, companyID, conversationID, contactID, triggerMessage)
+
 		err := e.executeNode(node, companyID, conversationID, contactID, instanceName, phone)
 		if err != nil {
 			log.Printf("[BOT] Error executing node %s: %v", node.ID, err)
@@ -420,7 +491,7 @@ func (e *BotEngine) executeFlow(flowID, triggerType, companyID, conversationID, 
 			WHERE id = $2
 		`, node.ID, execID)
 
-		nextID := nextBySource[node.ID]
+		nextID := chooseNextNodeID(node, outgoingBySource[node.ID], conditionResult)
 		if nextID == "" {
 			nextNode := findNextNodeByPosition(node, nodes, visited)
 			if nextNode == nil {
@@ -501,6 +572,119 @@ func (e *BotEngine) finishLatestExecution(flowID, conversationID, status string)
 	`, status, flowID, conversationID)
 }
 
+func (e *BotEngine) evaluateCondition(node BotNode, companyID, conversationID, contactID, incomingMessage string) *bool {
+	nodeType := getNodeType(node)
+	if nodeType == "condition_business_hours" {
+		hour := time.Now().Hour()
+		result := hour >= 8 && hour < 18
+		return &result
+	}
+	if nodeType != "condition" && nodeType != "condition_contact_field" && nodeType != "condition_tag" {
+		return nil
+	}
+
+	config := getNodeConfig(node)
+	field, _ := config["field"].(string)
+	operator, _ := config["operator"].(string)
+	expected, _ := config["value"].(string)
+	if operator == "" {
+		operator = "contains"
+	}
+
+	actual := ""
+	switch field {
+	case "", "message":
+		actual = incomingMessage
+	case "contact_name":
+		e.db.QueryRow("SELECT COALESCE(name, '') FROM contacts WHERE id = $1 AND company_id = $2", contactID, companyID).Scan(&actual)
+	case "contact_tag":
+		e.db.QueryRow(`
+			SELECT COALESCE(string_agg(t.name, ','), '')
+			FROM contact_tags ct
+			JOIN tags t ON t.id = ct.tag_id
+			WHERE ct.contact_id = $1 AND t.company_id = $2
+		`, contactID, companyID).Scan(&actual)
+	case "channel":
+		e.db.QueryRow(`
+			SELECT COALESCE(ch.name, '')
+			FROM conversations c
+			LEFT JOIN channels ch ON ch.id = c.channel_id
+			WHERE c.id = $1 AND c.company_id = $2
+		`, conversationID, companyID).Scan(&actual)
+	case "team":
+		e.db.QueryRow(`
+			SELECT COALESCE(t.name, '')
+			FROM conversations c
+			LEFT JOIN teams t ON t.id = c.team_id
+			WHERE c.id = $1 AND c.company_id = $2
+		`, conversationID, companyID).Scan(&actual)
+	case "agent":
+		e.db.QueryRow(`
+			SELECT COALESCE(u.email, '')
+			FROM conversations c
+			LEFT JOIN users u ON u.id = c.assigned_to
+			WHERE c.id = $1 AND c.company_id = $2
+		`, conversationID, companyID).Scan(&actual)
+	case "day_of_week":
+		actual = strings.ToLower(time.Now().Weekday().String())
+	case "hour":
+		actual = fmt.Sprintf("%02d", time.Now().Hour())
+	case "custom_variable":
+		variableName, _ := config["variable_name"].(string)
+		if variableName != "" {
+			e.db.QueryRow(`
+				SELECT COALESCE(context ->> $1, '')
+				FROM bot_executions
+				WHERE conversation_id = $2 AND status = 'running'
+				ORDER BY started_at DESC
+				LIMIT 1
+			`, variableName, conversationID).Scan(&actual)
+		}
+	default:
+		e.db.QueryRow(fmt.Sprintf("SELECT COALESCE(%s, '') FROM contacts WHERE id = $1 AND company_id = $2", safeContactField(field)), contactID, companyID).Scan(&actual)
+	}
+
+	result := compareCondition(actual, expected, operator)
+	return &result
+}
+
+func safeContactField(field string) string {
+	switch field {
+	case "name", "email", "company_name", "city", "state", "origin", "notes", "phone":
+		return field
+	default:
+		return "name"
+	}
+}
+
+func compareCondition(actual, expected, operator string) bool {
+	actual = strings.TrimSpace(strings.ToLower(actual))
+	expected = strings.TrimSpace(strings.ToLower(expected))
+
+	switch operator {
+	case "equals":
+		return actual == expected
+	case "not_equals":
+		return actual != expected
+	case "not_contains":
+		return !strings.Contains(actual, expected)
+	case "starts_with":
+		return strings.HasPrefix(actual, expected)
+	case "ends_with":
+		return strings.HasSuffix(actual, expected)
+	case "greater_than":
+		return actual > expected
+	case "less_than":
+		return actual < expected
+	case "is_empty":
+		return actual == ""
+	case "is_not_empty":
+		return actual != ""
+	default:
+		return strings.Contains(actual, expected)
+	}
+}
+
 // executeNode processes a single node
 func (e *BotEngine) executeNode(node BotNode, companyID, conversationID, contactID, instanceName, phone string) error {
 	// Get the actual node type from data.nodeType (React Flow format)
@@ -519,6 +703,14 @@ func (e *BotEngine) executeNode(node BotNode, companyID, conversationID, contact
 			node.Data["message"] = msg
 		}
 		return e.nodeSendMessage(node, companyID, conversationID, instanceName, phone)
+	case "send_image":
+		return e.nodeSendMedia(config, companyID, conversationID, instanceName, phone, "image")
+	case "send_document":
+		return e.nodeSendMedia(config, companyID, conversationID, instanceName, phone, "document")
+	case "send_video":
+		return e.nodeSendMedia(config, companyID, conversationID, instanceName, phone, "video")
+	case "send_audio":
+		return e.nodeSendAudio(config, companyID, conversationID, instanceName, phone)
 	case "send_buttons", "send_list":
 		msg, _ := config["message"].(string)
 		if msg == "" {
@@ -551,15 +743,21 @@ func (e *BotEngine) executeNode(node BotNode, companyID, conversationID, contact
 		return e.nodeAskQuestion(node, companyID, conversationID, instanceName, phone)
 	case "condition", "condition_business_hours", "condition_contact_field", "condition_tag":
 		return nil
-	case "delay", "wait_seconds", "wait_minutes", "wait_hours":
+	case "delay", "wait_seconds", "wait_minutes", "wait_hours", "wait_response", "wait_business_hours":
 		if secs, ok := getNumber(config["seconds"]); ok {
 			node.Data["seconds"] = secs
 		}
 		if mins, ok := getNumber(config["minutes"]); ok {
 			node.Data["seconds"] = mins * 60
 		}
+		if mins, ok := getNumber(config["timeout_minutes"]); ok {
+			node.Data["seconds"] = mins * 60
+		}
 		if hrs, ok := getNumber(config["hours"]); ok {
 			node.Data["seconds"] = hrs * 3600
+		}
+		if nodeType == "wait_business_hours" {
+			node.Data["seconds"] = secondsUntilBusinessHours()
 		}
 		return e.nodeDelay(node)
 	case "add_tag", "action_add_tag":
@@ -568,20 +766,41 @@ func (e *BotEngine) executeNode(node BotNode, companyID, conversationID, contact
 			node.Data["tag_name"] = tn
 		}
 		return e.nodeAddTag(node, companyID, contactID)
+	case "action_remove_tag":
+		tn, _ := config["tag_name"].(string)
+		if tn != "" {
+			node.Data["tag_name"] = tn
+		}
+		return e.nodeRemoveTag(node, companyID, contactID)
 	case "transfer_team", "action_transfer_team":
 		tm, _ := config["team_name"].(string)
 		if tm != "" {
 			node.Data["team_name"] = tm
 		}
 		return e.nodeTransferTeam(node, companyID, conversationID)
+	case "action_assign_agent":
+		email, _ := config["agent_email"].(string)
+		node.Data["agent_email"] = email
+		return e.nodeAssignAgent(node, companyID, conversationID)
+	case "action_update_contact":
+		field, _ := config["contact_field"].(string)
+		value, _ := config["contact_value"].(string)
+		node.Data["contact_field"] = field
+		node.Data["contact_value"] = value
+		return e.nodeUpdateContact(node, companyID, conversationID, contactID, phone)
+	case "action_change_funnel", "action_create_deal", "action_send_notification":
+		return e.nodeInternalNote(node, companyID, conversationID, nodeType)
 	case "call_webhook", "action_webhook":
-		return e.nodeCallWebhook(node)
+		return e.nodeCallWebhook(node, companyID, conversationID, contactID)
 	case "glpi_open_ticket":
 		return e.nodeGLPIOpenTicket(companyID, conversationID, contactID, instanceName, phone)
 	case "glpi_check_status":
 		return e.nodeGLPICheckStatus(companyID, conversationID, contactID, instanceName, phone)
 	case "end", "action_close_conversation":
 		cc, _ := config["close_conversation"].(bool)
+		if nodeType == "action_close_conversation" {
+			cc = true
+		}
 		node.Data["close_conversation"] = cc
 		return e.nodeEnd(node, companyID, conversationID)
 	default:
@@ -635,6 +854,92 @@ func (e *BotEngine) nodeSendMessage(node BotNode, companyID, conversationID, ins
 	})
 
 	return nil
+}
+
+func (e *BotEngine) nodeSendMedia(config map[string]interface{}, companyID, conversationID, instanceName, phone, mediaType string) error {
+	mediaURL := firstString(config, "media_url", "url", "file_url", "image_url", "document_url", "video_url")
+	caption := firstString(config, "caption", "message")
+	fileName := firstString(config, "file_name", "filename", "name")
+	if mediaURL == "" {
+		if caption != "" {
+			return e.sendBotText(companyID, conversationID, instanceName, phone, caption, "text")
+		}
+		return nil
+	}
+
+	var externalID string
+	if instanceName != "" && phone != "" {
+		var err error
+		externalID, err = e.evo.SendMediaMessage(instanceName, phone, mediaType, mediaURL, e.replaceVariables(caption, companyID, conversationID, phone), fileName)
+		if err != nil {
+			return err
+		}
+	}
+	return e.saveBotMessage(companyID, conversationID, e.replaceVariables(caption, companyID, conversationID, phone), mediaType, mediaURL, externalID)
+}
+
+func (e *BotEngine) nodeSendAudio(config map[string]interface{}, companyID, conversationID, instanceName, phone string) error {
+	audioURL := firstString(config, "audio_url", "media_url", "url", "file_url")
+	if audioURL == "" {
+		return nil
+	}
+
+	var externalID string
+	if instanceName != "" && phone != "" {
+		var err error
+		externalID, err = e.evo.SendAudioMessage(instanceName, phone, audioURL)
+		if err != nil {
+			return err
+		}
+	}
+	return e.saveBotMessage(companyID, conversationID, "", "audio", audioURL, externalID)
+}
+
+func (e *BotEngine) sendBotText(companyID, conversationID, instanceName, phone, message, messageType string) error {
+	message = e.replaceVariables(message, companyID, conversationID, phone)
+	var externalID string
+	if instanceName != "" && phone != "" {
+		var err error
+		externalID, err = e.evo.SendTextMessage(instanceName, phone, message)
+		if err != nil {
+			return err
+		}
+	}
+	return e.saveBotMessage(companyID, conversationID, message, messageType, "", externalID)
+}
+
+func (e *BotEngine) saveBotMessage(companyID, conversationID, content, messageType, mediaURL, externalID string) error {
+	msgID := uuid.New().String()
+	_, err := e.db.Exec(`
+		INSERT INTO messages (id, conversation_id, company_id, sender_type, content, message_type, media_url, external_id, status)
+		VALUES ($1, $2, $3, 'bot', NULLIF($4, ''), $5, NULLIF($6, ''), $7, 'sent')
+	`, msgID, conversationID, companyID, content, messageType, mediaURL, externalID)
+	if err != nil {
+		return err
+	}
+
+	preview := content
+	if preview == "" {
+		preview = "[" + messageType + "]"
+	}
+	e.db.Exec("UPDATE conversations SET last_message_at = NOW(), last_message_preview = $1, updated_at = NOW() WHERE id = $2", preview, conversationID)
+
+	e.wsHub.BroadcastToCompany(companyID, "new_message", map[string]interface{}{
+		"id": msgID, "conversation_id": conversationID,
+		"sender_type": "bot", "content": content, "message_type": messageType,
+		"media_url": mediaURL, "sender_name": "Bot",
+		"status": "sent", "created_at": time.Now(),
+	})
+	return nil
+}
+
+func firstString(config map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := config[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func (e *BotEngine) replaceVariables(text, companyID, conversationID, phone string) string {
@@ -730,6 +1035,20 @@ func (e *BotEngine) nodeAddTag(node BotNode, companyID, contactID string) error 
 	return nil
 }
 
+func (e *BotEngine) nodeRemoveTag(node BotNode, companyID, contactID string) error {
+	tagName, _ := node.Data["tag_name"].(string)
+	if tagName == "" {
+		return nil
+	}
+
+	_, err := e.db.Exec(`
+		DELETE FROM contact_tags
+		WHERE contact_id = $1
+		  AND tag_id IN (SELECT id FROM tags WHERE company_id = $2 AND name ILIKE $3)
+	`, contactID, companyID, tagName)
+	return err
+}
+
 func (e *BotEngine) nodeTransferTeam(node BotNode, companyID, conversationID string) error {
 	teamName, _ := node.Data["team_name"].(string)
 	if teamName == "" {
@@ -750,8 +1069,103 @@ func (e *BotEngine) nodeTransferTeam(node BotNode, companyID, conversationID str
 	return nil
 }
 
-func (e *BotEngine) nodeCallWebhook(node BotNode) error {
-	// TODO: Implement webhook call
+func (e *BotEngine) nodeAssignAgent(node BotNode, companyID, conversationID string) error {
+	agentEmail, _ := node.Data["agent_email"].(string)
+	if strings.TrimSpace(agentEmail) == "" {
+		return nil
+	}
+
+	var userID string
+	err := e.db.QueryRow(`
+		SELECT id
+		FROM users
+		WHERE company_id = $1 AND LOWER(email) = LOWER($2) AND is_active = true
+		LIMIT 1
+	`, companyID, agentEmail).Scan(&userID)
+	if err != nil {
+		return nil
+	}
+
+	_, err = e.db.Exec(`
+		UPDATE conversations
+		SET assigned_to = $1, status = 'in_progress', updated_at = NOW()
+		WHERE id = $2 AND company_id = $3
+	`, userID, conversationID, companyID)
+	return err
+}
+
+func (e *BotEngine) nodeUpdateContact(node BotNode, companyID, conversationID, contactID, phone string) error {
+	field, _ := node.Data["contact_field"].(string)
+	value, _ := node.Data["contact_value"].(string)
+	field = safeContactField(field)
+	value = e.replaceVariables(value, companyID, conversationID, phone)
+	if value == "" {
+		return nil
+	}
+
+	_, err := e.db.Exec(fmt.Sprintf(`
+		UPDATE contacts
+		SET %s = $1, updated_at = NOW()
+		WHERE id = $2 AND company_id = $3
+	`, field), value, contactID, companyID)
+	return err
+}
+
+func (e *BotEngine) nodeInternalNote(node BotNode, companyID, conversationID, nodeType string) error {
+	content := fmt.Sprintf("Automacao executou bloco %s. Configure os campos especificos deste bloco para acao completa.", nodeType)
+	msgID := uuid.New().String()
+	_, err := e.db.Exec(`
+		INSERT INTO messages (id, conversation_id, company_id, sender_type, content, message_type, is_private, status)
+		VALUES ($1, $2, $3, 'bot', $4, 'text', true, 'sent')
+	`, msgID, conversationID, companyID, content)
+	return err
+}
+
+func (e *BotEngine) nodeCallWebhook(node BotNode, companyID, conversationID, contactID string) error {
+	config := getNodeConfig(node)
+	url := firstString(config, "url", "webhook_url")
+	if url == "" {
+		return nil
+	}
+
+	method := strings.ToUpper(firstString(config, "method"))
+	if method == "" {
+		method = http.MethodPost
+	}
+
+	payload := map[string]interface{}{
+		"conversation_id": conversationID,
+		"contact_id":      contactID,
+		"company_id":      companyID,
+		"node_id":         node.ID,
+		"node_type":       getNodeType(node),
+		"config":          config,
+	}
+
+	var body io.Reader
+	if method != http.MethodGet {
+		raw, _ := json.Marshal(payload)
+		body = bytes.NewBuffer(raw)
+	}
+
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		return err
+	}
+	if method != http.MethodGet {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("webhook returned %d: %s", resp.StatusCode, string(data))
+	}
 	return nil
 }
 
