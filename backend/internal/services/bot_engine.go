@@ -459,6 +459,11 @@ func findNextNodeByPosition(current BotNode, nodes []BotNode, visited map[string
 
 // TriggerBot checks if any bot flow should be triggered for a new message
 func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, message, instanceName, phone string) {
+	if e.conversationHasHumanOwner(companyID, conversationID) {
+		log.Printf("[BOT] Skipping automation for conversation %s because it is assigned to human attendance", conversationID)
+		return
+	}
+
 	if e.resumeWaitingExecution(companyID, conversationID, contactID, instanceName, phone, message) {
 		return
 	}
@@ -540,6 +545,16 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 			return // Only trigger first matching flow
 		}
 	}
+}
+
+func (e *BotEngine) conversationHasHumanOwner(companyID, conversationID string) bool {
+	var hasOwner bool
+	err := e.db.QueryRow(`
+		SELECT assigned_to IS NOT NULL OR team_id IS NOT NULL
+		FROM conversations
+		WHERE id = $1 AND company_id = $2 AND status != 'resolved'
+	`, conversationID, companyID).Scan(&hasOwner)
+	return err == nil && hasOwner
 }
 
 // executeFlow runs a bot flow
@@ -1519,8 +1534,8 @@ func (e *BotEngine) nodeTransferTeam(node BotNode, companyID, conversationID str
 
 	e.db.Exec("UPDATE conversations SET team_id = $1, assigned_to = NULL, updated_at = NOW() WHERE id = $2 AND company_id = $3", teamID, conversationID, companyID)
 
-	// Pause bot when transferring
-	e.db.Exec("UPDATE bot_executions SET status = 'paused' WHERE conversation_id = $1 AND status = 'running'", conversationID)
+	// Pause bot when transferring to human attendance.
+	_ = pauseConversationAutomationState(e.db, conversationID)
 
 	return nil
 }
@@ -1555,7 +1570,10 @@ func (e *BotEngine) nodeAssignAgent(node BotNode, companyID, conversationID stri
 		SET assigned_to = $1, status = 'in_progress', updated_at = NOW()
 		WHERE id = $2 AND company_id = $3
 	`, userID, conversationID, companyID)
-	return err
+	if err != nil {
+		return err
+	}
+	return pauseConversationAutomationState(e.db, conversationID)
 }
 
 func (e *BotEngine) nodeUpdateContact(node BotNode, companyID, conversationID, contactID, phone string) error {
@@ -1672,7 +1690,7 @@ func (e *BotEngine) nodeGLPICheckStatus(companyID, conversationID, contactID, in
 func (e *BotEngine) nodeEnd(node BotNode, companyID, conversationID string) error {
 	closeConv, _ := node.Data["close_conversation"].(bool)
 	if closeConv {
-		_, err := e.db.Exec("UPDATE conversations SET status = 'resolved', resolved_at = NOW(), updated_at = NOW() WHERE id = $1 AND company_id = $2", conversationID, companyID)
+		_, err := e.db.Exec("UPDATE conversations SET status = 'resolved', resolved_at = NOW(), assigned_to = NULL, team_id = NULL, updated_at = NOW() WHERE id = $1 AND company_id = $2", conversationID, companyID)
 		if err != nil {
 			return err
 		}
@@ -1683,5 +1701,5 @@ func (e *BotEngine) nodeEnd(node BotNode, companyID, conversationID string) erro
 
 // PauseBotForConversation stops any running bot when a human takes over
 func (e *BotEngine) PauseBotForConversation(conversationID string) {
-	e.db.Exec("UPDATE bot_executions SET status = 'paused' WHERE conversation_id = $1 AND status = 'running'", conversationID)
+	_ = pauseConversationAutomationState(e.db, conversationID)
 }

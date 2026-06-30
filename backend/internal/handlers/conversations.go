@@ -442,6 +442,9 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
 		}
+		if err := svc.Message.PauseAutomationForConversation(conversationID); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
 
 		// Get contact phone and instance
 		var phone, instanceName string
@@ -524,6 +527,9 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+		if err := svc.Message.PauseAutomationForConversation(conversationID); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		// Save audio file to disk

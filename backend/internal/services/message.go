@@ -76,6 +76,12 @@ func (s *MessageService) GetConversationMessages(conversationID, companyID strin
 func (s *MessageService) SaveAndSendMessage(companyID, userID string, req *SendTextMessageRequest) (*models.Message, error) {
 	msgID := uuid.New().String()
 
+	if !req.IsPrivate {
+		if err := pauseConversationAutomationState(s.db, req.ConversationID); err != nil {
+			return nil, fmt.Errorf("failed to pause automation: %w", err)
+		}
+	}
+
 	_, err := s.db.Exec(`
 		INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, is_private, status)
 		VALUES ($1, $2, $3, 'user', $4, $5, 'text', $6, 'sent')
@@ -231,12 +237,24 @@ func (s *MessageService) GetConversationByID(companyID, conversationID string) (
 
 // AssignConversation assigns a conversation to a user
 func (s *MessageService) AssignConversation(conversationID, userID, companyID string) error {
-	_, err := s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
 		UPDATE conversations SET assigned_to = $1, status = 'in_progress', updated_at = NOW()
 		WHERE id = $2 AND company_id = $3
 	`, userID, conversationID, companyID)
 	if err != nil {
 		return fmt.Errorf("failed to assign conversation: %w", err)
+	}
+	if err := pauseConversationAutomationState(tx, conversationID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 
 	s.wsHub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
@@ -250,14 +268,22 @@ func (s *MessageService) AssignConversation(conversationID, userID, companyID st
 
 // TransferConversation transfers a conversation to another user or team
 func (s *MessageService) TransferConversation(conversationID, companyID string, toUserID *string, toTeamID *string, clearTeam bool) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	shouldPauseAutomation := false
+
 	if toUserID != nil {
-		_, err := s.db.Exec(`
+		_, err := tx.Exec(`
 			UPDATE conversations SET assigned_to = $1, status = 'in_progress', updated_at = NOW()
 			WHERE id = $2 AND company_id = $3
 		`, *toUserID, conversationID, companyID)
 		if err != nil {
 			return err
 		}
+		shouldPauseAutomation = true
 
 		s.wsHub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
 			"id":          conversationID,
@@ -267,13 +293,14 @@ func (s *MessageService) TransferConversation(conversationID, companyID string, 
 	}
 
 	if toTeamID != nil {
-		_, err := s.db.Exec(`
+		_, err := tx.Exec(`
 			UPDATE conversations SET team_id = $1, assigned_to = NULL, updated_at = NOW()
 			WHERE id = $2 AND company_id = $3
 		`, *toTeamID, conversationID, companyID)
 		if err != nil {
 			return err
 		}
+		shouldPauseAutomation = true
 
 		s.wsHub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
 			"id":          conversationID,
@@ -283,7 +310,7 @@ func (s *MessageService) TransferConversation(conversationID, companyID string, 
 	}
 
 	if clearTeam {
-		_, err := s.db.Exec(`
+		_, err := tx.Exec(`
 			UPDATE conversations SET team_id = NULL, updated_at = NOW()
 			WHERE id = $1 AND company_id = $2
 		`, conversationID, companyID)
@@ -297,7 +324,13 @@ func (s *MessageService) TransferConversation(conversationID, companyID string, 
 		})
 	}
 
-	return nil
+	if shouldPauseAutomation {
+		if err := pauseConversationAutomationState(tx, conversationID); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 // CloseConversation marks a conversation as resolved
@@ -309,7 +342,12 @@ func (s *MessageService) CloseConversation(conversationID, companyID string) err
 	defer tx.Rollback()
 
 	_, err = tx.Exec(`
-		UPDATE conversations SET status = 'resolved', resolved_at = NOW(), updated_at = NOW()
+		UPDATE conversations
+		SET status = 'resolved',
+			resolved_at = NOW(),
+			assigned_to = NULL,
+			team_id = NULL,
+			updated_at = NOW()
 		WHERE id = $1 AND company_id = $2
 	`, conversationID, companyID)
 	if err != nil {
@@ -320,7 +358,16 @@ func (s *MessageService) CloseConversation(conversationID, companyID string) err
 		return err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.wsHub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
+		"id":          conversationID,
+		"status":      "resolved",
+		"assigned_to": nil,
+		"team_id":     nil,
+	})
+	return nil
 }
 
 // ReopenConversation reopens a resolved conversation
@@ -330,6 +377,10 @@ func (s *MessageService) ReopenConversation(conversationID, companyID string) er
 		WHERE id = $1 AND company_id = $2
 	`, conversationID, companyID)
 	return err
+}
+
+func (s *MessageService) PauseAutomationForConversation(conversationID string) error {
+	return pauseConversationAutomationState(s.db, conversationID)
 }
 
 func clearConversationAutomationState(exec interface {
@@ -366,6 +417,33 @@ func clearConversationAutomationState(exec interface {
 			AND exec_conv.company_id = closed_conv.company_id
 			AND exec_conv.contact_id = closed_conv.contact_id
 			AND be.status IN ('running', 'waiting', 'external_wait', 'paused')
+	`, conversationID)
+	return err
+}
+
+func pauseConversationAutomationState(exec interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+}, conversationID string) error {
+	if _, err := exec.Exec(`
+		DELETE FROM glpi_flow_states gfs
+		USING conversations active_conv, conversations state_conv
+		WHERE active_conv.id = $1
+			AND state_conv.id = gfs.conversation_id
+			AND state_conv.company_id = active_conv.company_id
+			AND state_conv.contact_id = active_conv.contact_id
+	`, conversationID); err != nil {
+		return err
+	}
+	_, err := exec.Exec(`
+		UPDATE bot_executions be
+		SET status = 'paused',
+			context = COALESCE(be.context, '{}'::jsonb) || jsonb_build_object('paused_by_human_conversation_id', $1::text, 'paused_at', NOW()::text)
+		FROM conversations active_conv, conversations exec_conv
+		WHERE active_conv.id = $1
+			AND exec_conv.id = be.conversation_id
+			AND exec_conv.company_id = active_conv.company_id
+			AND exec_conv.contact_id = active_conv.contact_id
+			AND be.status IN ('running', 'waiting', 'external_wait')
 	`, conversationID)
 	return err
 }
