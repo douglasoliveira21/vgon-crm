@@ -756,7 +756,7 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 	_, err = e.db.Exec(`
 		UPDATE bot_executions
 		SET status = 'running',
-			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('last_response', $1, 'waiting_node_id', NULL, 'current_node_id', $2)
+			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('last_response', $1::text, 'waiting_node_id', NULL, 'current_node_id', $2::text)
 		WHERE id = $3
 	`, message, nextID, execID)
 	if err != nil {
