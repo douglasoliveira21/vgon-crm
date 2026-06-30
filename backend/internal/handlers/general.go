@@ -24,7 +24,9 @@ func GetTeams(svc *services.Container) fiber.Handler {
 		rows, err := svc.DB.Query(`
 			SELECT t.id, COALESCE(t.name, 'Time'), t.description,
 				   COALESCE(t.distribution_rule, 'round-robin'), COALESCE(t.is_active, true),
-				   (SELECT COUNT(*) FROM team_users tu WHERE tu.team_id = t.id) as member_count
+				   (SELECT COUNT(*) FROM team_users tu WHERE tu.team_id = t.id) as member_count,
+				   (SELECT COUNT(*) FROM conversations c WHERE c.team_id = t.id AND c.company_id = t.company_id AND COALESCE(c.status, 'open') IN ('open', 'in_progress', 'pending')) as open_count,
+				   (SELECT COALESCE(SUM(COALESCE(c.unread_count, 0)), 0) FROM conversations c WHERE c.team_id = t.id AND c.company_id = t.company_id AND COALESCE(c.status, 'open') IN ('open', 'in_progress', 'pending')) as unread_count
 			FROM teams t WHERE t.company_id = $1 ORDER BY COALESCE(t.name, 'Time')
 		`, companyID)
 		if err != nil {
@@ -38,15 +40,15 @@ func GetTeams(svc *services.Container) fiber.Handler {
 			var id, name, distRule string
 			var description *string
 			var isActive bool
-			var memberCount int
-			if err := rows.Scan(&id, &name, &description, &distRule, &isActive, &memberCount); err != nil {
+			var memberCount, openCount, unreadCount int
+			if err := rows.Scan(&id, &name, &description, &distRule, &isActive, &memberCount, &openCount, &unreadCount); err != nil {
 				log.Printf("[TEAMS] failed to scan team for company %s: %v", companyID, err)
 				continue
 			}
 			teams = append(teams, map[string]interface{}{
 				"id": id, "name": name, "description": description,
 				"distribution_rule": distRule, "is_active": isActive,
-				"member_count": memberCount,
+				"member_count": memberCount, "open_count": openCount, "unread_count": unreadCount,
 			})
 		}
 		if err := rows.Err(); err != nil {

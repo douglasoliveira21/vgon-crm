@@ -94,27 +94,16 @@ export function GlobalNotifications() {
     if (!isAuthenticated || !user?.id) return
 
     const shouldAlert = async (msg: IncomingMessage) => {
-      const alertEvents = getJsonSetting('notification_alert_events')
-      const alertMine = alertEvents.assigned_to_me !== false
-      const alertUnassigned = alertEvents.unassigned !== false
-      const alertOthers = alertEvents.assigned_to_others !== false
-
-      if (alertMine && alertUnassigned && alertOthers) return true
-
-      let conversation = conversationsRef.current.get(msg.conversation_id)
-      if (!conversation) {
-        try {
-          const response = await api.get(`/conversations/${msg.conversation_id}`)
-          conversation = response.data as ConversationInfo
-          conversationsRef.current.set(msg.conversation_id, conversation)
-        } catch {
-          return true
-        }
+      let conversation: ConversationInfo | undefined
+      try {
+        const response = await api.get(`/conversations/${msg.conversation_id}`)
+        conversation = response.data as ConversationInfo
+        conversationsRef.current.set(msg.conversation_id, conversation)
+      } catch {
+        conversation = conversationsRef.current.get(msg.conversation_id)
       }
 
-      if (conversation.assigned_to === user.id) return alertMine
-      if (!conversation.assigned_to) return alertUnassigned
-      return alertOthers
+      return !conversation?.assigned_to
     }
 
     const handleNewMessage = async (msg: IncomingMessage) => {

@@ -2,9 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useAuthStore } from '@/store/auth'
 import { useAppearanceStore } from '@/store/appearance'
+import api from '@/lib/api'
+import wsService from '@/lib/websocket'
 import {
   LayoutDashboard,
   Inbox,
@@ -28,16 +30,19 @@ import {
   UserCircle,
   ShieldCheck,
   ChevronUp,
+  ChevronDown,
+  AtSign,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
 const menuItems = [
   { label: 'Painel', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Caixa de Entrada', href: '/inbox', icon: Inbox },
-  { label: 'Conversas', href: '/conversations', icon: MessageSquare },
+  { label: 'Conversas', href: '/conversations', icon: MessageSquare, expandable: 'conversations' },
   { label: 'Contatos', href: '/contacts', icon: Users },
   { label: 'Empresas', href: '/companies', icon: Building2 },
-  { label: 'Times', href: '/teams', icon: UsersRound },
+  { label: 'Times', href: '/teams', icon: UsersRound, expandable: 'teams' },
   { label: 'Canais', href: '/channels', icon: Radio },
   { label: 'Funil de Vendas', href: '/funnels', icon: GitBranch },
   { label: 'Bots e Automações', href: '/automations', icon: Bot },
@@ -53,6 +58,31 @@ const statusMeta = {
   offline: { label: 'Offline', dot: 'bg-gray-400' },
 }
 
+type SidebarConversation = {
+  id: string
+  assigned_to?: string | null
+  team_id?: string | null
+  unread_count?: number
+  last_message_preview?: string
+}
+
+type SidebarTeam = {
+  id: string
+  name: string
+  is_active: boolean
+  open_count?: number
+  unread_count?: number
+}
+
+const Badge = ({ value }: { value?: number }) => {
+  if (!value || value <= 0) return null
+  return (
+    <span className="ml-auto flex min-w-5 items-center justify-center rounded-full bg-primary-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+      {value > 99 ? '99+' : value}
+    </span>
+  )
+}
+
 const resolveImage = (url?: string) => {
   if (!url) return ''
   return url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${url}` : url
@@ -63,7 +93,11 @@ export default function Sidebar() {
   const { user, logout, updateStatus } = useAuthStore()
   const { sidebarPinned, setSidebarPinned, setSidebarHovered, theme, toggleTheme } = useAppearanceStore()
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const [expandedSections, setExpandedSections] = useState<{ conversations: boolean; teams: boolean }>({ conversations: true, teams: false })
+  const [conversationCounts, setConversationCounts] = useState({ mine: 0, unassigned: 0, all: 0, mentions: 0 })
+  const [teams, setTeams] = useState<SidebarTeam[]>([])
   const profileMenuRef = useRef<HTMLDivElement>(null)
+  const refreshTimerRef = useRef<NodeJS.Timeout | null>(null)
   const expandedClass = sidebarPinned ? 'w-64' : 'w-20 hover:w-64'
   const showTextClass = sidebarPinned ? 'opacity-100' : 'opacity-0 group-hover/sidebar:opacity-100'
   const currentStatus = user?.availability_status || (user?.is_online ? 'online' : 'offline')
@@ -73,6 +107,47 @@ export default function Sidebar() {
     { label: 'Configurações', href: '/settings', icon: Settings, show: true },
     { label: 'Super Admin', href: '/admin', icon: ShieldCheck, show: !!user?.is_super_admin },
   ]
+
+  const countUnread = (items: SidebarConversation[]) => items.reduce((sum, item) => sum + (item.unread_count || 0), 0)
+
+  const fetchSidebarCounters = async () => {
+    if (!user?.id) return
+    try {
+      const status = 'open,in_progress,pending'
+      const [mineRes, unassignedRes, allRes, teamsRes] = await Promise.all([
+        api.get('/conversations', { params: { assigned_to: user.id, status, limit: 200 } }),
+        api.get('/conversations', { params: { unassigned: 'true', status, limit: 200 } }),
+        api.get('/conversations', { params: { status, limit: 200 } }),
+        api.get('/teams'),
+      ])
+
+      const mine = (mineRes.data.conversations || []) as SidebarConversation[]
+      const unassigned = (unassignedRes.data.conversations || []) as SidebarConversation[]
+      const all = (allRes.data.conversations || []) as SidebarConversation[]
+      const userTokens = [user.name, user.email?.split('@')[0]]
+        .filter(Boolean)
+        .map((value) => `@${String(value).toLowerCase()}`)
+      const mentions = all.filter((conversation) => {
+        const preview = (conversation.last_message_preview || '').toLowerCase()
+        return userTokens.some((token) => preview.includes(token))
+      })
+
+      setConversationCounts({
+        mine: countUnread(mine),
+        unassigned: countUnread(unassigned),
+        all: countUnread(all),
+        mentions: countUnread(mentions),
+      })
+      setTeams((teamsRes.data.teams || []).filter((team: SidebarTeam) => team.is_active !== false))
+    } catch {}
+  }
+
+  const scheduleSidebarRefresh = () => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+    refreshTimerRef.current = setTimeout(() => {
+      fetchSidebarCounters()
+    }, 500)
+  }
 
   useEffect(() => {
     const closeMenu = (event: MouseEvent) => {
@@ -84,6 +159,18 @@ export default function Sidebar() {
     document.addEventListener('mousedown', closeMenu)
     return () => document.removeEventListener('mousedown', closeMenu)
   }, [])
+
+  useEffect(() => {
+    fetchSidebarCounters()
+    const interval = setInterval(fetchSidebarCounters, 30000)
+    const handleNewMessage = () => scheduleSidebarRefresh()
+    wsService.on('new_message', handleNewMessage)
+    return () => {
+      clearInterval(interval)
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+      wsService.off('new_message', handleNewMessage)
+    }
+  }, [user?.id])
 
   return (
     <aside
@@ -141,24 +228,72 @@ export default function Sidebar() {
         {menuItems.map((item) => {
           const isActive = pathname === item.href || pathname?.startsWith(item.href + '/')
           const Icon = item.icon
+          const sectionKey = item.expandable as 'conversations' | 'teams' | undefined
+          const sectionOpen = sectionKey ? expandedSections[sectionKey] : false
+          const mainBadge = sectionKey === 'conversations'
+            ? conversationCounts.unassigned
+            : sectionKey === 'teams'
+              ? teams.reduce((sum, team) => sum + (team.unread_count || 0), 0)
+              : 0
 
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              title={item.label}
-              className={clsx(
-                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
-                isActive
-                  ? 'bg-primary-600/20 text-primary-300'
-                  : 'text-gray-400 hover:bg-white/5 hover:text-white'
+            <div key={item.href}>
+              <div
+                className={clsx(
+                  'flex items-center gap-2 rounded-lg text-sm font-medium transition-all',
+                  isActive
+                    ? 'bg-primary-600/20 text-primary-300'
+                    : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                )}
+              >
+                <Link href={item.href} title={item.label} className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5">
+                  <Icon size={20} className="shrink-0" />
+                  <span className={clsx('min-w-0 flex-1 whitespace-nowrap transition-opacity duration-200', showTextClass)}>
+                    {item.label}
+                  </span>
+                  <span className={clsx(showTextClass)}><Badge value={mainBadge} /></span>
+                </Link>
+                {sectionKey && (
+                  <button
+                    type="button"
+                    onClick={() => setExpandedSections((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }))}
+                    className={clsx(
+                      'mr-2 rounded-md p-1.5 transition-colors hover:bg-white/10',
+                      sidebarPinned ? 'block' : 'hidden group-hover/sidebar:block'
+                    )}
+                    title={sectionOpen ? 'Recolher menu' : 'Expandir menu'}
+                  >
+                    <ChevronDown size={15} className={clsx('transition-transform', sectionOpen && 'rotate-180')} />
+                  </button>
+                )}
+              </div>
+
+              {sectionKey === 'conversations' && sectionOpen && (
+                <div className={clsx('mt-1 space-y-1 pl-9 pr-2 transition-opacity duration-200', showTextClass)}>
+                  <SubMenuLink href="/conversations?view=mine" label="Minhas" count={conversationCounts.mine} />
+                  <SubMenuLink href="/conversations?view=unassigned" label="Nao atribuidas" count={conversationCounts.unassigned} />
+                  <SubMenuLink href="/conversations?view=all" label="Todas" count={conversationCounts.all} />
+                  <SubMenuLink href="/conversations?mentions=true" label="Mencoes" count={conversationCounts.mentions} icon={<AtSign size={13} />} />
+                </div>
               )}
-            >
-              <Icon size={20} className="shrink-0" />
-              <span className={clsx('whitespace-nowrap transition-opacity duration-200', showTextClass)}>
-                {item.label}
-              </span>
-            </Link>
+
+              {sectionKey === 'teams' && sectionOpen && (
+                <div className={clsx('mt-1 space-y-1 pl-9 pr-2 transition-opacity duration-200', showTextClass)}>
+                  <SubMenuLink href="/teams" label="Configurar times" icon={<SlidersHorizontal size={13} />} />
+                  {teams.map((team) => (
+                    <SubMenuLink
+                      key={team.id}
+                      href={`/conversations?team_id=${team.id}`}
+                      label={team.name}
+                      count={team.unread_count}
+                    />
+                  ))}
+                  {teams.length === 0 && (
+                    <span className="block truncate px-2 py-1.5 text-xs text-gray-500">Nenhum time ativo</span>
+                  )}
+                </div>
+              )}
+            </div>
           )
         })}
       </nav>
@@ -247,5 +382,19 @@ export default function Sidebar() {
         </div>
       </div>
     </aside>
+  )
+}
+
+function SubMenuLink({ href, label, count, icon }: { href: string; label: string; count?: number; icon?: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      title={label}
+      className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium text-gray-500 transition-colors hover:bg-white/5 hover:text-white"
+    >
+      {icon}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <Badge value={count} />
+    </Link>
   )
 }

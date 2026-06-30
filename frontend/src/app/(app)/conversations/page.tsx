@@ -165,6 +165,9 @@ export default function ConversationsPage() {
   const [quickReplyFilter, setQuickReplyFilter] = useState('')
   const [selectedQuickReplyIndex, setSelectedQuickReplyIndex] = useState(0)
   const channelFilter = searchParams.get('channel') || ''
+  const teamFilter = searchParams.get('team_id') || ''
+  const mentionsFilter = searchParams.get('mentions') === 'true'
+  const viewFilter = searchParams.get('view') || ''
   const conversationsAbortRef = useRef<AbortController | null>(null)
   const tabCountsAbortRef = useRef<AbortController | null>(null)
   const messagesAbortRef = useRef<AbortController | null>(null)
@@ -182,6 +185,15 @@ export default function ConversationsPage() {
   const messagesErrorUntilRef = useRef(0)
 
   useEffect(() => {
+    if (viewFilter === 'mine' || viewFilter === 'unassigned' || viewFilter === 'all') {
+      setFilter(viewFilter)
+    }
+    if (teamFilter || mentionsFilter) {
+      setFilter('all')
+    }
+  }, [viewFilter, teamFilter, mentionsFilter])
+
+  useEffect(() => {
     if (conversationsDebounceRef.current) {
       clearTimeout(conversationsDebounceRef.current)
     }
@@ -194,7 +206,7 @@ export default function ConversationsPage() {
         clearTimeout(conversationsDebounceRef.current)
       }
     }
-  }, [filter, statusFilter, channelFilter, user?.id])
+  }, [filter, statusFilter, channelFilter, teamFilter, mentionsFilter, user?.id])
 
   useEffect(() => {
     fetchTabUnreadCounts()
@@ -202,7 +214,7 @@ export default function ConversationsPage() {
     fetchTeams()
     fetchQuickReplies()
     fetchCompanies()
-  }, [channelFilter, user?.id])
+  }, [channelFilter, teamFilter, mentionsFilter, user?.id])
 
   useEffect(() => {
     const handleNewMessage = (data: Message) => {
@@ -303,10 +315,11 @@ export default function ConversationsPage() {
       const params: any = {}
       const channelParam = channelFilter
       if (channelParam) params.channel = channelParam
+      if (teamFilter) params.team_id = teamFilter
 
       // Tab filter
-      if (filter === 'mine') params.assigned_to = user?.id
-      if (filter === 'unassigned') params.unassigned = 'true'
+      if (!teamFilter && !mentionsFilter && filter === 'mine') params.assigned_to = user?.id
+      if (!teamFilter && !mentionsFilter && filter === 'unassigned') params.unassigned = 'true'
 
       // Status dropdown filter overrides
       if (statusFilter && statusFilter !== 'all_status') {
@@ -332,7 +345,17 @@ export default function ConversationsPage() {
       const response = await api.get('/conversations', { params, signal: controller.signal })
       if (requestId === conversationsRequestRef.current) {
         conversationsErrorUntilRef.current = 0
-        setConversations(response.data.conversations || [])
+        let nextConversations: Conversation[] = response.data.conversations || []
+        if (mentionsFilter && user) {
+          const tokens = [user.name, user.email?.split('@')[0]]
+            .filter(Boolean)
+            .map((value) => `@${String(value).toLowerCase()}`)
+          nextConversations = nextConversations.filter((conversation) => {
+            const preview = (conversation.last_message_preview || '').toLowerCase()
+            return tokens.some((token) => preview.includes(token))
+          })
+        }
+        setConversations(nextConversations)
       }
     } catch (error: any) {
       if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') return
