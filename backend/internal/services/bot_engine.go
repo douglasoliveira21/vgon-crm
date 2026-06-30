@@ -666,7 +666,7 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 		JOIN bot_flows bf ON bf.id = be.flow_id
 		WHERE be.conversation_id = $1
 			AND bf.company_id = $2
-			AND be.status = 'waiting'
+			AND (be.status = 'waiting' OR (be.status = 'running' AND COALESCE(be.context ->> 'waiting_node_id', '') <> ''))
 			AND bf.is_active = true
 		ORDER BY be.started_at DESC
 		LIMIT 1
@@ -680,7 +680,7 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 				JOIN bot_flows bf ON bf.id = be.flow_id
 				WHERE be.contact_id = $1
 					AND bf.company_id = $2
-					AND be.status = 'waiting'
+					AND (be.status = 'waiting' OR (be.status = 'running' AND COALESCE(be.context ->> 'waiting_node_id', '') <> ''))
 					AND bf.is_active = true
 				ORDER BY be.started_at DESC
 				LIMIT 1
@@ -690,6 +690,21 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 			}
 			if err == sql.ErrNoRows {
 				log.Printf("[BOT] No waiting execution for contact %s", contactID)
+				err = e.db.QueryRow(`
+					SELECT be.id, bf.id, bf.trigger_type, bf.nodes, bf.edges, COALESCE(be.context ->> 'current_node_id', ''), be.conversation_id::text
+					FROM bot_executions be
+					JOIN bot_flows bf ON bf.id = be.flow_id
+					WHERE be.contact_id = $1
+						AND bf.company_id = $2
+						AND be.status IN ('running', 'completed')
+						AND bf.is_active = true
+						AND be.started_at > NOW() - INTERVAL '30 minutes'
+					ORDER BY be.started_at DESC
+					LIMIT 1
+				`, contactID, companyID).Scan(&execID, &flowID, &triggerType, &nodesJSON, &edgesJSON, &waitingNodeID, &executionConversationID)
+				if err == nil && waitingNodeID != "" {
+					log.Printf("[BOT] Falling back to recent execution %s from conversation %s for contact %s", execID, executionConversationID, contactID)
+				}
 			}
 		} else {
 			log.Printf("[BOT] Could not load waiting execution for conversation %s: %v", conversationID, err)
@@ -775,12 +790,18 @@ func (e *BotEngine) markExecutionWaiting(execID, nodeID string) {
 	if execID == "" {
 		return
 	}
-	e.db.Exec(`
+	result, err := e.db.Exec(`
 		UPDATE bot_executions
 		SET status = 'waiting',
 			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('waiting_node_id', $1, 'current_node_id', $1)
 		WHERE id = $2
 	`, nodeID, execID)
+	if err != nil {
+		log.Printf("[BOT] Failed to mark execution %s waiting at node %s: %v", execID, nodeID, err)
+		return
+	}
+	rowsAffected, _ := result.RowsAffected()
+	log.Printf("[BOT] Marked execution %s waiting at node %s (%d rows)", execID, nodeID, rowsAffected)
 }
 
 func (e *BotEngine) resolveConversationInstance(companyID, conversationID, fallback string) string {
