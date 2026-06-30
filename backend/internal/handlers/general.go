@@ -352,17 +352,17 @@ func GetDeals(svc *services.Container) fiber.Handler {
 		idx := 2
 
 		if funnelID != "" {
-			query += " AND d.funnel_id = $" + string(rune('0'+idx))
+			query += fmt.Sprintf(" AND d.funnel_id = $%d", idx)
 			args = append(args, funnelID)
 			idx++
 		}
 		if stageID != "" {
-			query += " AND d.stage_id = $" + string(rune('0'+idx))
+			query += fmt.Sprintf(" AND d.stage_id = $%d", idx)
 			args = append(args, stageID)
 			idx++
 		}
 		if contactID != "" {
-			query += " AND d.contact_id = $" + string(rune('0'+idx))
+			query += fmt.Sprintf(" AND d.contact_id = $%d", idx)
 			args = append(args, contactID)
 			idx++
 		}

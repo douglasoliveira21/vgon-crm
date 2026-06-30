@@ -178,6 +178,8 @@ export default function ConversationsPage() {
   const lastConversationsFetchRef = useRef(0)
   const lastTabCountsFetchRef = useRef(0)
   const lastMessagesFetchRef = useRef(0)
+  const conversationsErrorUntilRef = useRef(0)
+  const messagesErrorUntilRef = useRef(0)
 
   useEffect(() => {
     if (conversationsDebounceRef.current) {
@@ -287,6 +289,7 @@ export default function ConversationsPage() {
 
   const fetchConversations = async () => {
     const now = Date.now()
+    if (now < conversationsErrorUntilRef.current) return
     if (conversationsInFlightRef.current || now - lastConversationsFetchRef.current < 1200) return
     conversationsInFlightRef.current = true
     lastConversationsFetchRef.current = now
@@ -328,10 +331,14 @@ export default function ConversationsPage() {
 
       const response = await api.get('/conversations', { params, signal: controller.signal })
       if (requestId === conversationsRequestRef.current) {
+        conversationsErrorUntilRef.current = 0
         setConversations(response.data.conversations || [])
       }
     } catch (error: any) {
       if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') return
+      if (error.response?.status >= 500) {
+        conversationsErrorUntilRef.current = Date.now() + 10000
+      }
       console.error('Error fetching conversations:', error)
     } finally {
       conversationsInFlightRef.current = false
@@ -425,14 +432,16 @@ export default function ConversationsPage() {
 
     const interval = setInterval(async () => {
       const now = Date.now()
+      if (now < messagesErrorUntilRef.current) return
       if (messagesInFlightRef.current || now - lastMessagesFetchRef.current < 8000) return
       messagesInFlightRef.current = true
       lastMessagesFetchRef.current = now
       const requestId = ++messagesRequestRef.current
       try {
-        const response = await api.get(`/conversations/${selectedConv.id}/messages`, { params: { limit: 200 } })
+        const response = await api.get(`/conversations/${selectedConv.id}/messages`, { params: { limit: 80 } })
         const newMessages: Message[] = response.data.messages || []
         if (requestId !== messagesRequestRef.current) return
+        messagesErrorUntilRef.current = 0
         setMessages((prev) => {
           // Count real messages (not temp)
           const realPrev = prev.filter((m) => !m.id.startsWith('temp-'))
@@ -450,7 +459,10 @@ export default function ConversationsPage() {
           }
           return prev
         })
-      } catch {
+      } catch (error: any) {
+        if (error.response?.status >= 500) {
+          messagesErrorUntilRef.current = Date.now() + 10000
+        }
       } finally {
         messagesInFlightRef.current = false
       }
@@ -471,6 +483,8 @@ export default function ConversationsPage() {
 
   const selectConversation = async (conv: Conversation) => {
     setSelectedConv(conv)
+    setMessages([])
+    messagesErrorUntilRef.current = 0
     messagesAbortRef.current?.abort()
     if (selectedConv) wsService.leaveConversation(selectedConv.id)
     wsService.joinConversation(conv.id)
@@ -491,12 +505,16 @@ export default function ConversationsPage() {
     messagesInFlightRef.current = true
     lastMessagesFetchRef.current = Date.now()
     try {
-      const response = await api.get(`/conversations/${conv.id}/messages`, { params: { limit: 200 }, signal: controller.signal })
+      const response = await api.get(`/conversations/${conv.id}/messages`, { params: { limit: 80 }, signal: controller.signal })
       if (requestId !== messagesRequestRef.current) return
+      messagesErrorUntilRef.current = 0
       setMessages(response.data.messages || [])
       scrollToBottom()
     } catch (error: any) {
       if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') return
+      if (error.response?.status >= 500) {
+        messagesErrorUntilRef.current = Date.now() + 10000
+      }
       console.error('Error fetching messages:', error)
     } finally {
       messagesInFlightRef.current = false
