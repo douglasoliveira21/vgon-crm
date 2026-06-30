@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -208,6 +209,15 @@ func normalizeTriggerType(triggerType string) string {
 	}
 }
 
+func nodeWaitsForResponse(node BotNode) bool {
+	switch getNodeType(node) {
+	case "ask_question", "ask_text", "ask_options", "ask_email", "ask_phone", "buttons", "send_buttons", "list_options", "wait_response":
+		return true
+	default:
+		return false
+	}
+}
+
 func getTriggerConfigString(nodes []BotNode, triggerType, key string) string {
 	triggerType = normalizeTriggerType(triggerType)
 	for _, node := range nodes {
@@ -307,6 +317,25 @@ func chooseNextNodeID(node BotNode, outgoing []BotEdge, conditionResult *bool) s
 	return outgoing[len(outgoing)-1].Target
 }
 
+func chooseNextNodeIDForResponse(outgoing []BotEdge, response string) string {
+	if len(outgoing) == 0 {
+		return ""
+	}
+	response = strings.TrimSpace(strings.ToLower(response))
+	if response != "" {
+		if idx, err := strconv.Atoi(response); err == nil && idx >= 1 && idx <= len(outgoing) {
+			return outgoing[idx-1].Target
+		}
+		for _, edge := range outgoing {
+			text := strings.ToLower(edge.SourceHandle + " " + edge.TargetHandle + " " + edge.Label + " " + edge.ID)
+			if strings.Contains(text, response) {
+				return edge.Target
+			}
+		}
+	}
+	return outgoing[0].Target
+}
+
 func findStartNode(nodes []BotNode, edges []BotEdge, triggerType string) *BotNode {
 	triggerType = normalizeTriggerType(triggerType)
 	incoming := map[string]bool{}
@@ -363,6 +392,10 @@ func findNextNodeByPosition(current BotNode, nodes []BotNode, visited map[string
 
 // TriggerBot checks if any bot flow should be triggered for a new message
 func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, message, instanceName, phone string) {
+	if e.resumeWaitingExecution(companyID, conversationID, contactID, instanceName, phone, message) {
+		return
+	}
+
 	// Find active flows for this company
 	rows, err := e.db.Query(`
 		SELECT id, trigger_type, trigger_value, nodes, edges
@@ -444,6 +477,10 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 
 // executeFlow runs a bot flow
 func (e *BotEngine) executeFlow(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone, triggerMessage string, nodesJSON, edgesJSON json.RawMessage) {
+	e.executeFlowFrom(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone, triggerMessage, nodesJSON, edgesJSON, "")
+}
+
+func (e *BotEngine) executeFlowFrom(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone, triggerMessage string, nodesJSON, edgesJSON json.RawMessage, startNodeID string) {
 	nodes, err := parseBotNodes(nodesJSON)
 	if err != nil {
 		log.Printf("[BOT] Failed to parse nodes for flow %s: %v", flowID, err)
@@ -484,6 +521,15 @@ func (e *BotEngine) executeFlow(flowID, triggerType, companyID, conversationID, 
 
 	outgoingBySource := buildOutgoingEdges(edges)
 	current := findStartNode(nodes, edges, triggerType)
+	if startNodeID != "" {
+		if node, ok := nodesByID[startNodeID]; ok {
+			current = &node
+		} else {
+			log.Printf("[BOT] Flow %s cannot resume at missing node %s", flowID, startNodeID)
+			e.markExecutionError(execID, startNodeID, fmt.Errorf("resume node not found"))
+			return
+		}
+	}
 	visited := map[string]bool{}
 	steps := 0
 	maxSteps := len(nodes) + len(edges) + 5
@@ -512,6 +558,12 @@ func (e *BotEngine) executeFlow(flowID, triggerType, companyID, conversationID, 
 			log.Printf("[BOT] Error executing node %s: %v", node.ID, err)
 			e.markExecutionError(execID, node.ID, err)
 			e.addBotExecutionNote(companyID, conversationID, fmt.Sprintf("Falha no envio da automacao no bloco %s: %v", getNodeType(node), err))
+			return
+		}
+
+		if nodeWaitsForResponse(node) {
+			e.markExecutionWaiting(execID, node.ID)
+			log.Printf("[BOT] Flow %s waiting for response at node %s", flowID, node.ID)
 			return
 		}
 
@@ -547,6 +599,74 @@ func (e *BotEngine) executeFlow(flowID, triggerType, companyID, conversationID, 
 	log.Printf("[BOT] Flow %s completed for conversation %s", flowID, conversationID)
 }
 
+func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID, instanceName, phone, message string) bool {
+	var execID, flowID, triggerType, waitingNodeID string
+	var nodesJSON, edgesJSON json.RawMessage
+	err := e.db.QueryRow(`
+		SELECT be.id, bf.id, bf.trigger_type, bf.nodes, bf.edges, COALESCE(be.context ->> 'waiting_node_id', '')
+		FROM bot_executions be
+		JOIN bot_flows bf ON bf.id = be.flow_id
+		WHERE be.conversation_id = $1
+			AND bf.company_id = $2
+			AND be.status = 'waiting'
+			AND bf.is_active = true
+		ORDER BY be.started_at DESC
+		LIMIT 1
+	`, conversationID, companyID).Scan(&execID, &flowID, &triggerType, &nodesJSON, &edgesJSON, &waitingNodeID)
+	if err != nil || waitingNodeID == "" {
+		return false
+	}
+
+	nodes, err := parseBotNodes(nodesJSON)
+	if err != nil {
+		e.markExecutionError(execID, waitingNodeID, err)
+		return true
+	}
+	edges, err := parseBotEdges(edgesJSON)
+	if err != nil {
+		e.markExecutionError(execID, waitingNodeID, err)
+		return true
+	}
+
+	nodesByID := make(map[string]BotNode, len(nodes))
+	for _, node := range nodes {
+		nodesByID[node.ID] = node
+	}
+	waitingNode, ok := nodesByID[waitingNodeID]
+	if !ok {
+		e.markExecutionError(execID, waitingNodeID, fmt.Errorf("waiting node not found"))
+		return true
+	}
+
+	outgoingBySource := buildOutgoingEdges(edges)
+	nextID := chooseNextNodeIDForResponse(outgoingBySource[waitingNode.ID], message)
+	if nextID == "" {
+		e.db.Exec(`
+			UPDATE bot_executions
+			SET status = 'completed',
+				completed_at = NOW(),
+				context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('last_response', $1)
+			WHERE id = $2
+		`, message, execID)
+		return true
+	}
+
+	_, err = e.db.Exec(`
+		UPDATE bot_executions
+		SET status = 'running',
+			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('last_response', $1, 'waiting_node_id', NULL, 'current_node_id', $2)
+		WHERE id = $3
+	`, message, nextID, execID)
+	if err != nil {
+		log.Printf("[BOT] Failed to resume waiting execution %s: %v", execID, err)
+		return true
+	}
+
+	instanceName = e.resolveConversationInstance(companyID, conversationID, instanceName)
+	go e.executeFlowFrom(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone, message, nodesJSON, edgesJSON, nextID)
+	return true
+}
+
 func (e *BotEngine) markExecutionError(execID, nodeID string, err error) {
 	if execID == "" {
 		return
@@ -562,6 +682,18 @@ func (e *BotEngine) markExecutionError(execID, nodeID string, err error) {
 			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('error', $1, 'error_node_id', $2)
 		WHERE id = $3
 	`, errMsg, nodeID, execID)
+}
+
+func (e *BotEngine) markExecutionWaiting(execID, nodeID string) {
+	if execID == "" {
+		return
+	}
+	e.db.Exec(`
+		UPDATE bot_executions
+		SET status = 'waiting',
+			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('waiting_node_id', $1, 'current_node_id', $1)
+		WHERE id = $2
+	`, nodeID, execID)
 }
 
 func (e *BotEngine) resolveConversationInstance(companyID, conversationID, fallback string) string {
