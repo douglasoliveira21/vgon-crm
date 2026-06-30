@@ -162,7 +162,8 @@ func GetChannels(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 
 		rows, err := svc.DB.Query(`
-			SELECT id, name, type, status, settings, is_active, created_at
+			SELECT id, name, COALESCE(type, 'whatsapp'), COALESCE(status, 'disconnected'),
+			       COALESCE(settings, '{}'::jsonb), COALESCE(is_active, true), COALESCE(created_at, NOW())::text
 			FROM channels WHERE company_id = $1 ORDER BY created_at DESC
 		`, companyID)
 		if err != nil {
@@ -176,12 +177,17 @@ func GetChannels(svc *services.Container) fiber.Handler {
 			var rawSettings []byte
 			var isActive bool
 			var createdAt string
-			rows.Scan(&id, &name, &chType, &status, &rawSettings, &isActive, &createdAt)
+			if err := rows.Scan(&id, &name, &chType, &status, &rawSettings, &isActive, &createdAt); err != nil {
+				continue
+			}
 			settings := sanitizeChannelSettings(chType, rawSettings)
 			channels = append(channels, map[string]interface{}{
 				"id": id, "name": name, "type": chType, "status": status,
 				"settings": settings, "is_active": isActive, "created_at": createdAt,
 			})
+		}
+		if err := rows.Err(); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		return c.JSON(fiber.Map{"channels": channels})
@@ -208,7 +214,7 @@ func GetFunnels(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 
 		rows, err := svc.DB.Query(`
-			SELECT id, name, description, is_default, is_active FROM funnels
+			SELECT id, name, description, COALESCE(is_default, false), COALESCE(is_active, true) FROM funnels
 			WHERE company_id = $1 ORDER BY created_at
 		`, companyID)
 		if err != nil {
@@ -221,7 +227,9 @@ func GetFunnels(svc *services.Container) fiber.Handler {
 			var id, name string
 			var description *string
 			var isDefault, isActive bool
-			rows.Scan(&id, &name, &description, &isDefault, &isActive)
+			if err := rows.Scan(&id, &name, &description, &isDefault, &isActive); err != nil {
+				continue
+			}
 
 			// Get stages
 			stageRows, _ := svc.DB.Query(`
@@ -239,7 +247,9 @@ func GetFunnels(svc *services.Container) fiber.Handler {
 					var isWon, isLost bool
 					var dealCount int
 					var dealValue float64
-					stageRows.Scan(&sID, &sName, &sColor, &pos, &isWon, &isLost, &dealCount, &dealValue)
+					if err := stageRows.Scan(&sID, &sName, &sColor, &pos, &isWon, &isLost, &dealCount, &dealValue); err != nil {
+						continue
+					}
 					stages = append(stages, map[string]interface{}{
 						"id": sID, "name": sName, "color": sColor, "position": pos,
 						"is_won": isWon, "is_lost": isLost, "deal_count": dealCount, "deal_value": dealValue,
@@ -252,6 +262,9 @@ func GetFunnels(svc *services.Container) fiber.Handler {
 				"id": id, "name": name, "description": description,
 				"is_default": isDefault, "is_active": isActive, "stages": stages,
 			})
+		}
+		if err := rows.Err(); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		return c.JSON(fiber.Map{"funnels": funnels})
@@ -339,7 +352,7 @@ func GetDeals(svc *services.Container) fiber.Handler {
 		contactID := c.Query("contact_id")
 
 		query := `
-			SELECT d.id, d.title, d.value, d.status, d.funnel_id, d.stage_id,
+			SELECT d.id, COALESCE(d.title, 'Negocio'), COALESCE(d.value, 0), COALESCE(d.status, 'open'), d.funnel_id, d.stage_id,
 				   c.name as contact_name, u.name as assigned_to_name, f.name as funnel_name, fs.name as stage_name
 			FROM deals d
 			LEFT JOIN contacts c ON d.contact_id = c.id
@@ -377,15 +390,21 @@ func GetDeals(svc *services.Container) fiber.Handler {
 
 		var deals []map[string]interface{}
 		for rows.Next() {
-			var id, title, status, funnelIDVal, stageIDVal string
+			var id, title, status string
+			var funnelIDVal, stageIDVal *string
 			var value float64
 			var contactName, assignedToName, funnelName, stageName *string
-			rows.Scan(&id, &title, &value, &status, &funnelIDVal, &stageIDVal, &contactName, &assignedToName, &funnelName, &stageName)
+			if err := rows.Scan(&id, &title, &value, &status, &funnelIDVal, &stageIDVal, &contactName, &assignedToName, &funnelName, &stageName); err != nil {
+				continue
+			}
 			deals = append(deals, map[string]interface{}{
 				"id": id, "title": title, "value": value, "status": status,
 				"funnel_id": funnelIDVal, "stage_id": stageIDVal, "contact_name": contactName,
 				"assigned_to_name": assignedToName, "funnel_name": funnelName, "stage_name": stageName,
 			})
+		}
+		if err := rows.Err(); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		return c.JSON(fiber.Map{"deals": deals})

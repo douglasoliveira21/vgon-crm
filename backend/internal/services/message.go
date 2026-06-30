@@ -37,8 +37,8 @@ func (s *MessageService) GetConversationMessages(conversationID, companyID strin
 
 	rows, err := s.db.Query(`
 		SELECT m.id, m.conversation_id, m.company_id, m.sender_type, m.sender_id,
-			   m.content, m.message_type, m.media_url, m.media_mime_type, m.media_filename,
-			   m.external_id, m.status, m.is_private, m.metadata, m.created_at,
+			   m.content, COALESCE(m.message_type, 'text'), m.media_url, m.media_mime_type, m.media_filename,
+			   m.external_id, COALESCE(m.status, 'sent'), COALESCE(m.is_private, false), COALESCE(m.metadata, '{}'::jsonb), COALESCE(m.created_at, NOW()),
 			   COALESCE(u.name, c.name, 'Unknown') as sender_name,
 			   COALESCE(u.avatar_url, c.avatar_url) as sender_avatar_url,
 			   m.reply_to_content, m.reply_to_sender
@@ -67,6 +67,9 @@ func (s *MessageService) GetConversationMessages(conversationID, companyID strin
 			continue
 		}
 		messages = append(messages, msg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read messages: %w", err)
 	}
 
 	return messages, nil
@@ -129,8 +132,8 @@ func (s *MessageService) GetConversations(companyID string, status string, assig
 
 	query := `
 		SELECT c.id, c.company_id, c.contact_id, c.channel_id, c.assigned_to, c.team_id,
-			   c.status, c.priority, c.subject, c.last_message_at, c.last_message_preview,
-			   c.unread_count, c.created_at, c.updated_at,
+			   COALESCE(c.status, 'open'), COALESCE(c.priority, 'normal'), c.subject, c.last_message_at, c.last_message_preview,
+			   COALESCE(c.unread_count, 0), COALESCE(c.created_at, NOW()), COALESCE(c.updated_at, NOW()),
 			   co.name as contact_name, co.phone as contact_phone, co.avatar_url as contact_avatar_url,
 			   COALESCE(c.customer_company_id, co.customer_company_id) as customer_company_id,
 			   cc.name as customer_company_name,
@@ -219,6 +222,9 @@ func (s *MessageService) GetConversations(companyID string, status string, assig
 			continue
 		}
 		conversations = append(conversations, conv)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read conversations: %w", err)
 	}
 
 	return conversations, nil
