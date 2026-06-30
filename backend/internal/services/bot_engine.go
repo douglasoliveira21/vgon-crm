@@ -473,6 +473,8 @@ func (e *BotEngine) executeFlow(flowID, triggerType, companyID, conversationID, 
 		return
 	}
 
+	instanceName = e.resolveConversationInstance(companyID, conversationID, instanceName)
+
 	log.Printf("[BOT] Starting flow %s for conversation %s", flowID, conversationID)
 
 	nodesByID := make(map[string]BotNode, len(nodes))
@@ -560,6 +562,44 @@ func (e *BotEngine) markExecutionError(execID, nodeID string, err error) {
 			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('error', $1, 'error_node_id', $2)
 		WHERE id = $3
 	`, errMsg, nodeID, execID)
+}
+
+func (e *BotEngine) resolveConversationInstance(companyID, conversationID, fallback string) string {
+	var instanceName string
+	err := e.db.QueryRow(`
+		SELECT COALESCE(wi.instance_name, '')
+		FROM conversations c
+		LEFT JOIN whatsapp_instances wi ON wi.channel_id = c.channel_id AND wi.company_id = c.company_id
+		WHERE c.id = $1 AND c.company_id = $2
+		LIMIT 1
+	`, conversationID, companyID).Scan(&instanceName)
+	if err == nil && strings.TrimSpace(instanceName) != "" {
+		instanceName = strings.TrimSpace(instanceName)
+		if fallback != "" && fallback != instanceName {
+			log.Printf("[BOT] Using conversation instance %s instead of stale instance %s for conversation %s", instanceName, fallback, conversationID)
+		}
+		return instanceName
+	}
+
+	fallback = strings.TrimSpace(fallback)
+	if fallback == "" {
+		return fallback
+	}
+
+	var exists bool
+	err = e.db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM whatsapp_instances
+			WHERE company_id = $1 AND instance_name = $2
+		)
+	`, companyID, fallback).Scan(&exists)
+	if err == nil && exists {
+		return fallback
+	}
+
+	log.Printf("[BOT] Instance %s is not registered for company %s", fallback, companyID)
+	return fallback
 }
 
 func (e *BotEngine) reserveExecution(flowID, conversationID, contactID string) bool {
