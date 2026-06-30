@@ -307,11 +307,12 @@ func fetchSLAByChannel(db *sql.DB, companyID, teamID, channelID, period string) 
 	where, args := dashboardConversationFilter(companyID, teamID, channelID, period)
 	rows, err := db.Query(`
 		SELECT COALESCE(ch.name, 'Sem canal'), COALESCE(ch.type, 'desconhecido'),
-		       COALESCE(100.0 * SUM(CASE WHEN c.first_response_due_at IS NULL OR (c.first_response_at IS NOT NULL AND c.first_response_at <= c.first_response_due_at) THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 0) AS first_sla,
-		       COALESCE(100.0 * SUM(CASE WHEN c.resolution_due_at IS NULL OR (c.resolved_at IS NOT NULL AND c.resolved_at <= c.resolution_due_at) THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 0) AS resolution_sla
+		       COALESCE(100.0 * SUM(CASE WHEN c.first_response_due_at IS NOT NULL AND COALESCE(c.first_response_at, NOW()) <= c.first_response_due_at THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN c.first_response_due_at IS NOT NULL THEN 1 ELSE 0 END), 0), 0) AS first_sla,
+		       COALESCE(100.0 * SUM(CASE WHEN c.resolution_due_at IS NOT NULL AND COALESCE(c.resolved_at, NOW()) <= c.resolution_due_at THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN c.resolution_due_at IS NOT NULL THEN 1 ELSE 0 END), 0), 0) AS resolution_sla
 		FROM conversations c
 		LEFT JOIN channels ch ON ch.id = c.channel_id
 		WHERE `+strings.ReplaceAll(where, "company_id", "c.company_id")+`
+		  AND (c.first_response_due_at IS NOT NULL OR c.resolution_due_at IS NOT NULL)
 		GROUP BY ch.name, ch.type
 		ORDER BY first_sla ASC
 	`, args...)
@@ -332,17 +333,24 @@ func fetchSLAByChannel(db *sql.DB, companyID, teamID, channelID, period string) 
 func fetchSLAAlerts(db *sql.DB, companyID, teamID, channelID string) []fiber.Map {
 	where, args := dashboardConversationFilter(companyID, teamID, channelID, "")
 	rows, err := db.Query(`
-		SELECT c.id, COALESCE(co.name, co.phone, 'Contato'), COALESCE(ch.name, 'Sem canal'), c.status,
-		       EXTRACT(EPOCH FROM (COALESCE(c.first_response_due_at, c.resolution_due_at) - NOW())) AS seconds_remaining
-		FROM conversations c
-		LEFT JOIN contacts co ON co.id = c.contact_id
-		LEFT JOIN channels ch ON ch.id = c.channel_id
-		WHERE `+strings.ReplaceAll(where, "company_id", "c.company_id")+`
-		  AND c.status IN ('open', 'pending', 'in_progress')
-		  AND (
-		    (c.first_response_due_at IS NOT NULL AND c.first_response_at IS NULL AND c.first_response_due_at <= NOW() + INTERVAL '30 minutes')
-		    OR (c.resolution_due_at IS NOT NULL AND c.resolved_at IS NULL AND c.resolution_due_at <= NOW() + INTERVAL '30 minutes')
-		  )
+		WITH pending_sla AS (
+			SELECT c.id, c.contact_id, c.channel_id, c.status,
+			       CASE
+			         WHEN c.first_response_due_at IS NOT NULL AND c.first_response_at IS NULL THEN c.first_response_due_at
+			         WHEN c.resolution_due_at IS NOT NULL AND c.resolved_at IS NULL THEN c.resolution_due_at
+			         ELSE NULL
+			       END AS due_at
+			FROM conversations c
+			WHERE `+strings.ReplaceAll(where, "company_id", "c.company_id")+`
+			  AND c.status IN ('open', 'pending', 'in_progress')
+		)
+		SELECT pending_sla.id, COALESCE(co.name, co.phone, 'Contato'), COALESCE(ch.name, 'Sem canal'), pending_sla.status,
+		       EXTRACT(EPOCH FROM (pending_sla.due_at - NOW())) AS seconds_remaining
+		FROM pending_sla
+		LEFT JOIN contacts co ON co.id = pending_sla.contact_id
+		LEFT JOIN channels ch ON ch.id = pending_sla.channel_id
+		WHERE pending_sla.due_at IS NOT NULL
+		  AND pending_sla.due_at <= NOW() + INTERVAL '30 minutes'
 		ORDER BY seconds_remaining ASC
 		LIMIT 8
 	`, args...)

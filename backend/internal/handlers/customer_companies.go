@@ -303,10 +303,21 @@ func scanCustomerCompany(rows *sql.Rows) (fiber.Map, error) {
 func refreshOpenConversationSLA(db *sql.DB, tenantID, customerCompanyID string) {
 	db.Exec(`
 		UPDATE conversations conv
-		SET first_response_due_at = conv.created_at + (cc.initial_response_sla_minutes || ' minutes')::interval,
+		SET customer_company_id = cc.id,
+		    first_response_due_at = conv.created_at + (cc.initial_response_sla_minutes || ' minutes')::interval,
 		    resolution_due_at = conv.created_at + (cc.resolution_sla_minutes || ' minutes')::interval
 		FROM customer_companies cc
-		WHERE conv.company_id = $1 AND cc.id = $2 AND conv.customer_company_id = cc.id AND conv.status != 'resolved'
+		WHERE conv.company_id = $1
+		  AND cc.id = $2
+		  AND conv.status != 'resolved'
+		  AND (
+		    conv.customer_company_id = cc.id
+		    OR EXISTS (
+		      SELECT 1
+		      FROM contacts ct
+		      WHERE ct.id = conv.contact_id AND ct.customer_company_id = cc.id
+		    )
+		  )
 	`, tenantID, customerCompanyID)
 }
 

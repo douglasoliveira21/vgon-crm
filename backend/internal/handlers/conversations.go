@@ -77,8 +77,14 @@ func StartConversation(svc *services.Container) fiber.Handler {
 
 func applyConversationSLA(db *sql.DB, companyID, conversationID string) {
 	db.Exec(`
+		WITH conversation_company AS (
+			SELECT conv.id, COALESCE(conv.customer_company_id, ct.customer_company_id) AS effective_company_id
+			FROM conversations conv
+			JOIN contacts ct ON ct.id = conv.contact_id
+			WHERE conv.id = $1 AND conv.company_id = $2
+		)
 		UPDATE conversations conv
-		SET customer_company_id = COALESCE(conv.customer_company_id, ct.customer_company_id),
+		SET customer_company_id = conversation_company.effective_company_id,
 		    first_response_due_at = CASE
 		      WHEN cc.id IS NULL THEN NULL
 		      ELSE conv.created_at + (cc.initial_response_sla_minutes || ' minutes')::interval
@@ -87,9 +93,9 @@ func applyConversationSLA(db *sql.DB, companyID, conversationID string) {
 		      WHEN cc.id IS NULL THEN NULL
 		      ELSE conv.created_at + (cc.resolution_sla_minutes || ' minutes')::interval
 		    END
-		FROM contacts ct
-		LEFT JOIN customer_companies cc ON COALESCE(conv.customer_company_id, ct.customer_company_id) = cc.id
-		WHERE conv.id = $1 AND conv.company_id = $2 AND conv.contact_id = ct.id
+		FROM conversation_company
+		LEFT JOIN customer_companies cc ON cc.id = conversation_company.effective_company_id
+		WHERE conv.id = conversation_company.id
 	`, conversationID, companyID)
 }
 
