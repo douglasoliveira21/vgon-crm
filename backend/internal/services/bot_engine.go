@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -117,6 +118,26 @@ func getNumber(value interface{}) (float64, bool) {
 		return n, err == nil
 	default:
 		return 0, false
+	}
+}
+
+func getStringValue(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case float64:
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10)
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case bool:
+		return strconv.FormatBool(v)
+	default:
+		return ""
 	}
 }
 
@@ -289,7 +310,7 @@ func buildOutgoingEdges(edges []BotEdge) map[string][]BotEdge {
 	return outgoing
 }
 
-func chooseNextNodeID(node BotNode, outgoing []BotEdge, conditionResult *bool) string {
+func chooseNextNodeID(node BotNode, outgoing []BotEdge, conditionResult *bool, nodesByID map[string]BotNode) string {
 	if len(outgoing) == 0 {
 		return ""
 	}
@@ -311,10 +332,47 @@ func chooseNextNodeID(node BotNode, outgoing []BotEdge, conditionResult *bool) s
 		}
 	}
 
+	if targetID := chooseConditionTargetByPosition(node, outgoing, *conditionResult, nodesByID); targetID != "" {
+		return targetID
+	}
+
 	if *conditionResult {
 		return outgoing[0].Target
 	}
 	return outgoing[len(outgoing)-1].Target
+}
+
+func chooseConditionTargetByPosition(node BotNode, outgoing []BotEdge, conditionResult bool, nodesByID map[string]BotNode) string {
+	if len(outgoing) < 2 || len(nodesByID) == 0 {
+		return ""
+	}
+
+	type candidate struct {
+		target string
+		dx     float64
+	}
+	candidates := make([]candidate, 0, len(outgoing))
+	for _, edge := range outgoing {
+		target, ok := nodesByID[edge.Target]
+		if !ok {
+			continue
+		}
+		candidates = append(candidates, candidate{
+			target: edge.Target,
+			dx:     math.Abs(target.Position["x"] - node.Position["x"]),
+		})
+	}
+	if len(candidates) < 2 {
+		return ""
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return candidates[i].dx < candidates[j].dx
+	})
+	if conditionResult {
+		return candidates[0].target
+	}
+	return candidates[len(candidates)-1].target
 }
 
 func chooseNextNodeIDForResponse(outgoing []BotEdge, response string) string {
@@ -574,7 +632,7 @@ func (e *BotEngine) executeFlowFrom(flowID, triggerType, companyID, conversation
 			WHERE id = $2
 		`, node.ID, execID)
 
-		nextID := chooseNextNodeID(node, outgoingBySource[node.ID], conditionResult)
+		nextID := chooseNextNodeID(node, outgoingBySource[node.ID], conditionResult, nodesByID)
 		if nextID == "" {
 			nextNode := findNextNodeByPosition(node, nodes, visited)
 			if nextNode == nil {
@@ -752,7 +810,7 @@ func (e *BotEngine) reserveExecution(flowID, conversationID, contactID string) b
 	if err := tx.QueryRow(`
 		SELECT COUNT(*)
 		FROM bot_executions
-		WHERE conversation_id = $1 AND status = 'running'
+		WHERE conversation_id = $1 AND status IN ('running', 'waiting')
 	`, conversationID).Scan(&execCount); err != nil {
 		log.Printf("[BOT] Failed to check running executions: %v", err)
 		return false
@@ -804,9 +862,9 @@ func (e *BotEngine) evaluateCondition(node BotNode, companyID, conversationID, c
 	}
 
 	config := getNodeConfig(node)
-	field, _ := config["field"].(string)
-	operator, _ := config["operator"].(string)
-	expected, _ := config["value"].(string)
+	field := getStringValue(config["field"])
+	operator := getStringValue(config["operator"])
+	expected := getStringValue(config["value"])
 	if operator == "" {
 		operator = "contains"
 	}
@@ -880,29 +938,41 @@ func safeContactField(field string) string {
 func compareCondition(actual, expected, operator string) bool {
 	actual = strings.TrimSpace(strings.ToLower(actual))
 	expected = strings.TrimSpace(strings.ToLower(expected))
+	operator = strings.TrimSpace(strings.ToLower(operator))
 
 	switch operator {
-	case "equals":
+	case "equals", "equal", "igual", "igual_a", "is", "==":
 		return actual == expected
-	case "not_equals":
+	case "not_equals", "not_equal", "diferente", "diferente_de", "!=":
 		return actual != expected
-	case "not_contains":
+	case "contains", "contem", "contém":
+		return strings.Contains(actual, expected)
+	case "not_contains", "nao_contem", "não_contém", "nao_contém":
 		return !strings.Contains(actual, expected)
-	case "starts_with":
+	case "starts_with", "comeca_com", "começa_com":
 		return strings.HasPrefix(actual, expected)
-	case "ends_with":
+	case "ends_with", "termina_com":
 		return strings.HasSuffix(actual, expected)
-	case "greater_than":
-		return actual > expected
-	case "less_than":
-		return actual < expected
-	case "is_empty":
+	case "greater_than", "maior_que":
+		return compareNumericOrText(actual, expected, func(a, b float64) bool { return a > b }, func(a, b string) bool { return a > b })
+	case "less_than", "menor_que":
+		return compareNumericOrText(actual, expected, func(a, b float64) bool { return a < b }, func(a, b string) bool { return a < b })
+	case "is_empty", "vazio":
 		return actual == ""
-	case "is_not_empty":
+	case "is_not_empty", "nao_vazio", "não_vazio":
 		return actual != ""
 	default:
 		return strings.Contains(actual, expected)
 	}
+}
+
+func compareNumericOrText(actual, expected string, numeric func(float64, float64) bool, text func(string, string) bool) bool {
+	actualNum, actualErr := strconv.ParseFloat(actual, 64)
+	expectedNum, expectedErr := strconv.ParseFloat(expected, 64)
+	if actualErr == nil && expectedErr == nil {
+		return numeric(actualNum, expectedNum)
+	}
+	return text(actual, expected)
 }
 
 // executeNode processes a single node
