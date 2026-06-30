@@ -991,10 +991,13 @@ func (s *EvolutionService) getOrCreateConversation(companyID, contactID string, 
 // GetInstances returns all instances for a company
 func (s *EvolutionService) GetInstances(companyID string) ([]models.WhatsAppInstance, error) {
 	rows, err := s.db.Query(`
-		SELECT id, company_id, channel_id, instance_name, instance_id, token, status, phone_number, webhook_url, connected_at, created_at, updated_at
+		SELECT id, company_id, channel_id, instance_name, instance_id, token,
+		       COALESCE(status, 'disconnected'),
+		       phone_number, webhook_url, connected_at,
+		       COALESCE(created_at, NOW()), COALESCE(updated_at, NOW())
 		FROM whatsapp_instances
 		WHERE company_id = $1
-		ORDER BY created_at DESC
+		ORDER BY COALESCE(created_at, NOW()) DESC
 	`, companyID)
 	if err != nil {
 		return nil, err
