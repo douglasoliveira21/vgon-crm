@@ -508,7 +508,9 @@ func (e *BotEngine) executeFlow(flowID, triggerType, companyID, conversationID, 
 		err := e.executeNode(node, companyID, conversationID, contactID, instanceName, phone)
 		if err != nil {
 			log.Printf("[BOT] Error executing node %s: %v", node.ID, err)
-			break
+			e.markExecutionError(execID, node.ID, err)
+			e.addBotExecutionNote(companyID, conversationID, fmt.Sprintf("Falha no envio da automacao no bloco %s: %v", getNodeType(node), err))
+			return
 		}
 
 		// Update current node
@@ -541,6 +543,23 @@ func (e *BotEngine) executeFlow(flowID, triggerType, companyID, conversationID, 
 	// Mark execution as completed
 	e.db.Exec("UPDATE bot_executions SET status = 'completed', completed_at = NOW() WHERE id = $1", execID)
 	log.Printf("[BOT] Flow %s completed for conversation %s", flowID, conversationID)
+}
+
+func (e *BotEngine) markExecutionError(execID, nodeID string, err error) {
+	if execID == "" {
+		return
+	}
+	errMsg := ""
+	if err != nil {
+		errMsg = err.Error()
+	}
+	e.db.Exec(`
+		UPDATE bot_executions
+		SET status = 'error',
+			completed_at = NOW(),
+			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('error', $1, 'error_node_id', $2)
+		WHERE id = $3
+	`, errMsg, nodeID, execID)
 }
 
 func (e *BotEngine) reserveExecution(flowID, conversationID, contactID string) bool {
@@ -1171,11 +1190,30 @@ func (e *BotEngine) nodeUpdateContact(node BotNode, companyID, conversationID, c
 
 func (e *BotEngine) nodeInternalNote(node BotNode, companyID, conversationID, nodeType string) error {
 	content := fmt.Sprintf("Automacao executou bloco %s. Configure os campos especificos deste bloco para acao completa.", nodeType)
+	return e.addBotExecutionNote(companyID, conversationID, content)
+}
+
+func (e *BotEngine) addBotExecutionNote(companyID, conversationID, content string) error {
 	msgID := uuid.New().String()
 	_, err := e.db.Exec(`
 		INSERT INTO messages (id, conversation_id, company_id, sender_type, content, message_type, is_private, status)
 		VALUES ($1, $2, $3, 'bot', $4, 'text', true, 'sent')
 	`, msgID, conversationID, companyID, content)
+	if err != nil {
+		return err
+	}
+
+	e.wsHub.BroadcastToCompany(companyID, "new_message", map[string]interface{}{
+		"id":              msgID,
+		"conversation_id": conversationID,
+		"sender_type":     "bot",
+		"content":         content,
+		"message_type":    "text",
+		"is_private":      true,
+		"sender_name":     "Bot",
+		"status":          "sent",
+		"created_at":      time.Now(),
+	})
 	return err
 }
 
