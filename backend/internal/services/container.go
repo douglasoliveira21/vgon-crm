@@ -48,6 +48,7 @@ func NewContainer(db *sql.DB, rdb *redis.Client, cfg *config.Config, wsHub *webs
 
 	// Link GLPI flow to bot engine
 	container.Bot.glpiFlow = container.GLPIFlow
+	container.GLPIFlow.SetBotEngine(container.Bot)
 
 	return container
 }

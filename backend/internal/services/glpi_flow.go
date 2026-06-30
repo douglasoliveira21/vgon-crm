@@ -31,6 +31,7 @@ type GLPIFlowEngine struct {
 	wsHub *websocket.Hub
 	evo   *EvolutionService
 	glpi  *GLPIService
+	bot   *BotEngine
 	cfg   struct {
 		UserToken string
 	}
@@ -45,6 +46,10 @@ func NewGLPIFlowEngine(db *sql.DB, wsHub *websocket.Hub, evo *EvolutionService, 
 	}
 	e.cfg.UserToken = userToken
 	return e
+}
+
+func (e *GLPIFlowEngine) SetBotEngine(bot *BotEngine) {
+	e.bot = bot
 }
 
 // StartGLPIFlow initiates the GLPI ticket creation flow for a conversation
@@ -336,6 +341,7 @@ func (e *GLPIFlowEngine) handleAskDescription(companyID, conversationID, contact
 		ticket.ID, state.EntityName, state.FullName, state.Email, state.Phone, state.Title, ticket.ID,
 	)
 	e.sendBotMessage(companyID, conversationID, instanceName, phone, successMsg)
+	e.resumeBotAfterCompletion(companyID, conversationID, contactID, instanceName, phone, fmt.Sprintf("glpi_ticket_opened:%d", ticket.ID))
 
 	// Update contact info in CRM
 	if contactID != "" {
@@ -400,6 +406,7 @@ func (e *GLPIFlowEngine) handleAskTicketNumber(companyID, conversationID, instan
 
 	e.sendBotMessage(companyID, conversationID, instanceName, phone, msg)
 	e.CancelFlow(conversationID) // Done
+	e.resumeBotAfterCompletion(companyID, conversationID, "", instanceName, phone, fmt.Sprintf("glpi_ticket_checked:%d", ticket.ID))
 	return true
 }
 
@@ -479,6 +486,16 @@ func (e *GLPIFlowEngine) addInternalNote(companyID, conversationID, content stri
 		"status":          "sent",
 		"created_at":      time.Now(),
 	})
+}
+
+func (e *GLPIFlowEngine) resumeBotAfterCompletion(companyID, conversationID, contactID, instanceName, phone, resultMessage string) {
+	if e.bot == nil {
+		return
+	}
+	if contactID == "" {
+		_ = e.db.QueryRow("SELECT contact_id::text FROM conversations WHERE id = $1 AND company_id = $2", conversationID, companyID).Scan(&contactID)
+	}
+	e.bot.ResumeAfterExternalNode(companyID, conversationID, contactID, instanceName, phone, resultMessage)
 }
 
 func (e *GLPIFlowEngine) saveState(conversationID string, state *GLPIFlowState) {

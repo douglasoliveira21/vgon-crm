@@ -239,6 +239,15 @@ func nodeWaitsForResponse(node BotNode) bool {
 	}
 }
 
+func nodeWaitsForExternalCompletion(node BotNode) bool {
+	switch getNodeType(node) {
+	case "glpi_open_ticket", "glpi_check_status":
+		return true
+	default:
+		return false
+	}
+}
+
 func getTriggerConfigString(nodes []BotNode, triggerType, key string) string {
 	triggerType = normalizeTriggerType(triggerType)
 	for _, node := range nodes {
@@ -619,6 +628,12 @@ func (e *BotEngine) executeFlowFrom(flowID, triggerType, companyID, conversation
 			return
 		}
 
+		if nodeWaitsForExternalCompletion(node) {
+			e.markExecutionExternalWait(execID, node.ID)
+			log.Printf("[BOT] Flow %s waiting for external completion at node %s", flowID, node.ID)
+			return
+		}
+
 		if nodeWaitsForResponse(node) {
 			e.markExecutionWaiting(execID, node.ID)
 			log.Printf("[BOT] Flow %s waiting for response at node %s", flowID, node.ID)
@@ -628,7 +643,7 @@ func (e *BotEngine) executeFlowFrom(flowID, triggerType, companyID, conversation
 		// Update current node
 		e.db.Exec(`
 			UPDATE bot_executions
-			SET context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('current_node_id', $1)
+			SET context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('current_node_id', $1::text)
 			WHERE id = $2
 		`, node.ID, execID)
 
@@ -747,7 +762,7 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 			UPDATE bot_executions
 			SET status = 'completed',
 				completed_at = NOW(),
-				context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('last_response', $1)
+				context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('last_response', $1::text)
 			WHERE id = $2
 		`, message, execID)
 		return true
@@ -756,7 +771,7 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 	_, err = e.db.Exec(`
 		UPDATE bot_executions
 		SET status = 'running',
-			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('last_response', $1::text, 'waiting_node_id', NULL, 'current_node_id', $2::text)
+			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('last_response', $1::text, 'waiting_node_id', NULL::text, 'current_node_id', $2::text)
 		WHERE id = $3
 	`, message, nextID, execID)
 	if err != nil {
@@ -781,7 +796,7 @@ func (e *BotEngine) markExecutionError(execID, nodeID string, err error) {
 		UPDATE bot_executions
 		SET status = 'error',
 			completed_at = NOW(),
-			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('error', $1, 'error_node_id', $2)
+			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('error', $1::text, 'error_node_id', $2::text)
 		WHERE id = $3
 	`, errMsg, nodeID, execID)
 }
@@ -802,6 +817,86 @@ func (e *BotEngine) markExecutionWaiting(execID, nodeID string) {
 	}
 	rowsAffected, _ := result.RowsAffected()
 	log.Printf("[BOT] Marked execution %s waiting at node %s (%d rows)", execID, nodeID, rowsAffected)
+}
+
+func (e *BotEngine) markExecutionExternalWait(execID, nodeID string) {
+	if execID == "" {
+		return
+	}
+	result, err := e.db.Exec(`
+		UPDATE bot_executions
+		SET status = 'external_wait',
+			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('external_node_id', $1::text, 'current_node_id', $1::text)
+		WHERE id = $2
+	`, nodeID, execID)
+	if err != nil {
+		log.Printf("[BOT] Failed to mark execution %s external_wait at node %s: %v", execID, nodeID, err)
+		return
+	}
+	rowsAffected, _ := result.RowsAffected()
+	log.Printf("[BOT] Marked execution %s external_wait at node %s (%d rows)", execID, nodeID, rowsAffected)
+}
+
+func (e *BotEngine) ResumeAfterExternalNode(companyID, conversationID, contactID, instanceName, phone, resultMessage string) {
+	var execID, flowID, triggerType, externalNodeID string
+	var nodesJSON, edgesJSON json.RawMessage
+	err := e.db.QueryRow(`
+		SELECT be.id, bf.id, bf.trigger_type, bf.nodes, bf.edges, COALESCE(be.context ->> 'external_node_id', '')
+		FROM bot_executions be
+		JOIN bot_flows bf ON bf.id = be.flow_id
+		WHERE be.conversation_id = $1
+			AND bf.company_id = $2
+			AND be.status = 'external_wait'
+			AND bf.is_active = true
+		ORDER BY be.started_at DESC
+		LIMIT 1
+	`, conversationID, companyID).Scan(&execID, &flowID, &triggerType, &nodesJSON, &edgesJSON, &externalNodeID)
+	if err != nil || externalNodeID == "" {
+		log.Printf("[BOT] No external_wait execution to resume for conversation %s: %v", conversationID, err)
+		return
+	}
+
+	nodes, err := parseBotNodes(nodesJSON)
+	if err != nil {
+		e.markExecutionError(execID, externalNodeID, err)
+		return
+	}
+	edges, err := parseBotEdges(edgesJSON)
+	if err != nil {
+		e.markExecutionError(execID, externalNodeID, err)
+		return
+	}
+	nodesByID := make(map[string]BotNode, len(nodes))
+	for _, node := range nodes {
+		nodesByID[node.ID] = node
+	}
+	externalNode, ok := nodesByID[externalNodeID]
+	if !ok {
+		e.markExecutionError(execID, externalNodeID, fmt.Errorf("external node not found"))
+		return
+	}
+	outgoingBySource := buildOutgoingEdges(edges)
+	nextID := chooseNextNodeID(externalNode, outgoingBySource[externalNodeID], nil, nodesByID)
+	if nextID == "" {
+		e.db.Exec("UPDATE bot_executions SET status = 'completed', completed_at = NOW() WHERE id = $1", execID)
+		log.Printf("[BOT] External node %s completed without next node for flow %s", externalNodeID, flowID)
+		return
+	}
+
+	_, err = e.db.Exec(`
+		UPDATE bot_executions
+		SET status = 'running',
+			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('external_result', $1::text, 'external_node_id', NULL::text, 'current_node_id', $2::text)
+		WHERE id = $3
+	`, resultMessage, nextID, execID)
+	if err != nil {
+		log.Printf("[BOT] Failed to resume external_wait execution %s: %v", execID, err)
+		return
+	}
+
+	instanceName = e.resolveConversationInstance(companyID, conversationID, instanceName)
+	log.Printf("[BOT] Resuming flow %s after external node %s at next node %s", flowID, externalNodeID, nextID)
+	go e.executeFlowFrom(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone, resultMessage, nodesJSON, edgesJSON, nextID)
 }
 
 func (e *BotEngine) resolveConversationInstance(companyID, conversationID, fallback string) string {
