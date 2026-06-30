@@ -210,6 +210,9 @@ CREATE TABLE messages (
     status VARCHAR(20) DEFAULT 'sent', -- sent, delivered, read, failed
     is_private BOOLEAN DEFAULT false,
     metadata JSONB DEFAULT '{}',
+    reply_to_id UUID REFERENCES messages(id) ON DELETE SET NULL,
+    reply_to_content TEXT,
+    reply_to_sender VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW()
 );
 
