@@ -147,6 +147,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	// Bot Flows
 	bots := protected.Group("/bot-flows")
 	bots.Get("/", GetBotFlows(svc))
+	bots.Get("/:id", GetBotFlow(svc))
 	bots.Post("/", CreateBotFlow(svc))
 	bots.Put("/:id", UpdateBotFlow(svc))
 	bots.Delete("/:id", DeleteBotFlow(svc))

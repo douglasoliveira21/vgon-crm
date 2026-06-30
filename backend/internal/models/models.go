@@ -246,6 +246,8 @@ type BotFlow struct {
 	TriggerValue *string         `json:"trigger_value,omitempty"`
 	ChannelID    *string         `json:"channel_id,omitempty"`
 	IsActive     bool            `json:"is_active"`
+	Priority     int             `json:"priority"`
+	StopOnMatch  bool            `json:"stop_on_match"`
 	Nodes        json.RawMessage `json:"nodes"`
 	Edges        json.RawMessage `json:"edges"`
 	CreatedAt    time.Time       `json:"created_at"`

@@ -317,6 +317,8 @@ CREATE TABLE bot_flows (
     trigger_value TEXT,
     channel_id UUID REFERENCES channels(id),
     is_active BOOLEAN DEFAULT false,
+    priority INTEGER NOT NULL DEFAULT 10,
+    stop_on_match BOOLEAN NOT NULL DEFAULT true,
     nodes JSONB DEFAULT '[]',
     edges JSONB DEFAULT '[]',
     created_at TIMESTAMP DEFAULT NOW(),

@@ -470,10 +470,10 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 
 	// Find active flows for this company
 	rows, err := e.db.Query(`
-		SELECT id, trigger_type, trigger_value, nodes, edges
+		SELECT id, trigger_type, trigger_value, nodes, edges, priority, stop_on_match
 		FROM bot_flows
 		WHERE company_id = $1 AND is_active = true
-		ORDER BY created_at ASC
+		ORDER BY priority DESC, created_at ASC
 	`, companyID)
 	if err != nil {
 		return
@@ -483,9 +483,11 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 	for rows.Next() {
 		var flowID, triggerType string
 		var triggerValue *string
+		var priority int
+		var stopOnMatch bool
 		var nodesJSON, edgesJSON json.RawMessage
 
-		if err := rows.Scan(&flowID, &triggerType, &triggerValue, &nodesJSON, &edgesJSON); err != nil {
+		if err := rows.Scan(&flowID, &triggerType, &triggerValue, &nodesJSON, &edgesJSON, &priority, &stopOnMatch); err != nil {
 			continue
 		}
 
@@ -541,8 +543,12 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 				continue
 			}
 
+			log.Printf("[BOT] Triggering flow %s (%s) with priority %d for conversation %s", flowID, triggerType, priority, conversationID)
 			go e.executeFlow(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone, message, nodesJSON, edgesJSON)
-			return // Only trigger first matching flow
+			if stopOnMatch {
+				return
+			}
+			return
 		}
 	}
 }
@@ -786,7 +792,13 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 	_, err = e.db.Exec(`
 		UPDATE bot_executions
 		SET status = 'running',
-			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('last_response', $1::text, 'waiting_node_id', NULL::text, 'current_node_id', $2::text)
+			context = jsonb_set(
+				jsonb_set(
+					jsonb_set(COALESCE(context, '{}'::jsonb), '{last_response}', to_jsonb($1::text), true),
+					'{waiting_node_id}', 'null'::jsonb, true
+				),
+				'{current_node_id}', to_jsonb($2::text), true
+			)
 		WHERE id = $3
 	`, message, nextID, execID)
 	if err != nil {
@@ -823,7 +835,10 @@ func (e *BotEngine) markExecutionWaiting(execID, nodeID string) {
 	result, err := e.db.Exec(`
 		UPDATE bot_executions
 		SET status = 'waiting',
-			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('waiting_node_id', $1::text, 'current_node_id', $1::text)
+			context = jsonb_set(
+				jsonb_set(COALESCE(context, '{}'::jsonb), '{waiting_node_id}', to_jsonb($1::text), true),
+				'{current_node_id}', to_jsonb($1::text), true
+			)
 		WHERE id = $2
 	`, nodeID, execID)
 	if err != nil {
@@ -841,7 +856,10 @@ func (e *BotEngine) markExecutionExternalWait(execID, nodeID string) {
 	result, err := e.db.Exec(`
 		UPDATE bot_executions
 		SET status = 'external_wait',
-			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('external_node_id', $1::text, 'current_node_id', $1::text)
+			context = jsonb_set(
+				jsonb_set(COALESCE(context, '{}'::jsonb), '{external_node_id}', to_jsonb($1::text), true),
+				'{current_node_id}', to_jsonb($1::text), true
+			)
 		WHERE id = $2
 	`, nodeID, execID)
 	if err != nil {
@@ -901,7 +919,13 @@ func (e *BotEngine) ResumeAfterExternalNode(companyID, conversationID, contactID
 	_, err = e.db.Exec(`
 		UPDATE bot_executions
 		SET status = 'running',
-			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('external_result', $1::text, 'external_node_id', NULL::text, 'current_node_id', $2::text)
+			context = jsonb_set(
+				jsonb_set(
+					jsonb_set(COALESCE(context, '{}'::jsonb), '{external_result}', to_jsonb($1::text), true),
+					'{external_node_id}', 'null'::jsonb, true
+				),
+				'{current_node_id}', to_jsonb($2::text), true
+			)
 		WHERE id = $3
 	`, resultMessage, nextID, execID)
 	if err != nil {
@@ -1144,6 +1168,8 @@ func (e *BotEngine) executeNode(node BotNode, companyID, conversationID, contact
 	config := getNodeConfig(node)
 
 	switch nodeType {
+	case "trigger_new_conversation", "trigger_inbox_message", "trigger_keyword", "trigger_off_hours", "trigger_tag_added", "trigger_funnel_stage", "trigger_no_response", "trigger_contact_created", "trigger_campaign_replied":
+		return nil
 	case "send_message", "send_text":
 		msg, _ := config["message"].(string)
 		if msg == "" {
@@ -1673,8 +1699,6 @@ func (e *BotEngine) nodeCallWebhook(node BotNode, companyID, conversationID, con
 func (e *BotEngine) nodeGLPIOpenTicket(companyID, conversationID, contactID, instanceName, phone string) error {
 	if e.glpiFlow != nil {
 		e.glpiFlow.StartGLPIFlow(companyID, conversationID, contactID, instanceName, phone, "open_ticket")
-		// Pause the bot since GLPI flow will take over the conversation
-		e.db.Exec("UPDATE bot_executions SET status = 'paused' WHERE conversation_id = $1 AND status = 'running'", conversationID)
 	}
 	return nil
 }
@@ -1682,7 +1706,6 @@ func (e *BotEngine) nodeGLPIOpenTicket(companyID, conversationID, contactID, ins
 func (e *BotEngine) nodeGLPICheckStatus(companyID, conversationID, contactID, instanceName, phone string) error {
 	if e.glpiFlow != nil {
 		e.glpiFlow.StartGLPIFlow(companyID, conversationID, contactID, instanceName, phone, "check_status")
-		e.db.Exec("UPDATE bot_executions SET status = 'paused' WHERE conversation_id = $1 AND status = 'running'", conversationID)
 	}
 	return nil
 }

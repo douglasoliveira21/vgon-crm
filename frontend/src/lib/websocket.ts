@@ -4,10 +4,11 @@ class WebSocketService {
   private ws: WebSocket | null = null
   private handlers: Map<string, WSEventHandler[]> = new Map()
   private reconnectAttempts = 0
-  private maxReconnectAttempts = 50
-  private reconnectDelay = 2000
+  private maxReconnectAttempts = 12
+  private reconnectDelay = 3000
   private currentToken: string | null = null
   private intentionalClose = false
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
   connect(token: string) {
     if (this.ws && this.currentToken === token && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
@@ -55,12 +56,15 @@ class WebSocketService {
   }
 
   private attemptReconnect(token: string) {
+    if (this.reconnectTimer) return
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++
-      setTimeout(() => {
+      const delay = Math.min(this.reconnectDelay * this.reconnectAttempts, 30000)
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null
         console.log(`WebSocket reconnecting... attempt ${this.reconnectAttempts}`)
         this.connect(token)
-      }, this.reconnectDelay * this.reconnectAttempts)
+      }, delay)
     }
   }
 
@@ -100,6 +104,10 @@ class WebSocketService {
       this.ws.onclose = null
       this.ws.close()
       this.ws = null
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
     }
     this.currentToken = null
   }

@@ -13,6 +13,8 @@ interface BotFlow {
   trigger_type: string
   trigger_value?: string
   is_active: boolean
+  priority?: number
+  stop_on_match?: boolean
   nodes: any[]
   edges: any[]
   created_at: string
@@ -228,6 +230,11 @@ export default function AutomationsPage() {
                     <span className="text-xs text-gray-400 dark:text-gray-500">
                       Gatilho: {triggerLabels[flow.trigger_type] || flow.trigger_type}
                       {flow.trigger_value && ` - "${flow.trigger_value}"`}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 mt-2">
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary-50 text-primary-700 dark:bg-primary-500/15 dark:text-primary-300">
+                      Prioridade {flow.priority ?? 10}
                     </span>
                   </div>
                 </div>

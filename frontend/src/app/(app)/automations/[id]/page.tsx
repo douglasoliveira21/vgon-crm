@@ -194,6 +194,13 @@ function getNodeIcon(type: string): string {
   return '⚡'
 }
 
+function getDefaultFlowPriority(triggerType: string): number {
+  if (triggerType === 'off_hours' || triggerType === 'trigger_off_hours') return 100
+  if (triggerType === 'no_response' || triggerType === 'trigger_no_response') return 80
+  if (triggerType === 'new_conversation' || triggerType === 'trigger_new_conversation' || triggerType === 'trigger_inbox_message') return 10
+  return 20
+}
+
 export default function FlowEditorPage() {
   const params = useParams()
   const router = useRouter()
@@ -204,6 +211,8 @@ export default function FlowEditorPage() {
   const [description, setDescription] = useState('')
   const [botName, setBotName] = useState('Assistente')
   const [isActive, setIsActive] = useState(false)
+  const [priority, setPriority] = useState(10)
+  const [stopOnMatch, setStopOnMatch] = useState(true)
   const [saving, setSaving] = useState(false)
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [showBlockPanel, setShowBlockPanel] = useState(true)
@@ -234,13 +243,14 @@ export default function FlowEditorPage() {
 
   const fetchFlow = async () => {
     try {
-      const response = await api.get('/bot-flows')
-      const flows = response.data.flows || []
-      const flow = flows.find((f: any) => f.id === flowId)
+      const response = await api.get(`/bot-flows/${flowId}`)
+      const flow = response.data
       if (flow) {
         setName(flow.name || '')
         setDescription(flow.description || '')
         setIsActive(flow.is_active || false)
+        setPriority(flow.priority ?? getDefaultFlowPriority(flow.trigger_type || 'trigger_new_conversation'))
+        setStopOnMatch(flow.stop_on_match ?? true)
 
         // Parse nodes - handle double-encoded strings
         let parsedNodes: any[] = []
@@ -366,6 +376,8 @@ export default function FlowEditorPage() {
         trigger_type: triggerNode?.data?.nodeType || 'trigger_new_conversation',
         trigger_value: triggerConfig.keywords || triggerConfig.channel_id || '',
         is_active: isActive,
+        priority,
+        stop_on_match: stopOnMatch,
         nodes: nodes,
         edges: edges,
       }
@@ -527,6 +539,18 @@ export default function FlowEditorPage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-xs text-gray-500">
+            <span>Prioridade</span>
+            <input
+              type="number"
+              min={1}
+              max={999}
+              value={priority}
+              onChange={(e) => setPriority(Math.max(1, Number(e.target.value) || 1))}
+              className="w-16 rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm text-gray-900 outline-none focus:border-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+              title="Maior prioridade executa antes"
+            />
+          </label>
           <label className="flex items-center gap-2 text-sm cursor-pointer">
             <input
               type="checkbox"

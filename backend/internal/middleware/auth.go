@@ -144,7 +144,7 @@ func RBACMiddleware(requiredPermissions ...string) fiber.Handler {
 // RateLimiter creates a rate limiting middleware using Redis
 func RateLimiter(rdb *redis.Client, maxRequests int, window time.Duration) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		if c.Method() == fiber.MethodOptions || strings.HasPrefix(c.Path(), "/api/auth/") {
+		if c.Method() == fiber.MethodOptions || c.Path() == "/ws" || strings.HasPrefix(c.Path(), "/api/auth/") {
 			return c.Next()
 		}
 

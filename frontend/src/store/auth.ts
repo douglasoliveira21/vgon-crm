@@ -30,6 +30,9 @@ interface AuthState {
   checkAuth: () => void
 }
 
+let checkAuthPromise: Promise<void> | null = null
+let lastCheckAuthAt = 0
+
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isAuthenticated: false,
@@ -108,14 +111,27 @@ export const useAuthStore = create<AuthState>((set) => ({
   checkAuth: () => {
     const token = localStorage.getItem('access_token')
     if (token) {
+      const now = Date.now()
+      if (checkAuthPromise || now - lastCheckAuthAt < 5000) {
+        wsService.connect(token)
+        set({ isAuthenticated: true })
+        return
+      }
+
+      lastCheckAuthAt = now
       wsService.connect(token)
-      api.get('/me').then((response) => {
+      checkAuthPromise = api.get('/me').then((response) => {
         set({ user: response.data, isAuthenticated: true })
       }).catch((error) => {
-        if (error.response?.status === 429) return
+        if (error.response?.status === 429) {
+          set({ isAuthenticated: true })
+          return
+        }
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token')
         set({ user: null, isAuthenticated: false })
+      }).finally(() => {
+        checkAuthPromise = null
       })
     } else {
       set({ user: null, isAuthenticated: false })

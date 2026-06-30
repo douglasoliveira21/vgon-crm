@@ -167,9 +167,17 @@ export default function ConversationsPage() {
   const channelFilter = searchParams.get('channel') || ''
   const conversationsAbortRef = useRef<AbortController | null>(null)
   const tabCountsAbortRef = useRef<AbortController | null>(null)
+  const messagesAbortRef = useRef<AbortController | null>(null)
   const conversationsRequestRef = useRef(0)
   const tabCountsRequestRef = useRef(0)
+  const messagesRequestRef = useRef(0)
   const conversationsDebounceRef = useRef<NodeJS.Timeout | null>(null)
+  const conversationsInFlightRef = useRef(false)
+  const tabCountsInFlightRef = useRef(false)
+  const messagesInFlightRef = useRef(false)
+  const lastConversationsFetchRef = useRef(0)
+  const lastTabCountsFetchRef = useRef(0)
+  const lastMessagesFetchRef = useRef(0)
 
   useEffect(() => {
     if (conversationsDebounceRef.current) {
@@ -278,6 +286,10 @@ export default function ConversationsPage() {
   }, [selectedConv])
 
   const fetchConversations = async () => {
+    const now = Date.now()
+    if (conversationsInFlightRef.current || now - lastConversationsFetchRef.current < 1200) return
+    conversationsInFlightRef.current = true
+    lastConversationsFetchRef.current = now
     conversationsAbortRef.current?.abort()
     const controller = new AbortController()
     conversationsAbortRef.current = controller
@@ -322,6 +334,7 @@ export default function ConversationsPage() {
       if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') return
       console.error('Error fetching conversations:', error)
     } finally {
+      conversationsInFlightRef.current = false
       if (requestId === conversationsRequestRef.current) {
         setLoading(false)
       }
@@ -329,6 +342,10 @@ export default function ConversationsPage() {
   }
 
   const fetchTabUnreadCounts = async () => {
+    const now = Date.now()
+    if (tabCountsInFlightRef.current || now - lastTabCountsFetchRef.current < 3000) return
+    tabCountsInFlightRef.current = true
+    lastTabCountsFetchRef.current = now
     tabCountsAbortRef.current?.abort()
     const controller = new AbortController()
     tabCountsAbortRef.current = controller
@@ -352,6 +369,8 @@ export default function ConversationsPage() {
       })
     } catch (error: any) {
       if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') return
+    } finally {
+      tabCountsInFlightRef.current = false
     }
   }
 
@@ -405,9 +424,15 @@ export default function ConversationsPage() {
     if (!selectedConv) return
 
     const interval = setInterval(async () => {
+      const now = Date.now()
+      if (messagesInFlightRef.current || now - lastMessagesFetchRef.current < 8000) return
+      messagesInFlightRef.current = true
+      lastMessagesFetchRef.current = now
+      const requestId = ++messagesRequestRef.current
       try {
         const response = await api.get(`/conversations/${selectedConv.id}/messages`, { params: { limit: 200 } })
         const newMessages: Message[] = response.data.messages || []
+        if (requestId !== messagesRequestRef.current) return
         setMessages((prev) => {
           // Count real messages (not temp)
           const realPrev = prev.filter((m) => !m.id.startsWith('temp-'))
@@ -425,8 +450,11 @@ export default function ConversationsPage() {
           }
           return prev
         })
-      } catch {}
-    }, 3000)
+      } catch {
+      } finally {
+        messagesInFlightRef.current = false
+      }
+    }, 12000)
 
     return () => clearInterval(interval)
   }, [selectedConv?.id])
@@ -436,13 +464,14 @@ export default function ConversationsPage() {
     const interval = setInterval(() => {
       fetchConversations()
       fetchTabUnreadCounts()
-    }, 10000) // Every 10 seconds
+    }, 30000) // WebSocket is primary; polling is only a calm fallback.
 
     return () => clearInterval(interval)
   }, [filter, statusFilter])
 
   const selectConversation = async (conv: Conversation) => {
     setSelectedConv(conv)
+    messagesAbortRef.current?.abort()
     if (selectedConv) wsService.leaveConversation(selectedConv.id)
     wsService.joinConversation(conv.id)
 
@@ -456,12 +485,21 @@ export default function ConversationsPage() {
       prev.map((c) => (c.id === conv.id ? { ...c, unread_count: 0 } : c))
     )
 
+    const controller = new AbortController()
+    messagesAbortRef.current = controller
+    const requestId = ++messagesRequestRef.current
+    messagesInFlightRef.current = true
+    lastMessagesFetchRef.current = Date.now()
     try {
-      const response = await api.get(`/conversations/${conv.id}/messages`, { params: { limit: 200 } })
+      const response = await api.get(`/conversations/${conv.id}/messages`, { params: { limit: 200 }, signal: controller.signal })
+      if (requestId !== messagesRequestRef.current) return
       setMessages(response.data.messages || [])
       scrollToBottom()
-    } catch (error) {
+    } catch (error: any) {
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') return
       console.error('Error fetching messages:', error)
+    } finally {
+      messagesInFlightRef.current = false
     }
   }
 
