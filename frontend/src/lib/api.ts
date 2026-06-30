@@ -1,4 +1,5 @@
 import axios from 'axios'
+import wsService from '@/lib/websocket'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
 
@@ -49,10 +50,11 @@ api.interceptors.response.use(
           originalRequest.headers.Authorization = `Bearer ${access_token}`
           return api(originalRequest)
         } catch (refreshError: any) {
-          if (refreshError.response?.status === 429) {
+          if (refreshError.response?.status === 429 || refreshError.response?.status >= 500) {
             return Promise.reject(refreshError)
           }
 
+          wsService.pauseReconnect()
           localStorage.removeItem('access_token')
           localStorage.removeItem('refresh_token')
           window.location.href = '/login'

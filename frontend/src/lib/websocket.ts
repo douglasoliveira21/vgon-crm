@@ -4,13 +4,18 @@ class WebSocketService {
   private ws: WebSocket | null = null
   private handlers: Map<string, WSEventHandler[]> = new Map()
   private reconnectAttempts = 0
-  private maxReconnectAttempts = 12
-  private reconnectDelay = 3000
+  private maxReconnectAttempts = 5
+  private reconnectDelay = 5000
   private currentToken: string | null = null
   private intentionalClose = false
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectPausedUntil = 0
 
   connect(token: string) {
+    if (!token || Date.now() < this.reconnectPausedUntil) {
+      return
+    }
+
     if (this.ws && this.currentToken === token && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return
     }
@@ -56,16 +61,32 @@ class WebSocketService {
   }
 
   private attemptReconnect(token: string) {
+    if (!token || Date.now() < this.reconnectPausedUntil) return
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return
     if (this.reconnectTimer) return
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++
-      const delay = Math.min(this.reconnectDelay * this.reconnectAttempts, 30000)
+      const delay = Math.min(this.reconnectDelay * this.reconnectAttempts, 60000)
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null
         console.log(`WebSocket reconnecting... attempt ${this.reconnectAttempts}`)
         this.connect(token)
       }, delay)
     }
+  }
+
+  pauseReconnect(ms = 60000) {
+    this.reconnectPausedUntil = Date.now() + ms
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    if (this.ws && this.ws.readyState !== WebSocket.CLOSED) {
+      this.intentionalClose = true
+      this.ws.onclose = null
+      this.ws.close()
+    }
+    this.ws = null
   }
 
   on(event: string, handler: WSEventHandler) {
@@ -110,6 +131,8 @@ class WebSocketService {
       this.reconnectTimer = null
     }
     this.currentToken = null
+    this.reconnectAttempts = 0
+    this.reconnectPausedUntil = 0
   }
 }
 

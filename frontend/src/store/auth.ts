@@ -123,7 +123,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       checkAuthPromise = api.get('/me').then((response) => {
         set({ user: response.data, isAuthenticated: true })
       }).catch((error) => {
-        if (error.response?.status === 429) {
+        if (error.response?.status === 429 || error.response?.status >= 500) {
           set({ isAuthenticated: true })
           return
         }
