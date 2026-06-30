@@ -151,6 +151,22 @@ const NODE_COLORS: Record<string, string> = {
   glpi: '#F97316',
 }
 
+type AutomationUser = {
+  id: string
+  name: string
+  email: string
+  is_active: boolean
+  availability_status?: string
+  role_name?: string | null
+}
+
+type AutomationTeam = {
+  id: string
+  name: string
+  is_active: boolean
+  member_count?: number
+}
+
 function getNodeColor(type: string): string {
   if (type.startsWith('glpi')) return NODE_COLORS.glpi
   if (type.startsWith('trigger')) return NODE_COLORS.trigger
@@ -191,13 +207,30 @@ export default function FlowEditorPage() {
   const [saving, setSaving] = useState(false)
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [showBlockPanel, setShowBlockPanel] = useState(true)
+  const [users, setUsers] = useState<AutomationUser[]>([])
+  const [teams, setTeams] = useState<AutomationTeam[]>([])
 
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
 
   useEffect(() => {
     if (!isNew) fetchFlow()
+    fetchAutomationOptions()
   }, [flowId])
+
+  const fetchAutomationOptions = async () => {
+    try {
+      const [usersResponse, teamsResponse] = await Promise.all([
+        api.get('/users'),
+        api.get('/teams'),
+      ])
+      setUsers((usersResponse.data.users || []).filter((user: AutomationUser) => user.is_active))
+      setTeams((teamsResponse.data.teams || []).filter((team: AutomationTeam) => team.is_active))
+    } catch {
+      setUsers([])
+      setTeams([])
+    }
+  }
 
   const fetchFlow = async () => {
     try {
@@ -588,6 +621,8 @@ export default function FlowEditorPage() {
 
               <NodeConfigPanel
                 node={currentSelectedNode}
+                users={users}
+                teams={teams}
                 onUpdate={(config) => updateNodeConfig(currentSelectedNode.id, config)}
               />
             </div>
@@ -599,7 +634,17 @@ export default function FlowEditorPage() {
 }
 
 // Node Configuration Panel
-function NodeConfigPanel({ node, onUpdate }: { node: Node; onUpdate: (config: Record<string, any>) => void }) {
+function NodeConfigPanel({
+  node,
+  users,
+  teams,
+  onUpdate,
+}: {
+  node: Node
+  users: AutomationUser[]
+  teams: AutomationTeam[]
+  onUpdate: (config: Record<string, any>) => void
+}) {
   const nodeType = node.data?.nodeType || ''
   const config = node.data?.config || {}
 
@@ -891,30 +936,62 @@ function NodeConfigPanel({ node, onUpdate }: { node: Node; onUpdate: (config: Re
 
   if (nodeType === 'action_transfer_team') {
     return (
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">Nome do time</label>
-        <input
-          type="text"
-          value={config.team_name || ''}
-          onChange={(e) => onUpdate({ team_name: e.target.value })}
+      <div className="space-y-2">
+        <label className="block text-xs font-medium text-gray-600 mb-1">Time de destino</label>
+        <select
+          value={config.team_id || ''}
+          onChange={(e) => {
+            const team = teams.find(t => t.id === e.target.value)
+            onUpdate({ team_id: e.target.value, team_name: team?.name || '' })
+          }}
           className="input text-sm"
-          placeholder="Comercial, Suporte, Financeiro..."
-        />
+        >
+          <option value="">Selecione um time ativo</option>
+          {teams.map((team) => (
+            <option key={team.id} value={team.id}>
+              {team.name}{typeof team.member_count === 'number' ? ` (${team.member_count} membros)` : ''}
+            </option>
+          ))}
+        </select>
+        {teams.length === 0 && (
+          <p className="text-xs text-yellow-600">Nenhum time ativo encontrado em Times.</p>
+        )}
+        {config.team_name && (
+          <p className="text-xs text-gray-500">Selecionado: {config.team_name}</p>
+        )}
       </div>
     )
   }
 
   if (nodeType === 'action_assign_agent') {
     return (
-      <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">E-mail do atendente</label>
-        <input
-          type="text"
-          value={config.agent_email || ''}
-          onChange={(e) => onUpdate({ agent_email: e.target.value })}
+      <div className="space-y-2">
+        <label className="block text-xs font-medium text-gray-600 mb-1">Atendente de destino</label>
+        <select
+          value={config.agent_id || ''}
+          onChange={(e) => {
+            const user = users.find(u => u.id === e.target.value)
+            onUpdate({
+              agent_id: e.target.value,
+              agent_name: user?.name || '',
+              agent_email: user?.email || '',
+            })
+          }}
           className="input text-sm"
-          placeholder="atendente@empresa.com"
-        />
+        >
+          <option value="">Selecione um atendente ativo</option>
+          {users.map((user) => (
+            <option key={user.id} value={user.id}>
+              {user.name} - {user.email}{user.availability_status ? ` (${user.availability_status})` : ''}
+            </option>
+          ))}
+        </select>
+        {users.length === 0 && (
+          <p className="text-xs text-yellow-600">Nenhum usuário ativo encontrado em Usuários.</p>
+        )}
+        {config.agent_name && (
+          <p className="text-xs text-gray-500">Selecionado: {config.agent_name}</p>
+        )}
       </div>
     )
   }

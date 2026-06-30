@@ -773,12 +773,20 @@ func (e *BotEngine) executeNode(node BotNode, companyID, conversationID, contact
 		}
 		return e.nodeRemoveTag(node, companyID, contactID)
 	case "transfer_team", "action_transfer_team":
+		tmID, _ := config["team_id"].(string)
+		if tmID != "" {
+			node.Data["team_id"] = tmID
+		}
 		tm, _ := config["team_name"].(string)
 		if tm != "" {
 			node.Data["team_name"] = tm
 		}
 		return e.nodeTransferTeam(node, companyID, conversationID)
 	case "action_assign_agent":
+		agentID, _ := config["agent_id"].(string)
+		if agentID != "" {
+			node.Data["agent_id"] = agentID
+		}
 		email, _ := config["agent_email"].(string)
 		node.Data["agent_email"] = email
 		return e.nodeAssignAgent(node, companyID, conversationID)
@@ -1050,18 +1058,26 @@ func (e *BotEngine) nodeRemoveTag(node BotNode, companyID, contactID string) err
 }
 
 func (e *BotEngine) nodeTransferTeam(node BotNode, companyID, conversationID string) error {
+	teamID, _ := node.Data["team_id"].(string)
 	teamName, _ := node.Data["team_name"].(string)
-	if teamName == "" {
+	if teamID == "" && teamName == "" {
 		return nil
 	}
 
-	var teamID string
-	err := e.db.QueryRow("SELECT id FROM teams WHERE company_id = $1 AND name ILIKE $2", companyID, teamName).Scan(&teamID)
-	if err != nil {
-		return nil
+	if teamID == "" {
+		err := e.db.QueryRow("SELECT id FROM teams WHERE company_id = $1 AND name ILIKE $2 AND is_active = true", companyID, teamName).Scan(&teamID)
+		if err != nil {
+			return nil
+		}
+	} else {
+		var exists bool
+		e.db.QueryRow("SELECT EXISTS(SELECT 1 FROM teams WHERE id = $1 AND company_id = $2 AND is_active = true)", teamID, companyID).Scan(&exists)
+		if !exists {
+			return nil
+		}
 	}
 
-	e.db.Exec("UPDATE conversations SET team_id = $1, assigned_to = NULL WHERE id = $2", teamID, conversationID)
+	e.db.Exec("UPDATE conversations SET team_id = $1, assigned_to = NULL, updated_at = NOW() WHERE id = $2 AND company_id = $3", teamID, conversationID, companyID)
 
 	// Pause bot when transferring
 	e.db.Exec("UPDATE bot_executions SET status = 'paused' WHERE conversation_id = $1 AND status = 'running'", conversationID)
@@ -1070,23 +1086,31 @@ func (e *BotEngine) nodeTransferTeam(node BotNode, companyID, conversationID str
 }
 
 func (e *BotEngine) nodeAssignAgent(node BotNode, companyID, conversationID string) error {
+	userID, _ := node.Data["agent_id"].(string)
 	agentEmail, _ := node.Data["agent_email"].(string)
-	if strings.TrimSpace(agentEmail) == "" {
+	if strings.TrimSpace(userID) == "" && strings.TrimSpace(agentEmail) == "" {
 		return nil
 	}
 
-	var userID string
-	err := e.db.QueryRow(`
-		SELECT id
-		FROM users
-		WHERE company_id = $1 AND LOWER(email) = LOWER($2) AND is_active = true
-		LIMIT 1
-	`, companyID, agentEmail).Scan(&userID)
-	if err != nil {
-		return nil
+	if userID == "" {
+		err := e.db.QueryRow(`
+			SELECT id
+			FROM users
+			WHERE company_id = $1 AND LOWER(email) = LOWER($2) AND is_active = true
+			LIMIT 1
+		`, companyID, agentEmail).Scan(&userID)
+		if err != nil {
+			return nil
+		}
+	} else {
+		var exists bool
+		e.db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND company_id = $2 AND is_active = true)", userID, companyID).Scan(&exists)
+		if !exists {
+			return nil
+		}
 	}
 
-	_, err = e.db.Exec(`
+	_, err := e.db.Exec(`
 		UPDATE conversations
 		SET assigned_to = $1, status = 'in_progress', updated_at = NOW()
 		WHERE id = $2 AND company_id = $3
