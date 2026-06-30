@@ -649,6 +649,10 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	if fromMe {
 		return
 	}
+	if s.isKnownOutgoingMessage(messageID) {
+		log.Printf("[WEBHOOK] Skipping outgoing message echo %s from instance %s", messageID, instanceName)
+		return
+	}
 
 	// Skip group messages (groups have @g.us in JID)
 	if strings.Contains(remoteJid, "@g.us") || strings.Contains(remoteJid, "@broadcast") {
@@ -1158,6 +1162,23 @@ func firstNonEmptyString(data map[string]interface{}, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func (s *EvolutionService) isKnownOutgoingMessage(messageID string) bool {
+	if strings.TrimSpace(messageID) == "" {
+		return false
+	}
+
+	var exists bool
+	err := s.db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM messages
+			WHERE external_id = $1
+				AND sender_type IN ('bot', 'agent', 'user')
+		)
+	`, messageID).Scan(&exists)
+	return err == nil && exists
 }
 
 func splitOnce(s, sep string) []string {
