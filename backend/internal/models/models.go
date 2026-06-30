@@ -241,6 +241,7 @@ type BotFlow struct {
 	ID           string          `json:"id"`
 	CompanyID    string          `json:"company_id"`
 	Name         string          `json:"name"`
+	BotName      string          `json:"bot_name"`
 	Description  *string         `json:"description,omitempty"`
 	TriggerType  string          `json:"trigger_type"`
 	TriggerValue *string         `json:"trigger_value,omitempty"`

@@ -39,7 +39,10 @@ func (s *MessageService) GetConversationMessages(conversationID, companyID strin
 		SELECT m.id, m.conversation_id, m.company_id, m.sender_type, m.sender_id,
 			   m.content, COALESCE(m.message_type, 'text'), m.media_url, m.media_mime_type, m.media_filename,
 			   m.external_id, COALESCE(m.status, 'sent'), COALESCE(m.is_private, false), COALESCE(m.metadata, '{}'::jsonb), COALESCE(m.created_at, NOW()),
-			   COALESCE(u.name, c.name, 'Unknown') as sender_name,
+			   CASE
+			     WHEN m.sender_type = 'bot' THEN COALESCE(NULLIF(m.metadata ->> 'bot_name', ''), 'Assistente')
+			     ELSE COALESCE(u.name, c.name, 'Contato')
+			   END as sender_name,
 			   COALESCE(u.avatar_url, c.avatar_url) as sender_avatar_url,
 			   m.reply_to_content, m.reply_to_sender
 		FROM messages m

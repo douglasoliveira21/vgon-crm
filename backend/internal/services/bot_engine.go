@@ -1308,6 +1308,8 @@ func (e *BotEngine) nodeSendMessage(node BotNode, companyID, conversationID, ins
 
 	// Replace variables
 	message = e.replaceVariables(message, companyID, conversationID, phone)
+	botName := e.botNameForConversation(companyID, conversationID)
+	outboundMessage := formatBotOutboundMessage(botName, message)
 
 	// Send via WhatsApp
 	var externalID string
@@ -1315,7 +1317,7 @@ func (e *BotEngine) nodeSendMessage(node BotNode, companyID, conversationID, ins
 		return fmt.Errorf("cannot send bot message: instanceName='%s' phone='%s'", instanceName, phone)
 	}
 	var err error
-	externalID, err = e.evo.SendTextMessage(instanceName, phone, message)
+	externalID, err = e.evo.SendTextMessage(instanceName, phone, outboundMessage)
 	if err != nil {
 		log.Printf("[BOT] Failed to send message to %s via %s: %v", phone, instanceName, err)
 		return err
@@ -1325,16 +1327,17 @@ func (e *BotEngine) nodeSendMessage(node BotNode, companyID, conversationID, ins
 	// Save message
 	msgID := uuid.New().String()
 	e.db.Exec(`
-		INSERT INTO messages (id, conversation_id, company_id, sender_type, content, message_type, external_id, status)
-		VALUES ($1, $2, $3, 'bot', $4, 'text', $5, 'sent')
-	`, msgID, conversationID, companyID, message, externalID)
+		INSERT INTO messages (id, conversation_id, company_id, sender_type, content, message_type, external_id, status, metadata)
+		VALUES ($1, $2, $3, 'bot', $4, 'text', $5, 'sent', jsonb_build_object('bot_name', $6::text))
+	`, msgID, conversationID, companyID, message, externalID, botName)
 
 	e.db.Exec("UPDATE conversations SET last_message_at = NOW(), last_message_preview = $1 WHERE id = $2", message, conversationID)
 
 	e.wsHub.BroadcastToCompany(companyID, "new_message", map[string]interface{}{
 		"id": msgID, "conversation_id": conversationID,
 		"sender_type": "bot", "content": message, "message_type": "text",
-		"sender_name": "Bot",
+		"sender_name": botName,
+		"metadata":    map[string]interface{}{"bot_name": botName},
 		"status":      "sent", "created_at": time.Now(),
 	})
 
@@ -1384,12 +1387,14 @@ func (e *BotEngine) nodeSendAudio(config map[string]interface{}, companyID, conv
 
 func (e *BotEngine) sendBotText(companyID, conversationID, instanceName, phone, message, messageType string) error {
 	message = e.replaceVariables(message, companyID, conversationID, phone)
+	botName := e.botNameForConversation(companyID, conversationID)
+	outboundMessage := formatBotOutboundMessage(botName, message)
 	var externalID string
 	if instanceName == "" || phone == "" {
 		return fmt.Errorf("cannot send bot text: instanceName='%s' phone='%s'", instanceName, phone)
 	}
 	var err error
-	externalID, err = e.evo.SendTextMessage(instanceName, phone, message)
+	externalID, err = e.evo.SendTextMessage(instanceName, phone, outboundMessage)
 	if err != nil {
 		return err
 	}
@@ -1398,10 +1403,11 @@ func (e *BotEngine) sendBotText(companyID, conversationID, instanceName, phone, 
 
 func (e *BotEngine) saveBotMessage(companyID, conversationID, content, messageType, mediaURL, externalID string) error {
 	msgID := uuid.New().String()
+	botName := e.botNameForConversation(companyID, conversationID)
 	_, err := e.db.Exec(`
-		INSERT INTO messages (id, conversation_id, company_id, sender_type, content, message_type, media_url, external_id, status)
-		VALUES ($1, $2, $3, 'bot', NULLIF($4, ''), $5, NULLIF($6, ''), $7, 'sent')
-	`, msgID, conversationID, companyID, content, messageType, mediaURL, externalID)
+		INSERT INTO messages (id, conversation_id, company_id, sender_type, content, message_type, media_url, external_id, status, metadata)
+		VALUES ($1, $2, $3, 'bot', NULLIF($4, ''), $5, NULLIF($6, ''), $7, 'sent', jsonb_build_object('bot_name', $8::text))
+	`, msgID, conversationID, companyID, content, messageType, mediaURL, externalID, botName)
 	if err != nil {
 		return err
 	}
@@ -1415,10 +1421,39 @@ func (e *BotEngine) saveBotMessage(companyID, conversationID, content, messageTy
 	e.wsHub.BroadcastToCompany(companyID, "new_message", map[string]interface{}{
 		"id": msgID, "conversation_id": conversationID,
 		"sender_type": "bot", "content": content, "message_type": messageType,
-		"media_url": mediaURL, "sender_name": "Bot",
+		"media_url": mediaURL, "sender_name": botName, "metadata": map[string]interface{}{"bot_name": botName},
 		"status": "sent", "created_at": time.Now(),
 	})
 	return nil
+}
+
+func (e *BotEngine) botNameForConversation(companyID, conversationID string) string {
+	var botName string
+	err := e.db.QueryRow(`
+		SELECT COALESCE(NULLIF(bf.bot_name, ''), bf.name, 'Assistente')
+		FROM bot_executions be
+		JOIN bot_flows bf ON bf.id = be.flow_id
+		WHERE be.conversation_id = $1 AND bf.company_id = $2
+		ORDER BY be.started_at DESC
+		LIMIT 1
+	`, conversationID, companyID).Scan(&botName)
+	if err != nil || strings.TrimSpace(botName) == "" {
+		return "Assistente"
+	}
+	return strings.TrimSpace(botName)
+}
+
+func formatBotOutboundMessage(botName, message string) string {
+	botName = strings.TrimSpace(botName)
+	message = strings.TrimSpace(message)
+	if botName == "" || message == "" {
+		return message
+	}
+	prefix := "*" + botName + ":*"
+	if strings.HasPrefix(message, prefix) {
+		return message
+	}
+	return prefix + "\n" + message
 }
 
 func firstString(config map[string]interface{}, keys ...string) string {
@@ -1468,11 +1503,13 @@ func (e *BotEngine) nodeAskQuestion(node BotNode, companyID, conversationID, ins
 
 	// Send via WhatsApp
 	var externalID string
+	botName := e.botNameForConversation(companyID, conversationID)
+	outboundMessage := formatBotOutboundMessage(botName, message)
 	if instanceName == "" || phone == "" {
 		return fmt.Errorf("cannot send bot question: instanceName='%s' phone='%s'", instanceName, phone)
 	}
 	var err error
-	externalID, err = e.evo.SendTextMessage(instanceName, phone, message)
+	externalID, err = e.evo.SendTextMessage(instanceName, phone, outboundMessage)
 	if err != nil {
 		log.Printf("[BOT] Failed to send question to %s via %s: %v", phone, instanceName, err)
 		return err
@@ -1481,14 +1518,15 @@ func (e *BotEngine) nodeAskQuestion(node BotNode, companyID, conversationID, ins
 	// Save message
 	msgID := uuid.New().String()
 	e.db.Exec(`
-		INSERT INTO messages (id, conversation_id, company_id, sender_type, content, message_type, external_id, status)
-		VALUES ($1, $2, $3, 'bot', $4, 'text', $5, 'sent')
-	`, msgID, conversationID, companyID, message, externalID)
+		INSERT INTO messages (id, conversation_id, company_id, sender_type, content, message_type, external_id, status, metadata)
+		VALUES ($1, $2, $3, 'bot', $4, 'text', $5, 'sent', jsonb_build_object('bot_name', $6::text))
+	`, msgID, conversationID, companyID, message, externalID, botName)
 
 	e.wsHub.BroadcastToCompany(companyID, "new_message", map[string]interface{}{
 		"id": msgID, "conversation_id": conversationID,
 		"sender_type": "bot", "content": message, "message_type": "text",
-		"sender_name": "Assistente",
+		"sender_name": botName,
+		"metadata":    map[string]interface{}{"bot_name": botName},
 		"status":      "sent", "created_at": time.Now(),
 	})
 

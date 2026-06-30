@@ -519,7 +519,7 @@ func GetBotFlows(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 
 		rows, err := svc.DB.Query(`
-			SELECT id, name, description, trigger_type, trigger_value, is_active, priority, stop_on_match, nodes, edges, created_at
+			SELECT id, name, COALESCE(bot_name, 'Assistente'), description, trigger_type, trigger_value, is_active, priority, stop_on_match, nodes, edges, created_at
 			FROM bot_flows WHERE company_id = $1 ORDER BY priority DESC, created_at ASC
 		`, companyID)
 		if err != nil {
@@ -529,16 +529,17 @@ func GetBotFlows(svc *services.Container) fiber.Handler {
 
 		var flows []map[string]interface{}
 		for rows.Next() {
-			var id, name, triggerType string
+			var id, name, botName, triggerType string
 			var description, triggerValue *string
 			var isActive bool
 			var priority int
 			var stopOnMatch bool
 			var nodes, edges json.RawMessage
 			var createdAt string
-			rows.Scan(&id, &name, &description, &triggerType, &triggerValue, &isActive, &priority, &stopOnMatch, &nodes, &edges, &createdAt)
+			rows.Scan(&id, &name, &botName, &description, &triggerType, &triggerValue, &isActive, &priority, &stopOnMatch, &nodes, &edges, &createdAt)
 			flows = append(flows, map[string]interface{}{
 				"id": id, "name": name, "description": description,
+				"bot_name":     botName,
 				"trigger_type": triggerType, "trigger_value": triggerValue,
 				"is_active": isActive, "priority": priority, "stop_on_match": stopOnMatch, "nodes": nodes, "edges": edges,
 				"created_at": createdAt,
@@ -554,7 +555,7 @@ func GetBotFlow(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 		flowID := c.Params("id")
 
-		var id, name, triggerType string
+		var id, name, botName, triggerType string
 		var description, triggerValue *string
 		var isActive, stopOnMatch bool
 		var priority int
@@ -562,16 +563,17 @@ func GetBotFlow(svc *services.Container) fiber.Handler {
 		var createdAt string
 
 		err := svc.DB.QueryRow(`
-			SELECT id, name, description, trigger_type, trigger_value, is_active, priority, stop_on_match, nodes, edges, created_at
+			SELECT id, name, COALESCE(bot_name, 'Assistente'), description, trigger_type, trigger_value, is_active, priority, stop_on_match, nodes, edges, created_at
 			FROM bot_flows
 			WHERE id = $1 AND company_id = $2
-		`, flowID, companyID).Scan(&id, &name, &description, &triggerType, &triggerValue, &isActive, &priority, &stopOnMatch, &nodes, &edges, &createdAt)
+		`, flowID, companyID).Scan(&id, &name, &botName, &description, &triggerType, &triggerValue, &isActive, &priority, &stopOnMatch, &nodes, &edges, &createdAt)
 		if err != nil {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Fluxo não encontrado"})
 		}
 
 		return c.JSON(fiber.Map{
 			"id": id, "name": name, "description": description,
+			"bot_name":     botName,
 			"trigger_type": triggerType, "trigger_value": triggerValue,
 			"is_active": isActive, "priority": priority, "stop_on_match": stopOnMatch,
 			"nodes": nodes, "edges": edges, "created_at": createdAt,
@@ -585,6 +587,7 @@ func CreateBotFlow(svc *services.Container) fiber.Handler {
 
 		var body struct {
 			Name         string          `json:"name"`
+			BotName      string          `json:"bot_name"`
 			Description  string          `json:"description"`
 			TriggerType  string          `json:"trigger_type"`
 			TriggerValue string          `json:"trigger_value"`
@@ -606,6 +609,9 @@ func CreateBotFlow(svc *services.Container) fiber.Handler {
 		if body.Priority == 0 {
 			body.Priority = defaultBotFlowPriority(body.TriggerType)
 		}
+		if strings.TrimSpace(body.BotName) == "" {
+			body.BotName = "Assistente"
+		}
 		stopOnMatch := true
 		if body.StopOnMatch != nil {
 			stopOnMatch = *body.StopOnMatch
@@ -613,9 +619,9 @@ func CreateBotFlow(svc *services.Container) fiber.Handler {
 
 		id := uuid.New().String()
 		_, err := svc.DB.Exec(`
-			INSERT INTO bot_flows (id, company_id, name, description, trigger_type, trigger_value, priority, stop_on_match, nodes, edges)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		`, id, companyID, body.Name, body.Description, body.TriggerType, body.TriggerValue, body.Priority, stopOnMatch, body.Nodes, body.Edges)
+			INSERT INTO bot_flows (id, company_id, name, bot_name, description, trigger_type, trigger_value, priority, stop_on_match, nodes, edges)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		`, id, companyID, body.Name, body.BotName, body.Description, body.TriggerType, body.TriggerValue, body.Priority, stopOnMatch, body.Nodes, body.Edges)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -631,6 +637,7 @@ func UpdateBotFlow(svc *services.Container) fiber.Handler {
 
 		var body struct {
 			Name         string          `json:"name"`
+			BotName      string          `json:"bot_name"`
 			Description  string          `json:"description"`
 			TriggerType  string          `json:"trigger_type"`
 			TriggerValue string          `json:"trigger_value"`
@@ -644,16 +651,19 @@ func UpdateBotFlow(svc *services.Container) fiber.Handler {
 		if body.Priority == 0 {
 			body.Priority = defaultBotFlowPriority(body.TriggerType)
 		}
+		if strings.TrimSpace(body.BotName) == "" {
+			body.BotName = "Assistente"
+		}
 		stopOnMatch := true
 		if body.StopOnMatch != nil {
 			stopOnMatch = *body.StopOnMatch
 		}
 
 		svc.DB.Exec(`
-			UPDATE bot_flows SET name = $1, description = $2, trigger_type = $3, trigger_value = $4,
-			is_active = $5, priority = $6, stop_on_match = $7, nodes = $8, edges = $9, updated_at = NOW()
-			WHERE id = $10 AND company_id = $11
-		`, body.Name, body.Description, body.TriggerType, body.TriggerValue, body.IsActive, body.Priority, stopOnMatch, body.Nodes, body.Edges, flowID, companyID)
+			UPDATE bot_flows SET name = $1, bot_name = $2, description = $3, trigger_type = $4, trigger_value = $5,
+			is_active = $6, priority = $7, stop_on_match = $8, nodes = $9, edges = $10, updated_at = NOW()
+			WHERE id = $11 AND company_id = $12
+		`, body.Name, body.BotName, body.Description, body.TriggerType, body.TriggerValue, body.IsActive, body.Priority, stopOnMatch, body.Nodes, body.Edges, flowID, companyID)
 
 		return c.JSON(fiber.Map{"message": "Flow updated"})
 	}

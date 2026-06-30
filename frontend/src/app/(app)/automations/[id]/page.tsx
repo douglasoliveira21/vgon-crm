@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef, type DragEvent, type MouseEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
@@ -218,6 +218,9 @@ export default function FlowEditorPage() {
   const [showBlockPanel, setShowBlockPanel] = useState(true)
   const [users, setUsers] = useState<AutomationUser[]>([])
   const [teams, setTeams] = useState<AutomationTeam[]>([])
+  const [reactFlowInstance, setReactFlowInstance] = useState<any>(null)
+  const [contextMenu, setContextMenu] = useState<null | { x: number; y: number; type: 'node' | 'edge'; id: string }>(null)
+  const canvasWrapperRef = useRef<HTMLDivElement | null>(null)
 
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
@@ -248,6 +251,7 @@ export default function FlowEditorPage() {
       if (flow) {
         setName(flow.name || '')
         setDescription(flow.description || '')
+        setBotName(flow.bot_name || 'Assistente')
         setIsActive(flow.is_active || false)
         setPriority(flow.priority ?? getDefaultFlowPriority(flow.trigger_type || 'trigger_new_conversation'))
         setStopOnMatch(flow.stop_on_match ?? true)
@@ -315,13 +319,14 @@ export default function FlowEditorPage() {
   const onNodeClick = useCallback((_: any, node: Node) => {
     setSelectedNode(node)
     setShowBlockPanel(false)
+    setContextMenu(null)
   }, [])
 
-  const addNode = (nodeType: string) => {
+  const addNode = (nodeType: string, position?: { x: number; y: number }) => {
     const newNode: Node = {
       id: `node_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       type: 'default',
-      position: { x: 300, y: (nodes.length + 1) * 150 },
+      position: position || { x: 300, y: (nodes.length + 1) * 150 },
       data: {
         label: `${getNodeIcon(nodeType)} ${getNodeLabel(nodeType)}`,
         nodeType,
@@ -334,12 +339,40 @@ export default function FlowEditorPage() {
         padding: 12,
         fontSize: 13,
         minWidth: 180,
+        animation: 'automationNodeDrop 180ms ease-out',
       },
     }
     setNodes((nds) => [...nds, newNode])
     setSelectedNode(newNode)
     setShowBlockPanel(false)
   }
+
+  const onDragStart = (event: DragEvent, nodeType: string) => {
+    event.dataTransfer.setData('application/reactflow', nodeType)
+    event.dataTransfer.effectAllowed = 'move'
+  }
+
+  const onDragOver = useCallback((event: DragEvent) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }, [])
+
+  const onDrop = useCallback((event: DragEvent) => {
+    event.preventDefault()
+    const nodeType = event.dataTransfer.getData('application/reactflow')
+    if (!nodeType) return
+
+    const bounds = canvasWrapperRef.current?.getBoundingClientRect()
+    const fallbackPosition = {
+      x: event.clientX - (bounds?.left || 0),
+      y: event.clientY - (bounds?.top || 0),
+    }
+    const position = reactFlowInstance?.screenToFlowPosition
+      ? reactFlowInstance.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      : fallbackPosition
+
+    addNode(nodeType, position)
+  }, [reactFlowInstance, nodes.length])
 
   const updateNodeConfig = (nodeId: string, config: Record<string, any>) => {
     setNodes((nds) => nds.map(n => {
@@ -356,10 +389,32 @@ export default function FlowEditorPage() {
 
   const deleteSelectedNode = () => {
     if (!selectedNode) return
-    setNodes((nds) => nds.filter(n => n.id !== selectedNode.id))
-    setEdges((eds) => eds.filter(e => e.source !== selectedNode.id && e.target !== selectedNode.id))
-    setSelectedNode(null)
+    deleteNodeById(selectedNode.id)
   }
+
+  const deleteNodeById = (nodeId: string) => {
+    setNodes((nds) => nds.filter(n => n.id !== nodeId))
+    setEdges((eds) => eds.filter(e => e.source !== nodeId && e.target !== nodeId))
+    setSelectedNode(null)
+    setContextMenu(null)
+  }
+
+  const deleteEdgeById = (edgeId: string) => {
+    setEdges((eds) => eds.filter(e => e.id !== edgeId))
+    setContextMenu(null)
+  }
+
+  const onNodeContextMenu = useCallback((event: MouseEvent, node: Node) => {
+    event.preventDefault()
+    setSelectedNode(node)
+    setShowBlockPanel(false)
+    setContextMenu({ x: event.clientX, y: event.clientY, type: 'node', id: node.id })
+  }, [])
+
+  const onEdgeContextMenu = useCallback((event: MouseEvent, edge: Edge) => {
+    event.preventDefault()
+    setContextMenu({ x: event.clientX, y: event.clientY, type: 'edge', id: edge.id })
+  }, [])
 
   const saveFlow = async () => {
     if (!name.trim()) {
@@ -372,6 +427,7 @@ export default function FlowEditorPage() {
       const triggerConfig = triggerNode?.data?.config || {}
       const payload = {
         name,
+        bot_name: botName.trim() || 'Assistente',
         description,
         trigger_type: triggerNode?.data?.nodeType || 'trigger_new_conversation',
         trigger_value: triggerConfig.keywords || triggerConfig.channel_id || '',
@@ -512,6 +568,30 @@ export default function FlowEditorPage() {
           border-color: rgb(55 65 81);
           color: rgb(229 231 235);
         }
+        @keyframes automationNodeDrop {
+          from {
+            opacity: 0.35;
+            transform: scale(0.92) translateY(8px);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+          }
+        }
+        .automation-builder .block-draggable {
+          cursor: grab;
+        }
+        .automation-builder .block-draggable:active {
+          cursor: grabbing;
+          opacity: 0.75;
+          transform: scale(0.98);
+        }
+        .automation-builder .react-flow__node {
+          transition: box-shadow 160ms ease, transform 160ms ease;
+        }
+        .automation-builder .react-flow__node:hover {
+          box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+        }
       `}</style>
       {/* Top bar */}
       <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between flex-shrink-0 z-10">
@@ -581,8 +661,11 @@ export default function FlowEditorPage() {
                     {category.nodes.map((node) => (
                       <button
                         key={node.type}
+                        draggable
+                        onDragStart={(event) => onDragStart(event, node.type)}
                         onClick={() => addNode(node.type)}
-                        className={`w-full text-left px-3 py-2 rounded-lg border text-xs font-medium transition-colors hover:shadow-sm ${CATEGORY_COLORS[category.color]}`}
+                        className={`block-draggable w-full text-left px-3 py-2 rounded-lg border text-xs font-medium transition-all hover:shadow-sm ${CATEGORY_COLORS[category.color]}`}
+                        title="Clique para adicionar ou arraste para o quadro"
                       >
                         {node.icon} {node.label}
                       </button>
@@ -595,7 +678,7 @@ export default function FlowEditorPage() {
         )}
 
         {/* Canvas */}
-        <div className="flex-1 relative">
+        <div ref={canvasWrapperRef} className="flex-1 relative" onDrop={onDrop} onDragOver={onDragOver}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -603,7 +686,10 @@ export default function FlowEditorPage() {
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onNodeClick={onNodeClick}
-            onPaneClick={() => { setSelectedNode(null); setShowBlockPanel(true) }}
+            onNodeContextMenu={onNodeContextMenu}
+            onEdgeContextMenu={onEdgeContextMenu}
+            onInit={setReactFlowInstance}
+            onPaneClick={() => { setSelectedNode(null); setShowBlockPanel(true); setContextMenu(null) }}
             fitView
             defaultEdgeOptions={{
               type: 'smoothstep',
@@ -623,6 +709,30 @@ export default function FlowEditorPage() {
               </button>
             </Panel>
           </ReactFlow>
+
+          {contextMenu && (
+            <div
+              className="fixed z-50 min-w-44 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 text-sm shadow-xl dark:border-gray-700 dark:bg-gray-900"
+              style={{ top: contextMenu.y, left: contextMenu.x }}
+              onContextMenu={(event) => event.preventDefault()}
+            >
+              {contextMenu.type === 'edge' ? (
+                <button
+                  onClick={() => deleteEdgeById(contextMenu.id)}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                >
+                  <Trash2 size={14} /> Excluir ligacao
+                </button>
+              ) : (
+                <button
+                  onClick={() => deleteNodeById(contextMenu.id)}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40"
+                >
+                  <Trash2 size={14} /> Excluir balao
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Right panel - Node config */}
