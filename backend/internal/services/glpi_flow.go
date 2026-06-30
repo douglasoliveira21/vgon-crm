@@ -122,6 +122,7 @@ func (e *GLPIFlowEngine) ActiveConversationForMessage(companyID, conversationID,
 		JOIN conversations c ON c.id = gfs.conversation_id
 		WHERE c.company_id = $1
 			AND c.contact_id = $2
+			AND c.status != 'resolved'
 		ORDER BY gfs.updated_at DESC
 		LIMIT 1
 	`, companyID, contactID).Scan(&activeConversationID)

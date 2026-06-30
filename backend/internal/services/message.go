@@ -335,16 +335,37 @@ func (s *MessageService) ReopenConversation(conversationID, companyID string) er
 func clearConversationAutomationState(exec interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)
 }, conversationID string) error {
-	if _, err := exec.Exec("DELETE FROM glpi_flow_states WHERE conversation_id = $1", conversationID); err != nil {
+	if _, err := exec.Exec(`
+		DELETE FROM glpi_flow_states gfs
+		USING conversations closed_conv, conversations state_conv
+		WHERE closed_conv.id = $1
+			AND state_conv.id = gfs.conversation_id
+			AND state_conv.company_id = closed_conv.company_id
+			AND state_conv.contact_id = closed_conv.contact_id
+	`, conversationID); err != nil {
 		return err
 	}
-	_, err := exec.Exec(`
+	if _, err := exec.Exec(`
 		UPDATE bot_executions
 		SET status = 'completed',
 			completed_at = COALESCE(completed_at, NOW()),
 			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('closed_conversation_id', $1::text, 'closed_at', NOW()::text)
 		WHERE conversation_id = $1
 			AND status IN ('running', 'waiting', 'external_wait', 'paused')
+	`, conversationID); err != nil {
+		return err
+	}
+	_, err := exec.Exec(`
+		UPDATE bot_executions be
+		SET status = 'completed',
+			completed_at = COALESCE(be.completed_at, NOW()),
+			context = COALESCE(be.context, '{}'::jsonb) || jsonb_build_object('closed_contact_conversation_id', $1::text, 'closed_at', NOW()::text)
+		FROM conversations closed_conv, conversations exec_conv
+		WHERE closed_conv.id = $1
+			AND exec_conv.id = be.conversation_id
+			AND exec_conv.company_id = closed_conv.company_id
+			AND exec_conv.contact_id = closed_conv.contact_id
+			AND be.status IN ('running', 'waiting', 'external_wait', 'paused')
 	`, conversationID)
 	return err
 }
