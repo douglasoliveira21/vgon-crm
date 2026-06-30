@@ -102,6 +102,33 @@ func (e *GLPIFlowEngine) HasActiveFlow(conversationID string) bool {
 	return state != nil
 }
 
+func (e *GLPIFlowEngine) ActiveConversationForMessage(companyID, conversationID, contactID string) string {
+	if e.HasActiveFlow(conversationID) {
+		return conversationID
+	}
+	if contactID == "" {
+		return ""
+	}
+
+	var activeConversationID string
+	err := e.db.QueryRow(`
+		SELECT gfs.conversation_id::text
+		FROM glpi_flow_states gfs
+		JOIN conversations c ON c.id = gfs.conversation_id
+		WHERE c.company_id = $1
+			AND c.contact_id = $2
+		ORDER BY gfs.updated_at DESC
+		LIMIT 1
+	`, companyID, contactID).Scan(&activeConversationID)
+	if err != nil {
+		return ""
+	}
+	if activeConversationID != conversationID {
+		log.Printf("[GLPI-FLOW] Resuming active flow from conversation %s using response received in conversation %s", activeConversationID, conversationID)
+	}
+	return activeConversationID
+}
+
 // CancelFlow removes any active GLPI flow for a conversation
 func (e *GLPIFlowEngine) CancelFlow(conversationID string) {
 	e.db.Exec("DELETE FROM glpi_flow_states WHERE conversation_id = $1", conversationID)
@@ -380,8 +407,17 @@ func (e *GLPIFlowEngine) handleAskTicketNumber(companyID, conversationID, instan
 
 func (e *GLPIFlowEngine) sendBotMessage(companyID, conversationID, instanceName, phone, message string) {
 	var externalID string
-	if instanceName != "" && phone != "" {
-		externalID, _ = e.evo.SendTextMessage(instanceName, phone, message)
+	instanceName = e.resolveConversationInstance(companyID, conversationID, instanceName)
+	if instanceName == "" || phone == "" {
+		e.addInternalNote(companyID, conversationID, fmt.Sprintf("Falha no envio GLPI: instancia='%s' telefone='%s'", instanceName, phone))
+		return
+	}
+
+	externalID, err := e.evo.SendTextMessage(instanceName, phone, message)
+	if err != nil {
+		log.Printf("[GLPI-FLOW] Failed to send message to %s via %s: %v", phone, instanceName, err)
+		e.addInternalNote(companyID, conversationID, fmt.Sprintf("Falha no envio GLPI para o cliente: %v", err))
+		return
 	}
 
 	msgID := uuid.New().String()
@@ -400,6 +436,49 @@ func (e *GLPIFlowEngine) sendBotMessage(companyID, conversationID, instanceName,
 	})
 
 	log.Printf("[GLPI-FLOW] Sent message to %s: %s", phone, message[:min(50, len(message))])
+}
+
+func (e *GLPIFlowEngine) resolveConversationInstance(companyID, conversationID, fallback string) string {
+	var instanceName string
+	err := e.db.QueryRow(`
+		SELECT COALESCE(wi.instance_name, '')
+		FROM conversations c
+		LEFT JOIN whatsapp_instances wi ON wi.channel_id = c.channel_id AND wi.company_id = c.company_id
+		WHERE c.id = $1 AND c.company_id = $2
+		LIMIT 1
+	`, conversationID, companyID).Scan(&instanceName)
+	if err == nil && strings.TrimSpace(instanceName) != "" {
+		instanceName = strings.TrimSpace(instanceName)
+		if fallback != "" && fallback != instanceName {
+			log.Printf("[GLPI-FLOW] Using conversation instance %s instead of stale instance %s for conversation %s", instanceName, fallback, conversationID)
+		}
+		return instanceName
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func (e *GLPIFlowEngine) addInternalNote(companyID, conversationID, content string) {
+	msgID := uuid.New().String()
+	_, err := e.db.Exec(`
+		INSERT INTO messages (id, conversation_id, company_id, sender_type, content, message_type, is_private, status)
+		VALUES ($1, $2, $3, 'bot', $4, 'text', true, 'sent')
+	`, msgID, conversationID, companyID, content)
+	if err != nil {
+		log.Printf("[GLPI-FLOW] Failed to save internal note: %v", err)
+		return
+	}
+
+	e.wsHub.BroadcastToCompany(companyID, "new_message", map[string]interface{}{
+		"id":              msgID,
+		"conversation_id": conversationID,
+		"sender_type":     "bot",
+		"content":         content,
+		"message_type":    "text",
+		"is_private":      true,
+		"sender_name":     "Assistente GLPI",
+		"status":          "sent",
+		"created_at":      time.Now(),
+	})
 }
 
 func (e *GLPIFlowEngine) saveState(conversationID string, state *GLPIFlowState) {

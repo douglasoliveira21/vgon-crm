@@ -716,9 +716,15 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	})
 
 	// Trigger bot if applicable (only for contact messages)
-	if s.glpiFlow != nil && s.glpiFlow.HasActiveFlow(conversationID) {
-		go s.glpiFlow.HandleGLPIMessage(instance.CompanyID, conversationID, contactID, instanceName, phone, content)
-	} else if s.botEngine != nil {
+	if s.glpiFlow != nil {
+		glpiConversationID := s.glpiFlow.ActiveConversationForMessage(instance.CompanyID, conversationID, contactID)
+		if glpiConversationID != "" {
+			go s.glpiFlow.HandleGLPIMessage(instance.CompanyID, glpiConversationID, contactID, instanceName, phone, content)
+			return
+		}
+	}
+
+	if s.botEngine != nil {
 		channelID := ""
 		if instance.ChannelID != nil {
 			channelID = *instance.ChannelID
