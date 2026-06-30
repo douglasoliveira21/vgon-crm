@@ -602,7 +602,7 @@ func (s *EmailService) saveEmail(companyID, channelID string, item fetchedEmail)
 		return false, err
 	}
 
-	conversationID, isNew, err := s.getOrCreateEmailConversation(companyID, contactID, channelID, item.Subject)
+	conversationID, isNew, isResolved, err := s.getOrCreateEmailConversation(companyID, contactID, channelID, item.Subject)
 	if err != nil {
 		return false, err
 	}
@@ -635,13 +635,28 @@ func (s *EmailService) saveEmail(companyID, channelID string, item fetchedEmail)
 	if len(preview) > 160 {
 		preview = preview[:160]
 	}
-	_, err = s.db.Exec(`
-		UPDATE conversations
-		SET last_message_at = $1, last_message_preview = $2, unread_count = unread_count + 1, subject = COALESCE(NULLIF(subject, ''), $3), updated_at = NOW()
-		WHERE id = $4 AND company_id = $5
-	`, createdAt, preview, item.Subject, conversationID, companyID)
+	if isResolved {
+		_, err = s.db.Exec(`
+			UPDATE conversations
+			SET last_message_at = GREATEST(COALESCE(last_message_at, $1), $1),
+			    last_message_preview = $2,
+			    subject = COALESCE(NULLIF(subject, ''), $3),
+			    updated_at = NOW()
+			WHERE id = $4 AND company_id = $5
+		`, createdAt, preview, item.Subject, conversationID, companyID)
+	} else {
+		_, err = s.db.Exec(`
+			UPDATE conversations
+			SET last_message_at = $1, last_message_preview = $2, unread_count = unread_count + 1, subject = COALESCE(NULLIF(subject, ''), $3), updated_at = NOW()
+			WHERE id = $4 AND company_id = $5
+		`, createdAt, preview, item.Subject, conversationID, companyID)
+	}
 	if err != nil {
 		return false, err
+	}
+
+	if isResolved {
+		return true, nil
 	}
 
 	messagePayload := map[string]interface{}{
@@ -687,7 +702,7 @@ func (s *EmailService) getOrCreateEmailContact(companyID, name, email string) (s
 	return contactID, err
 }
 
-func (s *EmailService) getOrCreateEmailConversation(companyID, contactID, channelID, subject string) (string, bool, error) {
+func (s *EmailService) getOrCreateEmailConversation(companyID, contactID, channelID, subject string) (string, bool, bool, error) {
 	var conversationID string
 	err := s.db.QueryRow(`
 		SELECT id
@@ -697,7 +712,25 @@ func (s *EmailService) getOrCreateEmailConversation(companyID, contactID, channe
 		LIMIT 1
 	`, companyID, contactID, channelID).Scan(&conversationID)
 	if err == nil {
-		return conversationID, false, nil
+		return conversationID, false, false, nil
+	}
+
+	normalizedSubject := normalizeEmailSubject(subject)
+	if normalizedSubject != "" {
+		err = s.db.QueryRow(`
+			SELECT id
+			FROM conversations
+			WHERE company_id = $1
+			  AND contact_id = $2
+			  AND channel_id = $3
+			  AND status = 'resolved'
+			  AND lower(regexp_replace(regexp_replace(COALESCE(subject, ''), '^\s*(re|fw|fwd)\s*:\s*', '', 'i'), '\s+', ' ', 'g')) = $4
+			ORDER BY resolved_at DESC NULLS LAST, updated_at DESC
+			LIMIT 1
+		`, companyID, contactID, channelID, normalizedSubject).Scan(&conversationID)
+		if err == nil {
+			return conversationID, false, true, nil
+		}
 	}
 
 	conversationID = uuid.New().String()
@@ -705,7 +738,21 @@ func (s *EmailService) getOrCreateEmailConversation(companyID, contactID, channe
 		INSERT INTO conversations (id, company_id, contact_id, channel_id, status, subject, last_message_at)
 		VALUES ($1, $2, $3, $4, 'open', $5, NOW())
 	`, conversationID, companyID, contactID, channelID, subject)
-	return conversationID, true, err
+	return conversationID, true, false, err
+}
+
+func normalizeEmailSubject(subject string) string {
+	value := strings.ToLower(strings.TrimSpace(subject))
+	for {
+		next := regexp.MustCompile(`^\s*(re|fw|fwd)\s*:\s*`).ReplaceAllString(value, "")
+		next = strings.TrimSpace(next)
+		if next == value {
+			break
+		}
+		value = next
+	}
+	value = regexp.MustCompile(`\s+`).ReplaceAllString(value, " ")
+	return value
 }
 
 func parseEmailSettings(raw []byte) (EmailChannelSettings, error) {
