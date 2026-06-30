@@ -144,12 +144,22 @@ func RBACMiddleware(requiredPermissions ...string) fiber.Handler {
 // RateLimiter creates a rate limiting middleware using Redis
 func RateLimiter(rdb *redis.Client, maxRequests int, window time.Duration) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		if c.Method() == fiber.MethodOptions || c.Path() == "/ws" || strings.HasPrefix(c.Path(), "/api/auth/") {
+		path := c.Path()
+		if c.Method() == fiber.MethodOptions ||
+			path == "/ws" ||
+			strings.HasPrefix(path, "/api/auth/") ||
+			strings.HasPrefix(path, "/api/webhooks/") {
 			return c.Next()
 		}
 
 		ip := c.IP()
-		key := fmt.Sprintf("rate_limit:%s", ip)
+		if forwardedFor := strings.TrimSpace(c.Get("X-Forwarded-For")); forwardedFor != "" {
+			ip = strings.TrimSpace(strings.Split(forwardedFor, ",")[0])
+		} else if realIP := strings.TrimSpace(c.Get("X-Real-IP")); realIP != "" {
+			ip = realIP
+		}
+
+		key := fmt.Sprintf("rate_limit:%s:%s:%s", ip, c.Method(), path)
 
 		ctx := context.Background()
 		count, err := rdb.Incr(ctx, key).Result()
@@ -162,6 +172,7 @@ func RateLimiter(rdb *redis.Client, maxRequests int, window time.Duration) fiber
 		}
 
 		if count > int64(maxRequests) {
+			c.Set("Retry-After", fmt.Sprintf("%.0f", window.Seconds()))
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
 				"error": "Rate limit exceeded",
 			})

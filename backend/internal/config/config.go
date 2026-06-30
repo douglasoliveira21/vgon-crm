@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -78,8 +79,8 @@ func Load() *Config {
 		StorageSecretKey:      getEnv("STORAGE_SECRET_KEY", "minioadmin"),
 		StorageBucket:         getEnv("STORAGE_BUCKET", "evocrm"),
 		StorageUseSSL:         getEnv("STORAGE_USE_SSL", "false") == "true",
-		RateLimitMax:          100,
-		RateLimitWindow:       time.Minute,
+		RateLimitMax:          parseInt(getEnv("RATE_LIMIT_MAX", "1200"), 1200),
+		RateLimitWindow:       parseDuration(getEnv("RATE_LIMIT_WINDOW", "1m")),
 		GLPIBaseURL:           getEnv("GLPI_BASE_URL", ""),
 		GLPIAppToken:          getEnv("GLPI_APP_TOKEN", ""),
 		GLPIUserToken:         getEnv("GLPI_USER_TOKEN", ""),
@@ -109,4 +110,12 @@ func parseDuration(s string) time.Duration {
 		return 15 * time.Minute
 	}
 	return d
+}
+
+func parseInt(s string, defaultValue int) int {
+	value, err := strconv.Atoi(s)
+	if err != nil || value <= 0 {
+		return defaultValue
+	}
+	return value
 }
