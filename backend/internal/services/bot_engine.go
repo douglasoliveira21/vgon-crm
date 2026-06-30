@@ -672,8 +672,12 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 		LIMIT 1
 	`, conversationID, companyID).Scan(&execID, &flowID, &triggerType, &nodesJSON, &edgesJSON, &waitingNodeID)
 	if err != nil || waitingNodeID == "" {
+		if err != sql.ErrNoRows {
+			log.Printf("[BOT] Could not load waiting execution for conversation %s: %v", conversationID, err)
+		}
 		return false
 	}
+	log.Printf("[BOT] Resuming waiting flow %s for conversation %s with response %q", flowID, conversationID, message)
 
 	nodes, err := parseBotNodes(nodesJSON)
 	if err != nil {
@@ -698,6 +702,7 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 
 	outgoingBySource := buildOutgoingEdges(edges)
 	nextID := chooseNextNodeIDForResponse(outgoingBySource[waitingNode.ID], message)
+	log.Printf("[BOT] Waiting node %s response %q selected next node %s", waitingNode.ID, message, nextID)
 	if nextID == "" {
 		e.db.Exec(`
 			UPDATE bot_executions

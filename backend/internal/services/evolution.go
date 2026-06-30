@@ -1043,6 +1043,10 @@ func extractMessageContent(message map[string]interface{}) (msgType, content, me
 		return "text", text, ""
 	}
 
+	if content := extractInteractiveResponseContent(message); content != "" {
+		return "text", content, ""
+	}
+
 	if img, ok := message["imageMessage"].(map[string]interface{}); ok {
 		caption, _ := img["caption"].(string)
 		url, _ := img["url"].(string)
@@ -1083,6 +1087,57 @@ func extractMessageContent(message map[string]interface{}) (msgType, content, me
 	}
 
 	return "text", "", ""
+}
+
+func extractInteractiveResponseContent(message map[string]interface{}) string {
+	if response, ok := message["buttonsResponseMessage"].(map[string]interface{}); ok {
+		return firstNonEmptyString(response, "selectedButtonId", "selectedDisplayText", "displayText")
+	}
+
+	if response, ok := message["templateButtonReplyMessage"].(map[string]interface{}); ok {
+		return firstNonEmptyString(response, "selectedId", "selectedDisplayText", "displayText")
+	}
+
+	if response, ok := message["listResponseMessage"].(map[string]interface{}); ok {
+		if reply, ok := response["singleSelectReply"].(map[string]interface{}); ok {
+			if value := firstNonEmptyString(reply, "selectedRowId", "title", "description"); value != "" {
+				return value
+			}
+		}
+		return firstNonEmptyString(response, "title", "description")
+	}
+
+	if response, ok := message["interactiveResponseMessage"].(map[string]interface{}); ok {
+		if body, ok := response["body"].(map[string]interface{}); ok {
+			if value := firstNonEmptyString(body, "text"); value != "" {
+				return value
+			}
+		}
+		if native, ok := response["nativeFlowResponseMessage"].(map[string]interface{}); ok {
+			if value := firstNonEmptyString(native, "name"); value != "" {
+				return value
+			}
+			if rawParams := firstNonEmptyString(native, "paramsJson"); rawParams != "" {
+				var params map[string]interface{}
+				if err := json.Unmarshal([]byte(rawParams), &params); err == nil {
+					if value := firstNonEmptyString(params, "id", "selectedId", "selectedRowId", "display_text", "title"); value != "" {
+						return value
+					}
+				}
+			}
+		}
+	}
+
+	return ""
+}
+
+func firstNonEmptyString(data map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := data[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func splitOnce(s, sep string) []string {
