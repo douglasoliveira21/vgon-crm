@@ -793,7 +793,7 @@ func (e *BotEngine) markExecutionWaiting(execID, nodeID string) {
 	result, err := e.db.Exec(`
 		UPDATE bot_executions
 		SET status = 'waiting',
-			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('waiting_node_id', $1, 'current_node_id', $1)
+			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('waiting_node_id', $1::text, 'current_node_id', $1::text)
 		WHERE id = $2
 	`, nodeID, execID)
 	if err != nil {
