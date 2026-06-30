@@ -914,10 +914,11 @@ func (s *EvolutionService) fetchAndSaveContactPhoto(instanceName, phone, contact
 func (s *EvolutionService) getOrCreateConversation(companyID, contactID string, channelID *string) string {
 	var conversationID string
 
-	// First, try to find any non-resolved conversation for this contact in this company
+	// First, try to find any active conversation for this contact in this company.
+	// Resolved/closed conversations remain historical; a new customer message starts a new bot-eligible conversation.
 	err := s.db.QueryRow(`
 		SELECT id FROM conversations 
-		WHERE company_id = $1 AND contact_id = $2 AND status != 'resolved'
+		WHERE company_id = $1 AND contact_id = $2 AND status IN ('open', 'pending', 'in_progress')
 		ORDER BY last_message_at DESC NULLS LAST, created_at DESC
 		LIMIT 1
 	`, companyID, contactID).Scan(&conversationID)

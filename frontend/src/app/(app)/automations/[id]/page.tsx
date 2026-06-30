@@ -725,6 +725,10 @@ function NodeConfigPanel({
     )
   }
 
+  if (nodeType === 'trigger_off_hours') {
+    return <BusinessHoursConfig config={config} onUpdate={onUpdate} mode="outside" />
+  }
+
   // --- MESSAGE NODES ---
   if (nodeType === 'send_text') {
     return (
@@ -908,6 +912,10 @@ function NodeConfigPanel({
   }
 
   if (nodeType === 'condition_business_hours') {
+    return <BusinessHoursConfig config={config} onUpdate={onUpdate} mode="condition" />
+  }
+
+  if (nodeType === 'condition_business_hours') {
     return (
       <div className="p-3 bg-gray-50 rounded-lg text-xs text-gray-600">
         Verifica automaticamente se está dentro do horário comercial configurado na empresa.
@@ -1065,6 +1073,10 @@ function NodeConfigPanel({
     )
   }
 
+  if (nodeType === 'wait_business_hours') {
+    return <BusinessHoursConfig config={config} onUpdate={onUpdate} mode="wait" />
+  }
+
   // --- WAIT NODES ---
   if (nodeType.startsWith('wait')) {
     return (
@@ -1181,6 +1193,54 @@ function NodeConfigPanel({
   return (
     <div className="p-3 bg-gray-50 rounded-lg text-xs text-gray-500">
       Selecione um bloco para configurar.
+    </div>
+  )
+}
+
+function BusinessHoursConfig({
+  config,
+  onUpdate,
+  mode,
+}: {
+  config: Record<string, any>
+  onUpdate: (config: Record<string, any>) => void
+  mode: 'outside' | 'condition' | 'wait'
+}) {
+  const startTime = config.start_time || '08:00'
+  const endTime = config.end_time || '18:00'
+  const descriptions = {
+    outside: 'Este fluxo sera ativado fora do horario abaixo.',
+    condition: 'Saida verdadeira: dentro do horario. Saida falsa: fora do horario.',
+    wait: 'Pausa o fluxo ate chegar no horario inicial configurado.',
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Inicio</label>
+          <input
+            type="time"
+            value={startTime}
+            onChange={(e) => onUpdate({ start_time: e.target.value })}
+            className="input text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Fim</label>
+          <input
+            type="time"
+            value={endTime}
+            onChange={(e) => onUpdate({ end_time: e.target.value })}
+            className="input text-sm"
+          />
+        </div>
+      </div>
+      <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
+        Horario atual configurado: <strong>{startTime} as {endTime}</strong>.
+        <br />
+        {descriptions[mode]}
+      </div>
     </div>
   )
 }

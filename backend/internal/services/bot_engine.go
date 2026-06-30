@@ -156,10 +156,12 @@ func appendOptionsToMessage(message string, options []string) string {
 	return builder.String()
 }
 
-func secondsUntilBusinessHours() float64 {
+func secondsUntilBusinessHours(startTime, endTime string) float64 {
 	now := time.Now()
-	start := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, now.Location())
-	end := time.Date(now.Year(), now.Month(), now.Day(), 18, 0, 0, 0, now.Location())
+	startHour, startMinute := parseClock(startTime, 8, 0)
+	endHour, endMinute := parseClock(endTime, 18, 0)
+	start := time.Date(now.Year(), now.Month(), now.Day(), startHour, startMinute, 0, 0, now.Location())
+	end := time.Date(now.Year(), now.Month(), now.Day(), endHour, endMinute, 0, 0, now.Location())
 	if now.Before(start) {
 		return start.Sub(now).Seconds()
 	}
@@ -168,6 +170,30 @@ func secondsUntilBusinessHours() float64 {
 	}
 	next := start.Add(24 * time.Hour)
 	return next.Sub(now).Seconds()
+}
+
+func parseClock(value string, defaultHour, defaultMinute int) (int, int) {
+	parts := strings.Split(strings.TrimSpace(value), ":")
+	if len(parts) != 2 {
+		return defaultHour, defaultMinute
+	}
+	var hour, minute int
+	if _, err := fmt.Sscanf(parts[0]+":"+parts[1], "%d:%d", &hour, &minute); err != nil {
+		return defaultHour, defaultMinute
+	}
+	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return defaultHour, defaultMinute
+	}
+	return hour, minute
+}
+
+func isWithinBusinessHours(startTime, endTime string) bool {
+	now := time.Now()
+	startHour, startMinute := parseClock(startTime, 8, 0)
+	endHour, endMinute := parseClock(endTime, 18, 0)
+	start := time.Date(now.Year(), now.Month(), now.Day(), startHour, startMinute, 0, 0, now.Location())
+	end := time.Date(now.Year(), now.Month(), now.Day(), endHour, endMinute, 0, 0, now.Location())
+	return !now.Before(start) && now.Before(end)
 }
 
 func normalizeTriggerType(triggerType string) string {
@@ -394,8 +420,9 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 			}
 
 		case "off_hours", "trigger_off_hours":
-			hour := time.Now().Hour()
-			shouldTrigger = hour < 8 || hour >= 18
+			startTime := getTriggerConfigString(nodes, "trigger_off_hours", "start_time")
+			endTime := getTriggerConfigString(nodes, "trigger_off_hours", "end_time")
+			shouldTrigger = !isWithinBusinessHours(startTime, endTime)
 
 		case "trigger_inbox_message":
 			shouldTrigger = triggerMatchesChannel(nodes, channelID)
@@ -575,8 +602,10 @@ func (e *BotEngine) finishLatestExecution(flowID, conversationID, status string)
 func (e *BotEngine) evaluateCondition(node BotNode, companyID, conversationID, contactID, incomingMessage string) *bool {
 	nodeType := getNodeType(node)
 	if nodeType == "condition_business_hours" {
-		hour := time.Now().Hour()
-		result := hour >= 8 && hour < 18
+		config := getNodeConfig(node)
+		startTime, _ := config["start_time"].(string)
+		endTime, _ := config["end_time"].(string)
+		result := isWithinBusinessHours(startTime, endTime)
 		return &result
 	}
 	if nodeType != "condition" && nodeType != "condition_contact_field" && nodeType != "condition_tag" {
@@ -757,7 +786,9 @@ func (e *BotEngine) executeNode(node BotNode, companyID, conversationID, contact
 			node.Data["seconds"] = hrs * 3600
 		}
 		if nodeType == "wait_business_hours" {
-			node.Data["seconds"] = secondsUntilBusinessHours()
+			startTime, _ := config["start_time"].(string)
+			endTime, _ := config["end_time"].(string)
+			node.Data["seconds"] = secondsUntilBusinessHours(startTime, endTime)
 		}
 		return e.nodeDelay(node)
 	case "add_tag", "action_add_tag":
