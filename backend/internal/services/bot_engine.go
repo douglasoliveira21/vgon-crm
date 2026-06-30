@@ -672,7 +672,9 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 		LIMIT 1
 	`, conversationID, companyID).Scan(&execID, &flowID, &triggerType, &nodesJSON, &edgesJSON, &waitingNodeID)
 	if err != nil || waitingNodeID == "" {
-		if err != sql.ErrNoRows {
+		if err == sql.ErrNoRows {
+			log.Printf("[BOT] No waiting execution for conversation %s", conversationID)
+		} else {
 			log.Printf("[BOT] Could not load waiting execution for conversation %s: %v", conversationID, err)
 		}
 		return false

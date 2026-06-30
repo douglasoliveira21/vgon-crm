@@ -671,6 +671,7 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	// Extract message content
 	message, _ := data["message"].(map[string]interface{})
 	msgType, content, mediaURL := extractMessageContent(message)
+	log.Printf("[WEBHOOK] Incoming message for conversation %s from %s on %s: type=%s content=%q", conversationID, phone, instanceName, msgType, content)
 
 	// Save message
 	msgID := uuid.New().String()
@@ -927,17 +928,36 @@ func (s *EvolutionService) fetchAndSaveContactPhoto(instanceName, phone, contact
 func (s *EvolutionService) getOrCreateConversation(companyID, contactID string, channelID *string) string {
 	var conversationID string
 
-	// First, try to find any active conversation for this contact in this company.
-	// Resolved/closed conversations remain historical; a new customer message starts a new bot-eligible conversation.
-	err := s.db.QueryRow(`
-		SELECT id FROM conversations 
-		WHERE company_id = $1 AND contact_id = $2 AND status IN ('open', 'pending', 'in_progress')
-		ORDER BY last_message_at DESC NULLS LAST, created_at DESC
-		LIMIT 1
-	`, companyID, contactID).Scan(&conversationID)
-	if err == nil {
-		log.Printf("[CONVERSATION] Found existing conversation %s for contact %s", conversationID, contactID)
-		return conversationID
+	// First, try to find an active conversation for this contact in the same channel.
+	// Different WhatsApp instances/channels must not steal each other's waiting bot execution.
+	if channelID != nil && *channelID != "" {
+		err := s.db.QueryRow(`
+			SELECT id FROM conversations
+			WHERE company_id = $1
+				AND contact_id = $2
+				AND channel_id = $3
+				AND status IN ('open', 'pending', 'in_progress')
+			ORDER BY last_message_at DESC NULLS LAST, created_at DESC
+			LIMIT 1
+		`, companyID, contactID, *channelID).Scan(&conversationID)
+		if err == nil {
+			log.Printf("[CONVERSATION] Found existing conversation %s for contact %s on channel %s", conversationID, contactID, *channelID)
+			return conversationID
+		}
+	} else {
+		err := s.db.QueryRow(`
+			SELECT id FROM conversations
+			WHERE company_id = $1
+				AND contact_id = $2
+				AND channel_id IS NULL
+				AND status IN ('open', 'pending', 'in_progress')
+			ORDER BY last_message_at DESC NULLS LAST, created_at DESC
+			LIMIT 1
+		`, companyID, contactID).Scan(&conversationID)
+		if err == nil {
+			log.Printf("[CONVERSATION] Found existing conversation %s for contact %s without channel", conversationID, contactID)
+			return conversationID
+		}
 	}
 
 	// No active conversation found, create a new one
