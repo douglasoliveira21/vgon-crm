@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -18,8 +19,20 @@ func Connect(databaseURL string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
+	var pingErr error
+	for attempt := 1; attempt <= 12; attempt++ {
+		pingErr = db.Ping()
+		if pingErr == nil {
+			break
+		}
+		if attempt < 12 {
+			log.Printf("Database connection attempt %d/12 failed: %v; retrying in 5s", attempt, pingErr)
+			time.Sleep(5 * time.Second)
+		}
+	}
+	if pingErr != nil {
+		db.Close()
+		return nil, fmt.Errorf("failed to ping database after retries: %w", pingErr)
 	}
 
 	// Connection pool settings
