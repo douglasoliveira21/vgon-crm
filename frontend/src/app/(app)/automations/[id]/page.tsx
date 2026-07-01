@@ -59,6 +59,7 @@ const NODE_CATEGORIES = [
       { type: 'trigger_no_response', label: 'Sem resposta', icon: '⏰' },
       { type: 'trigger_contact_created', label: 'Contato criado', icon: '👤' },
       { type: 'trigger_campaign_replied', label: 'Campanha respondida', icon: '📢' },
+      { type: 'trigger_conversation_closed', label: 'Conversa encerrada', icon: '✅' },
     ],
   },
   {
@@ -197,6 +198,7 @@ function getNodeIcon(type: string): string {
 function getDefaultFlowPriority(triggerType: string): number {
   if (triggerType === 'off_hours' || triggerType === 'trigger_off_hours') return 100
   if (triggerType === 'no_response' || triggerType === 'trigger_no_response') return 80
+  if (triggerType === 'conversation_closed' || triggerType === 'trigger_conversation_closed') return 90
   if (triggerType === 'new_conversation' || triggerType === 'trigger_new_conversation' || triggerType === 'trigger_inbox_message') return 10
   return 20
 }
@@ -852,6 +854,15 @@ function NodeConfigPanel({
         <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
           📥 Este fluxo será ativado quando uma mensagem chegar na caixa de entrada selecionada.
         </div>
+      </div>
+    )
+  }
+
+  if (nodeType === 'trigger_conversation_closed') {
+    return (
+      <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
+        ✅ Este fluxo será ativado quando um atendente <strong>encerrar (resolver)</strong> a conversa.
+        Use-o para enviar uma mensagem de despedida ou pesquisa de satisfação.
       </div>
     )
   }

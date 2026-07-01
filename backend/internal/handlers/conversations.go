@@ -223,6 +223,10 @@ func CloseConversation(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
+		// Fire any "conversation closed" bot flow (e.g. a farewell message).
+		// Runs asynchronously so it never blocks the close response.
+		go svc.Bot.TriggerConversationClosed(companyID, conversationID)
+
 		return c.JSON(fiber.Map{"message": "Conversation closed"})
 	}
 }

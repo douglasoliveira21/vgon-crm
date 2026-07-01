@@ -604,6 +604,64 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 	}
 }
 
+// TriggerConversationClosed fires bot flows configured with the "conversation
+// closed" trigger. It is intended to run after an agent manually resolves a
+// conversation (via the /close endpoint), so a farewell/closing flow can run.
+// Bot-driven closes (the action_close_conversation node) update the conversation
+// directly and do NOT pass through here, which avoids re-trigger loops.
+func (e *BotEngine) TriggerConversationClosed(companyID, conversationID string) {
+	var contactID, channelID, phone, instanceName string
+	err := e.db.QueryRow(`
+		SELECT COALESCE(c.contact_id::text, ''),
+		       COALESCE(c.channel_id::text, ''),
+		       COALESCE(ct.phone, ''),
+		       COALESCE(wi.instance_name, '')
+		FROM conversations c
+		LEFT JOIN contacts ct ON ct.id = c.contact_id
+		LEFT JOIN whatsapp_instances wi ON wi.channel_id = c.channel_id AND wi.company_id = c.company_id
+		WHERE c.id = $1 AND c.company_id = $2
+	`, conversationID, companyID).Scan(&contactID, &channelID, &phone, &instanceName)
+	if err != nil {
+		log.Printf("[BOT] Could not load conversation %s for closing flow: %v", conversationID, err)
+		return
+	}
+
+	rows, err := e.db.Query(`
+		SELECT id, trigger_type, nodes, edges, priority, stop_on_match
+		FROM bot_flows
+		WHERE company_id = $1 AND is_active = true
+			AND trigger_type IN ('conversation_closed', 'trigger_conversation_closed')
+		ORDER BY priority DESC, created_at ASC
+	`, companyID)
+	if err != nil {
+		log.Printf("[BOT] Failed to query closing flows for company %s: %v", companyID, err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var flowID, triggerType string
+		var priority int
+		var stopOnMatch bool
+		var nodesJSON, edgesJSON json.RawMessage
+		if err := rows.Scan(&flowID, &triggerType, &nodesJSON, &edgesJSON, &priority, &stopOnMatch); err != nil {
+			continue
+		}
+		nodes, err := parseBotNodes(nodesJSON)
+		if err != nil || len(nodes) == 0 {
+			continue
+		}
+		if !e.reserveExecution(flowID, conversationID, contactID) {
+			continue
+		}
+		log.Printf("[BOT] Triggering closing flow %s (%s) priority %d for conversation %s", flowID, triggerType, priority, conversationID)
+		go e.executeFlow(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone, "", nodesJSON, edgesJSON)
+		if stopOnMatch {
+			return
+		}
+	}
+}
+
 func (e *BotEngine) conversationHasHumanOwner(companyID, conversationID string) bool {
 	var hasOwner bool
 	err := e.db.QueryRow(`
@@ -1206,7 +1264,7 @@ func (e *BotEngine) executeNode(node BotNode, companyID, conversationID, contact
 	config := getNodeConfig(node)
 
 	switch nodeType {
-	case "trigger_new_conversation", "trigger_inbox_message", "trigger_keyword", "trigger_off_hours", "trigger_tag_added", "trigger_funnel_stage", "trigger_no_response", "trigger_contact_created", "trigger_campaign_replied":
+	case "trigger_new_conversation", "trigger_inbox_message", "trigger_keyword", "trigger_off_hours", "trigger_tag_added", "trigger_funnel_stage", "trigger_no_response", "trigger_contact_created", "trigger_campaign_replied", "trigger_conversation_closed":
 		return nil
 	case "send_message", "send_text":
 		msg, _ := config["message"].(string)
