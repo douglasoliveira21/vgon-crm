@@ -388,8 +388,9 @@ func (s *EvolutionService) SendTextMessage(instanceName, phone, text string) (st
 // SendTextMessageWithQuote sends a text message with optional quoted message
 func (s *EvolutionService) SendTextMessageWithQuote(instanceName, phone, text, quotedMsgID string) (string, error) {
 	payload := map[string]interface{}{
-		"number": phone,
-		"text":   text,
+		"number":      phone,
+		"text":        text,
+		"linkPreview": false,
 	}
 
 	if quotedMsgID != "" {
