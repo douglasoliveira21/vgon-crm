@@ -417,6 +417,9 @@ func (s *EvolutionService) SendTextMessageWithQuote(instanceName, phone, text, q
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("evolution send text returned %d: %s", resp.StatusCode, string(respBody))
+	}
 
 	var result map[string]interface{}
 	if err := json.Unmarshal(respBody, &result); err != nil {

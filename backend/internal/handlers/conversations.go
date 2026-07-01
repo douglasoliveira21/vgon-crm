@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -10,6 +11,23 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
+
+var outgoingURLPattern = regexp.MustCompile(`(^|[\s(])((?:www\.|(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})[^\s<>"']*)`)
+
+func normalizeOutgoingWhatsAppLinks(message string) string {
+	return outgoingURLPattern.ReplaceAllStringFunc(message, func(match string) string {
+		prefix := ""
+		url := match
+		if len(match) > 0 && (match[0] == ' ' || match[0] == '\n' || match[0] == '\t' || match[0] == '(') {
+			prefix = match[:1]
+			url = match[1:]
+		}
+		if strings.Contains(url, "@") || strings.HasPrefix(strings.ToLower(url), "http://") || strings.HasPrefix(strings.ToLower(url), "https://") {
+			return match
+		}
+		return prefix + "https://" + url
+	})
+}
 
 func StartConversation(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
@@ -64,10 +82,17 @@ func StartConversation(svc *services.Container) fiber.Handler {
 			`, conversationID).Scan(&phone, &instanceName)
 
 			if phone != "" && instanceName != "" {
-				externalID, _ := svc.Evolution.SendTextMessage(instanceName, phone, body.Message)
+				externalID, sendErr := svc.Evolution.SendTextMessage(instanceName, phone, normalizeOutgoingWhatsAppLinks(body.Message))
 				msgID := uuid.New().String()
-				svc.DB.Exec(`INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, external_id, status) VALUES ($1, $2, $3, 'user', $4, $5, 'text', $6, 'sent')`,
-					msgID, conversationID, companyID, userID, body.Message, externalID)
+				status := "sent"
+				if sendErr != nil {
+					status = "failed"
+				}
+				svc.DB.Exec(`INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, external_id, status) VALUES ($1, $2, $3, 'user', $4, $5, 'text', $6, $7)`,
+					msgID, conversationID, companyID, userID, body.Message, externalID, status)
+				if sendErr != nil {
+					return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": sendErr.Error()})
+				}
 			}
 		}
 
@@ -414,7 +439,11 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 					svc.DB.QueryRow("SELECT COALESCE(external_id, '') FROM messages WHERE id = $1", *body.ReplyToID).Scan(&quotedExternalID)
 				}
 
-				externalID, _ := svc.Evolution.SendTextMessageWithQuote(instanceName, phone, messageToSend, quotedExternalID)
+				externalID, err := svc.Evolution.SendTextMessageWithQuote(instanceName, phone, normalizeOutgoingWhatsAppLinks(messageToSend), quotedExternalID)
+				if err != nil {
+					svc.DB.Exec("UPDATE messages SET status = 'failed' WHERE id = $1 AND company_id = $2", msg.ID, companyID)
+					return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+				}
 				if externalID != "" {
 					svc.DB.Exec("UPDATE messages SET external_id = $1 WHERE id = $2", externalID, msg.ID)
 				}
