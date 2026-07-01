@@ -659,6 +659,17 @@ func (e *BotEngine) executeFlowFrom(flowID, triggerType, companyID, conversation
 	}
 
 	outgoingBySource := buildOutgoingEdges(edges)
+
+	// Diagnostic dump of the parsed graph so routing problems can be traced.
+	for _, n := range nodes {
+		outs := outgoingBySource[n.ID]
+		targets := make([]string, 0, len(outs))
+		for _, ed := range outs {
+			targets = append(targets, fmt.Sprintf("%s(handle=%q,label=%q)", ed.Target, ed.SourceHandle, ed.Label))
+		}
+		log.Printf("[BOT][GRAPH] node %s type=%s outgoing=%d -> %v", n.ID, getNodeType(n), len(outs), targets)
+	}
+
 	current := findStartNode(nodes, edges, triggerType)
 	if startNodeID != "" {
 		if node, ok := nodesByID[startNodeID]; ok {
@@ -1143,6 +1154,7 @@ func (e *BotEngine) evaluateCondition(node BotNode, companyID, conversationID, c
 	}
 
 	result := compareCondition(actual, expected, operator)
+	log.Printf("[BOT][COND] node %s field=%q operator=%q expected=%q actual=%q -> %v", node.ID, field, operator, expected, actual, result)
 	return &result
 }
 
