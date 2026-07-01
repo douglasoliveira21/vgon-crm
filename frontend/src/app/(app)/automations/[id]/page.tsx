@@ -56,7 +56,7 @@ const NODE_CATEGORIES = [
       { type: 'trigger_off_hours', label: 'Fora do horário', icon: '🌙' },
       { type: 'trigger_tag_added', label: 'Tag adicionada', icon: '🏷️' },
       { type: 'trigger_funnel_stage', label: 'Etapa do funil', icon: '📊' },
-      { type: 'trigger_no_response', label: 'Sem resposta', icon: '⏰' },
+      { type: 'trigger_client_inactivity', label: 'Cliente inativo', icon: '⏰' },
       { type: 'trigger_contact_created', label: 'Contato criado', icon: '👤' },
       { type: 'trigger_campaign_replied', label: 'Campanha respondida', icon: '📢' },
       { type: 'trigger_conversation_closed', label: 'Conversa encerrada', icon: '✅' },
@@ -197,7 +197,7 @@ function getNodeIcon(type: string): string {
 
 function getDefaultFlowPriority(triggerType: string): number {
   if (triggerType === 'off_hours' || triggerType === 'trigger_off_hours') return 100
-  if (triggerType === 'no_response' || triggerType === 'trigger_no_response') return 80
+  if (triggerType === 'client_inactivity' || triggerType === 'trigger_client_inactivity' || triggerType === 'no_response' || triggerType === 'trigger_no_response') return 80
   if (triggerType === 'conversation_closed' || triggerType === 'trigger_conversation_closed') return 90
   if (triggerType === 'new_conversation' || triggerType === 'trigger_new_conversation' || triggerType === 'trigger_inbox_message') return 10
   return 20
@@ -446,7 +446,7 @@ export default function FlowEditorPage() {
         bot_name: botName.trim() || 'Assistente',
         description,
         trigger_type: triggerNode?.data?.nodeType || 'trigger_new_conversation',
-        trigger_value: triggerConfig.keywords || triggerConfig.channel_id || '',
+        trigger_value: triggerConfig.keywords || triggerConfig.channel_id || triggerConfig.inactivity_minutes || '',
         is_active: isActive,
         priority,
         stop_on_match: stopOnMatch,
@@ -797,15 +797,14 @@ function NodeConfigPanel({
 }) {
   const nodeType = node.data?.nodeType || ''
   const config = node.data?.config || {}
+  const [channels, setChannels] = useState<Array<{id: string; name: string; type: string; status: string}>>([])
+
+  useEffect(() => {
+    api.get('/channels').then(res => setChannels(res.data.channels || [])).catch(() => {})
+  }, [])
 
   // --- TRIGGER NODES ---
   if (nodeType === 'trigger_inbox_message') {
-    const [channels, setChannels] = useState<Array<{id: string; name: string; type: string; status: string}>>([])
-
-    useEffect(() => {
-      api.get('/channels').then(res => setChannels(res.data.channels || [])).catch(() => {})
-    }, [])
-
     const filteredChannels = config.channel_type && config.channel_type !== 'any'
       ? channels.filter(c => c.type === config.channel_type)
       : channels
@@ -863,6 +862,48 @@ function NodeConfigPanel({
       <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
         ✅ Este fluxo será ativado quando um atendente <strong>encerrar (resolver)</strong> a conversa.
         Use-o para enviar uma mensagem de despedida ou pesquisa de satisfação.
+      </div>
+    )
+  }
+
+  if (nodeType === 'trigger_client_inactivity' || nodeType === 'trigger_no_response') {
+    return (
+      <div className="space-y-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Tempo sem resposta do cliente (minutos)</label>
+          <input
+            type="number"
+            value={config.inactivity_minutes || 30}
+            onChange={(e) => onUpdate({ inactivity_minutes: parseInt(e.target.value) || 30 })}
+            className="input text-sm"
+            min={1}
+            max={10080}
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Caixa de entrada</label>
+          <select
+            value={config.channel_id || ''}
+            onChange={(e) => {
+              const ch = channels.find(c => c.id === e.target.value)
+              onUpdate({ channel_id: e.target.value, channel_name: ch?.name || '' })
+            }}
+            className="input text-sm"
+          >
+            <option value="">Todas as caixas de entrada</option>
+            {channels.map(ch => (
+              <option key={ch.id} value={ch.id}>
+                {ch.name} {ch.status === 'connected' ? '🟢' : '⚪'}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="p-3 bg-yellow-50 rounded-lg text-xs text-yellow-700">
+          ⏰ Ativa somente quando a última mensagem pública foi do atendente ou do bot e o cliente não respondeu no tempo definido.
+          Para encerrar automaticamente, conecte este gatilho ao bloco <strong>Encerrar conversa</strong>.
+        </div>
       </div>
     )
   }

@@ -82,6 +82,55 @@ interface Message {
   created_at: string
 }
 
+const URL_REGEX = /((?:https?:\/\/|www\.|(?:[a-z0-9-]+\.)+[a-z]{2,})[^\s<>"']*)/gi
+const TRAILING_PUNCTUATION_REGEX = /[.,!?;:)\]}]+$/
+
+function renderTextWithLinks(text: string, isOwnMessage: boolean) {
+  const parts: React.ReactNode[] = []
+  let lastIndex = 0
+
+  for (const match of text.matchAll(URL_REGEX)) {
+    const rawUrl = match[0]
+    const index = match.index ?? 0
+    if (index > 0 && text[index - 1] === '@') {
+      continue
+    }
+    if (index > lastIndex) {
+      parts.push(text.slice(lastIndex, index))
+    }
+
+    const trailing = rawUrl.match(TRAILING_PUNCTUATION_REGEX)?.[0] || ''
+    const cleanUrl = trailing ? rawUrl.slice(0, -trailing.length) : rawUrl
+    const href = /^https?:\/\//i.test(cleanUrl) ? cleanUrl : `https://${cleanUrl}`
+
+    parts.push(
+      <a
+        key={`${index}-${cleanUrl}`}
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={clsx(
+          'underline underline-offset-2 break-all',
+          isOwnMessage ? 'text-white font-medium' : 'text-primary-600 hover:text-primary-700'
+        )}
+      >
+        {cleanUrl}
+      </a>
+    )
+
+    if (trailing) {
+      parts.push(trailing)
+    }
+    lastIndex = index + rawUrl.length
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex))
+  }
+
+  return parts.length > 0 ? parts : text
+}
+
 interface UserItem {
   id: string
   name: string
@@ -1441,7 +1490,9 @@ export default function ConversationsPage() {
                   )}
 
                   {msg.content && msg.message_type !== 'audio' && (
-                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                    <p className="text-sm whitespace-pre-wrap break-words">
+                      {renderTextWithLinks(msg.content, msg.sender_type === 'user')}
+                    </p>
                   )}
 
                   <div className={clsx(

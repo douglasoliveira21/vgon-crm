@@ -60,6 +60,7 @@ func main() {
 	// Start periodic background tasks
 	svc.Evolution.StartPeriodicPhotoSync()
 	svc.Email.StartPeriodicSync()
+	svc.Bot.StartClientInactivityMonitor()
 
 	// Initialize Fiber app
 	app := fiber.New(fiber.Config{

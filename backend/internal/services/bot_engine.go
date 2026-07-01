@@ -223,7 +223,7 @@ func normalizeTriggerType(triggerType string) string {
 		return triggerType
 	}
 	switch triggerType {
-	case "new_conversation", "keyword", "off_hours", "tag_added":
+	case "new_conversation", "keyword", "off_hours", "tag_added", "client_inactivity":
 		return "trigger_" + triggerType
 	default:
 		return triggerType
@@ -259,6 +259,26 @@ func getTriggerConfigString(nodes []BotNode, triggerType, key string) string {
 		}
 	}
 	return ""
+}
+
+func getTriggerConfigInt(nodes []BotNode, triggerType, key string, fallback int) int {
+	triggerType = normalizeTriggerType(triggerType)
+	for _, node := range nodes {
+		if getNodeType(node) != triggerType {
+			continue
+		}
+		value := getNodeConfig(node)[key]
+		if n, ok := getNumber(value); ok && n > 0 {
+			return int(n)
+		}
+		if text := getStringValue(value); text != "" {
+			parsed, err := strconv.Atoi(text)
+			if err == nil && parsed > 0 {
+				return parsed
+			}
+		}
+	}
+	return fallback
 }
 
 func triggerMatchesChannel(nodes []BotNode, channelID string) bool {
@@ -660,6 +680,133 @@ func (e *BotEngine) TriggerConversationClosed(companyID, conversationID string) 
 			return
 		}
 	}
+}
+
+func (e *BotEngine) StartClientInactivityMonitor() {
+	ticker := time.NewTicker(1 * time.Minute)
+	go func() {
+		e.TriggerClientInactivityFlows()
+		for range ticker.C {
+			e.TriggerClientInactivityFlows()
+		}
+	}()
+}
+
+func (e *BotEngine) TriggerClientInactivityFlows() {
+	rows, err := e.db.Query(`
+		SELECT id, company_id::text, trigger_type, trigger_value, nodes, edges, priority, stop_on_match
+		FROM bot_flows
+		WHERE is_active = true
+			AND trigger_type IN ('client_inactivity', 'trigger_client_inactivity', 'no_response', 'trigger_no_response')
+		ORDER BY priority DESC, created_at ASC
+	`)
+	if err != nil {
+		log.Printf("[BOT] Failed to query client inactivity flows: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var flowID, companyID, triggerType string
+		var triggerValue *string
+		var priority int
+		var stopOnMatch bool
+		var nodesJSON, edgesJSON json.RawMessage
+		if err := rows.Scan(&flowID, &companyID, &triggerType, &triggerValue, &nodesJSON, &edgesJSON, &priority, &stopOnMatch); err != nil {
+			continue
+		}
+
+		nodes, err := parseBotNodes(nodesJSON)
+		if err != nil || len(nodes) == 0 {
+			continue
+		}
+		inactivityMinutes := getTriggerConfigInt(nodes, triggerType, "inactivity_minutes", 0)
+		if inactivityMinutes <= 0 {
+			inactivityMinutes = getTriggerConfigInt(nodes, triggerType, "timeout_minutes", 30)
+		}
+		if triggerValue != nil && strings.TrimSpace(*triggerValue) != "" {
+			if parsed, err := strconv.Atoi(strings.TrimSpace(*triggerValue)); err == nil && parsed > 0 {
+				inactivityMinutes = parsed
+			}
+		}
+		channelID := getTriggerConfigString(nodes, triggerType, "channel_id")
+
+		conversations, err := e.findClientInactiveConversations(companyID, flowID, channelID, inactivityMinutes)
+		if err != nil {
+			log.Printf("[BOT] Failed to find client inactive conversations for flow %s: %v", flowID, err)
+			continue
+		}
+
+		for _, conv := range conversations {
+			if !e.reserveExecution(flowID, conv.conversationID, conv.contactID) {
+				continue
+			}
+			log.Printf("[BOT] Triggering client inactivity flow %s priority %d for conversation %s", flowID, priority, conv.conversationID)
+			go e.executeFlow(flowID, triggerType, companyID, conv.conversationID, conv.contactID, conv.instanceName, conv.phone, "", nodesJSON, edgesJSON)
+		}
+	}
+}
+
+type inactiveConversation struct {
+	conversationID string
+	contactID      string
+	channelID      string
+	phone          string
+	instanceName   string
+}
+
+func (e *BotEngine) findClientInactiveConversations(companyID, flowID, channelID string, inactivityMinutes int) ([]inactiveConversation, error) {
+	if inactivityMinutes <= 0 {
+		inactivityMinutes = 30
+	}
+	rows, err := e.db.Query(`
+		SELECT c.id::text,
+		       COALESCE(c.contact_id::text, ''),
+		       COALESCE(c.channel_id::text, ''),
+		       COALESCE(ct.phone, ''),
+		       COALESCE(wi.instance_name, '')
+		FROM conversations c
+		JOIN LATERAL (
+			SELECT m.sender_type, m.created_at
+			FROM messages m
+			WHERE m.conversation_id = c.id
+				AND m.company_id = c.company_id
+				AND COALESCE(m.is_private, false) = false
+			ORDER BY m.created_at DESC
+			LIMIT 1
+		) last_message ON true
+		LEFT JOIN contacts ct ON ct.id = c.contact_id
+		LEFT JOIN whatsapp_instances wi ON wi.channel_id = c.channel_id AND wi.company_id = c.company_id
+		WHERE c.company_id = $1
+			AND c.status IN ('open', 'pending', 'in_progress')
+			AND c.contact_id IS NOT NULL
+			AND last_message.sender_type IN ('user', 'bot')
+			AND last_message.created_at <= NOW() - ($2::int * INTERVAL '1 minute')
+			AND ($3 = '' OR c.channel_id::text = $3)
+			AND NOT EXISTS (
+				SELECT 1
+				FROM bot_executions be
+				WHERE be.flow_id = $4
+					AND be.conversation_id = c.id
+					AND be.started_at >= last_message.created_at
+			)
+		ORDER BY last_message.created_at ASC
+		LIMIT 50
+	`, companyID, inactivityMinutes, channelID, flowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	conversations := []inactiveConversation{}
+	for rows.Next() {
+		var conv inactiveConversation
+		if err := rows.Scan(&conv.conversationID, &conv.contactID, &conv.channelID, &conv.phone, &conv.instanceName); err != nil {
+			continue
+		}
+		conversations = append(conversations, conv)
+	}
+	return conversations, rows.Err()
 }
 
 func (e *BotEngine) conversationHasHumanOwner(companyID, conversationID string) bool {
@@ -1264,7 +1411,7 @@ func (e *BotEngine) executeNode(node BotNode, companyID, conversationID, contact
 	config := getNodeConfig(node)
 
 	switch nodeType {
-	case "trigger_new_conversation", "trigger_inbox_message", "trigger_keyword", "trigger_off_hours", "trigger_tag_added", "trigger_funnel_stage", "trigger_no_response", "trigger_contact_created", "trigger_campaign_replied", "trigger_conversation_closed":
+	case "trigger_new_conversation", "trigger_inbox_message", "trigger_keyword", "trigger_off_hours", "trigger_tag_added", "trigger_funnel_stage", "trigger_no_response", "trigger_client_inactivity", "trigger_contact_created", "trigger_campaign_replied", "trigger_conversation_closed":
 		return nil
 	case "send_message", "send_text":
 		msg, _ := config["message"].(string)
