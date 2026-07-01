@@ -544,8 +544,8 @@ export default function ConversationsPage() {
     }
   }
 
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const sendMessage = async (e?: React.FormEvent) => {
+    e?.preventDefault()
     if (!newMessage.trim() || !selectedConv) return
 
     const tempId = `temp-${Date.now()}`
@@ -1551,8 +1551,8 @@ export default function ConversationsPage() {
 
                 {/* Input */}
                 <div className="flex-1 relative">
-                  <input
-                    type="text"
+                  <textarea
+                    rows={1}
                     value={newMessage}
                     onChange={(e) => {
                       const val = e.target.value
@@ -1580,17 +1580,20 @@ export default function ConversationsPage() {
                         } else if (e.key === 'ArrowUp') {
                           e.preventDefault()
                           setSelectedQuickReplyIndex((prev) => Math.max(prev - 1, 0))
-                        } else if (e.key === 'Enter' && filtered.length > 0) {
+                        } else if (e.key === 'Enter' && !e.shiftKey && filtered.length > 0) {
                           e.preventDefault()
                           setNewMessage(filtered[selectedQuickReplyIndex].content)
                           setShowQuickReplies(false)
                         } else if (e.key === 'Escape') {
                           setShowQuickReplies(false)
                         }
+                      } else if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        sendMessage()
                       }
                     }}
                     placeholder="Digite uma mensagem... (/ para atalhos)"
-                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500/20 outline-none pr-10"
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500/20 outline-none pr-10 resize-none min-h-[46px] max-h-32"
                   />
 
                   {/* Quick Replies Dropdown */}

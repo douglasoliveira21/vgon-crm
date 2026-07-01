@@ -50,12 +50,17 @@ func (s *ContactService) GetContacts(companyID string, search string, limit, off
 	}
 
 	// Count query
-	countQuery := "SELECT COUNT(*) FROM contacts WHERE company_id = $1"
+	countQuery := `
+		SELECT COUNT(*)
+		FROM contacts c
+		LEFT JOIN customer_companies cc ON c.customer_company_id = cc.id
+		WHERE c.company_id = $1
+	`
 	args := []interface{}{companyID}
 	argIdx := 2
 
 	if search != "" {
-		countQuery += fmt.Sprintf(" AND (name ILIKE $%d OR phone ILIKE $%d OR email ILIKE $%d)", argIdx, argIdx, argIdx)
+		countQuery += fmt.Sprintf(" AND (c.name ILIKE $%d OR c.phone ILIKE $%d OR c.email ILIKE $%d OR c.company_name ILIKE $%d OR cc.name ILIKE $%d)", argIdx, argIdx, argIdx, argIdx, argIdx)
 		args = append(args, "%"+search+"%")
 		argIdx++
 	}
@@ -76,12 +81,12 @@ func (s *ContactService) GetContacts(companyID string, search string, limit, off
 	dataArgIdx := 2
 
 	if search != "" {
-		query += fmt.Sprintf(" AND (name ILIKE $%d OR phone ILIKE $%d OR email ILIKE $%d)", dataArgIdx, dataArgIdx, dataArgIdx)
+		query += fmt.Sprintf(" AND (c.name ILIKE $%d OR c.phone ILIKE $%d OR c.email ILIKE $%d OR c.company_name ILIKE $%d OR cc.name ILIKE $%d)", dataArgIdx, dataArgIdx, dataArgIdx, dataArgIdx, dataArgIdx)
 		dataArgs = append(dataArgs, "%"+search+"%")
 		dataArgIdx++
 	}
 
-	query += " ORDER BY updated_at DESC"
+	query += " ORDER BY LOWER(COALESCE(NULLIF(c.name, ''), NULLIF(c.phone, ''), NULLIF(c.email, ''), '')), c.created_at DESC"
 	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", dataArgIdx, dataArgIdx+1)
 	dataArgs = append(dataArgs, limit, offset)
 

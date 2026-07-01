@@ -6,6 +6,8 @@ import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { Search, Plus, Edit2, Trash2, Phone, Mail, MapPin, Building, Tag, MessageSquare } from 'lucide-react'
 
+const PAGE_SIZE = 25
+
 interface Contact {
   id: string
   name?: string
@@ -34,19 +36,32 @@ export default function ContactsPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
   const [showForm, setShowForm] = useState(false)
   const [editingContact, setEditingContact] = useState<Contact | null>(null)
   const [companies, setCompanies] = useState<CustomerCompany[]>([])
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   useEffect(() => {
     fetchContacts()
+  }, [search, page])
+
+  useEffect(() => {
     fetchCompanies()
-  }, [search])
+  }, [])
 
   const fetchContacts = async () => {
+    setLoading(true)
     try {
-      const response = await api.get('/contacts', { params: { search, limit: 50 } })
-      setContacts(response.data.contacts || [])
+      const response = await api.get('/contacts', {
+        params: { search, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE },
+      })
+      const sortedContacts = [...(response.data.contacts || [])].sort((a, b) =>
+        (a.name || a.phone || a.email || '').localeCompare(b.name || b.phone || b.email || '', 'pt-BR', {
+          sensitivity: 'base',
+        })
+      )
+      setContacts(sortedContacts)
       setTotal(response.data.total || 0)
     } catch (error) {
       console.error('Error:', error)
@@ -108,8 +123,11 @@ export default function ContactsPage() {
         <input
           type="text"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar por nome, telefone ou e-mail..."
+          onChange={(e) => {
+            setSearch(e.target.value)
+            setPage(1)
+          }}
+          placeholder="Buscar por nome, telefone, e-mail ou empresa..."
           className="input pl-10"
         />
       </div>
@@ -198,6 +216,32 @@ export default function ContactsPage() {
           </div>
         )}
       </div>
+
+      {total > PAGE_SIZE && (
+        <div className="flex items-center justify-between mt-4 text-sm text-gray-600">
+          <span>
+            Página {page} de {totalPages} · {total} contatos
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              disabled={page === 1 || loading}
+              className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Anterior
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+              disabled={page >= totalPages || loading}
+              className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Próxima
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Contact Form Modal */}
       {showForm && (
