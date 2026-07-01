@@ -88,10 +88,12 @@ const TRAILING_PUNCTUATION_REGEX = /[.,!?;:)\]}]+$/
 function renderTextWithLinks(text: string, isOwnMessage: boolean) {
   const parts: React.ReactNode[] = []
   let lastIndex = 0
+  const urlRegex = new RegExp(URL_REGEX)
+  let match: RegExpExecArray | null
 
-  for (const match of text.matchAll(URL_REGEX)) {
+  while ((match = urlRegex.exec(text)) !== null) {
     const rawUrl = match[0]
-    const index = match.index ?? 0
+    const index = match.index
     if (index > 0 && text[index - 1] === '@') {
       continue
     }
