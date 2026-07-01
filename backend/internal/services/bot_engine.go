@@ -726,21 +726,6 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 			}
 			if err == sql.ErrNoRows {
 				log.Printf("[BOT] No waiting execution for contact %s", contactID)
-				err = e.db.QueryRow(`
-					SELECT be.id, bf.id, bf.trigger_type, bf.nodes, bf.edges, COALESCE(be.context ->> 'current_node_id', ''), be.conversation_id::text
-					FROM bot_executions be
-					JOIN bot_flows bf ON bf.id = be.flow_id
-					WHERE be.contact_id = $1
-						AND bf.company_id = $2
-						AND be.status IN ('running', 'completed')
-						AND bf.is_active = true
-						AND be.started_at > NOW() - INTERVAL '30 minutes'
-					ORDER BY be.started_at DESC
-					LIMIT 1
-				`, contactID, companyID).Scan(&execID, &flowID, &triggerType, &nodesJSON, &edgesJSON, &waitingNodeID, &executionConversationID)
-				if err == nil && waitingNodeID != "" {
-					log.Printf("[BOT] Falling back to recent execution %s from conversation %s for contact %s", execID, executionConversationID, contactID)
-				}
 			}
 		} else {
 			log.Printf("[BOT] Could not load waiting execution for conversation %s: %v", conversationID, err)
