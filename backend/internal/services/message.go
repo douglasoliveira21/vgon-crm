@@ -158,6 +158,11 @@ func (s *MessageService) GetConversations(companyID string, status string, assig
 		args = append(args, conversationIDs[0])
 		argIdx++
 	}
+	if len(conversationIDs) > 1 && conversationIDs[1] != "" {
+		query += fmt.Sprintf(" AND c.contact_id = $%d", argIdx)
+		args = append(args, conversationIDs[1])
+		argIdx++
+	}
 
 	if status != "" {
 		// Support comma-separated status values

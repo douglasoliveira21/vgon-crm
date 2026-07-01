@@ -105,12 +105,13 @@ func GetConversations(svc *services.Container) fiber.Handler {
 		status := c.Query("status")
 		teamID := c.Query("team_id")
 		channelID := c.Query("channel")
+		contactID := c.Query("contact_id")
 		assignedTo := c.Query("assigned_to")
 		unassigned := c.Query("unassigned")
 		limit := c.QueryInt("limit", 50)
 		offset := c.QueryInt("offset", 0)
 
-		conversations, err := svc.Message.GetConversations(companyID, status, assignedTo, teamID, channelID, unassigned == "true", limit, offset)
+		conversations, err := svc.Message.GetConversations(companyID, status, assignedTo, teamID, channelID, unassigned == "true", limit, offset, "", contactID)
 		if err != nil {
 			log.Printf("[CONVERSATIONS] failed to list conversations for company %s: %v", companyID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})

@@ -239,10 +239,33 @@ function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campa
 
   useEffect(() => {
     api.get('/tags').then(res => setTags(res.data.tags || [])).catch(() => {})
-    api.get('/contacts', { params: { limit: 200 } }).then(res => {
-      setAllContacts((res.data.contacts || []).map((c: any) => ({ id: c.id, name: c.name || c.phone, phone: c.phone })))
-    }).catch(() => {})
+    loadAllContacts()
   }, [])
+
+  const loadAllContacts = async () => {
+    const pageSize = 500
+    let offset = 0
+    let total = 0
+    const contacts: Array<{id: string; name: string; phone: string}> = []
+
+    try {
+      do {
+        const response = await api.get('/contacts', { params: { limit: pageSize, offset } })
+        const pageContacts = response.data.contacts || []
+        total = response.data.total || pageContacts.length
+        contacts.push(
+          ...pageContacts
+            .filter((c: any) => c.phone)
+            .map((c: any) => ({ id: c.id, name: c.name || c.phone, phone: c.phone }))
+        )
+        offset += pageSize
+      } while (offset < total)
+
+      setAllContacts(contacts)
+    } catch {
+      setAllContacts(contacts)
+    }
+  }
 
   const searchContact = (query: string) => {
     setContactSearch(query)

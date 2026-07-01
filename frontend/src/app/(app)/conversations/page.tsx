@@ -1759,7 +1759,16 @@ export default function ConversationsPage() {
 
       {/* Right Panel - Contact */}
       {selectedConv && (
-        <ContactPanel conversation={selectedConv} users={users} teams={teams} onAssignUser={transferToUser} onAssignTeam={transferToTeam} onUnassign={unassignConversation} onUnassignTeam={unassignTeam} />
+        <ContactPanel
+          conversation={selectedConv}
+          users={users}
+          teams={teams}
+          onAssignUser={transferToUser}
+          onAssignTeam={transferToTeam}
+          onUnassign={unassignConversation}
+          onUnassignTeam={unassignTeam}
+          onSelectConversation={selectConversation}
+        />
       )}
 
       {/* Transfer Modal */}
@@ -2093,11 +2102,30 @@ function ConversationSLABar({ conversation }: { conversation: Conversation }) {
 }
 
 // Contact Panel with Tags and Funnel
-function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, onUnassign, onUnassignTeam }: { conversation: Conversation; users: UserItem[]; teams: TeamItem[]; onAssignUser: (userId: string) => void; onAssignTeam: (teamId: string) => void; onUnassign: () => void; onUnassignTeam: () => void }) {
+function ContactPanel({
+  conversation,
+  users,
+  teams,
+  onAssignUser,
+  onAssignTeam,
+  onUnassign,
+  onUnassignTeam,
+  onSelectConversation,
+}: {
+  conversation: Conversation
+  users: UserItem[]
+  teams: TeamItem[]
+  onAssignUser: (userId: string) => void
+  onAssignTeam: (teamId: string) => void
+  onUnassign: () => void
+  onUnassignTeam: () => void
+  onSelectConversation: (conversation: Conversation) => void
+}) {
   const [tags, setTags] = useState<Array<{id: string; name: string; color: string}>>([])
   const [contactTags, setContactTags] = useState<Array<{id: string; name: string; color: string}>>([])
   const [funnels, setFunnels] = useState<Array<{id: string; name: string; stages: Array<{id: string; name: string}>}>>([])
   const [contactDeals, setContactDeals] = useState<ContactDeal[]>([])
+  const [contactConversations, setContactConversations] = useState<Conversation[]>([])
   const [showTagSelect, setShowTagSelect] = useState(false)
   const [showFunnelSelect, setShowFunnelSelect] = useState(false)
   const [showAssignUser, setShowAssignUser] = useState(false)
@@ -2107,16 +2135,19 @@ function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, 
     if (!conversation.contact_id) {
       setContactTags([])
       setContactDeals([])
+      setContactConversations([])
       return
     }
 
-    const [contactRes, dealsRes] = await Promise.all([
+    const [contactRes, dealsRes, conversationsRes] = await Promise.all([
       api.get(`/contacts/${conversation.contact_id}`).catch(() => null),
       api.get('/deals', { params: { contact_id: conversation.contact_id } }).catch(() => null),
+      api.get('/conversations', { params: { contact_id: conversation.contact_id, limit: 100 } }).catch(() => null),
     ])
 
     setContactTags(contactRes?.data?.tags || [])
     setContactDeals((dealsRes?.data?.deals || []).filter((deal: ContactDeal) => deal.status === 'open'))
+    setContactConversations(conversationsRes?.data?.conversations || [])
   }
 
   useEffect(() => {
@@ -2220,6 +2251,56 @@ function ContactPanel({ conversation, users, teams, onAssignUser, onAssignTeam, 
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-950">
           <label className="text-xs font-medium text-gray-400 uppercase">Canal</label>
           <p className="mt-2 text-sm font-semibold text-gray-900 dark:text-white">{conversation.channel_name || 'WhatsApp'}</p>
+        </div>
+
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-950">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <label className="text-xs font-medium text-gray-400 uppercase">Histórico de conversas</label>
+            <span className="text-[11px] text-gray-400">{contactConversations.length}</span>
+          </div>
+          <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+            {contactConversations.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  if (item.id !== conversation.id) onSelectConversation(item)
+                }}
+                className={clsx(
+                  'w-full rounded-lg border px-3 py-2 text-left transition-colors',
+                  item.id === conversation.id
+                    ? 'border-primary-200 bg-primary-50'
+                    : 'border-gray-200 bg-white hover:border-primary-200 hover:bg-primary-50/60 dark:border-gray-800 dark:bg-gray-900'
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-xs font-semibold text-gray-800 dark:text-gray-100">
+                    {item.channel_name || 'Conversa'}
+                  </span>
+                  <span className="shrink-0 text-[10px] text-gray-400">
+                    {item.last_message_at ? new Date(item.last_message_at).toLocaleDateString('pt-BR') : '-'}
+                  </span>
+                </div>
+                <p className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">
+                  {item.last_message_preview || 'Sem mensagens'}
+                </p>
+                <span className={clsx(
+                  'mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium',
+                  item.status === 'resolved' ? 'bg-gray-100 text-gray-600' :
+                  item.status === 'in_progress' ? 'bg-blue-100 text-blue-700' :
+                  item.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
+                  'bg-green-100 text-green-700'
+                )}>
+                  {item.status === 'resolved' ? 'Resolvida' :
+                   item.status === 'in_progress' ? 'Em atendimento' :
+                   item.status === 'pending' ? 'Pendente' : 'Aberta'}
+                </span>
+              </button>
+            ))}
+            {contactConversations.length === 0 && (
+              <p className="text-xs text-gray-400">Nenhum histórico encontrado</p>
+            )}
+          </div>
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-950">
