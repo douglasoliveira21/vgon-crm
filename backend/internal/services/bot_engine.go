@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -339,6 +340,7 @@ func chooseNextNodeID(node BotNode, outgoing []BotEdge, conditionResult *bool, n
 	// that would falsely match short tokens and always return the first edge.
 	for _, edge := range outgoing {
 		if edgeMetaMatches(edge, preferred) {
+			log.Printf("[BOT] condition %s -> %v routed by label to %s", node.ID, *conditionResult, edge.Target)
 			return edge.Target
 		}
 	}
@@ -348,6 +350,7 @@ func chooseNextNodeID(node BotNode, outgoing []BotEdge, conditionResult *bool, n
 		if edgeMetaMatches(edge, opposite) {
 			for _, candidate := range outgoing {
 				if !edgeMetaMatches(candidate, opposite) {
+					log.Printf("[BOT] condition %s -> %v routed by opposite-label to %s", node.ID, *conditionResult, candidate.Target)
 					return candidate.Target
 				}
 			}
@@ -355,14 +358,64 @@ func chooseNextNodeID(node BotNode, outgoing []BotEdge, conditionResult *bool, n
 		}
 	}
 
-	// 3. Fall back to output order, matching the builder convention:
+	// 3. Geometry: in a tree layout the ENTÃO (true) branch continues to the SIDE
+	// while the SENÃO (false) branch drops DOWN. This is independent of creation
+	// order and of edge labels, so it also fixes older flows.
+	if targetID := chooseConditionTargetByGeometry(node, outgoing, *conditionResult, nodesByID); targetID != "" {
+		log.Printf("[BOT] condition %s -> %v routed by geometry to %s", node.ID, *conditionResult, targetID)
+		return targetID
+	}
+
+	// 4. Fall back to output order, matching the builder convention:
 	// Saída 1 (primeira aresta) = ENTÃO (verdadeiro), Saída 2 (última) = SENÃO (falso).
-	// buildOutgoingEdges sorts by handle/label/ID, so for handle-less condition edges
-	// this preserves creation order.
 	if *conditionResult {
+		log.Printf("[BOT] condition %s -> true routed by order to %s", node.ID, outgoing[0].Target)
 		return outgoing[0].Target
 	}
+	log.Printf("[BOT] condition %s -> false routed by order to %s", node.ID, outgoing[len(outgoing)-1].Target)
 	return outgoing[len(outgoing)-1].Target
+}
+
+// chooseConditionTargetByGeometry distinguishes the ENTÃO/SENÃO branches of a
+// condition using the position of the target nodes. The branch whose target is
+// positioned more "downward than sideways" is treated as the SENÃO (false)
+// branch; the other is the ENTÃO (true) branch. Returns "" when the two targets
+// are not clearly separable so the caller can fall back to another heuristic.
+func chooseConditionTargetByGeometry(node BotNode, outgoing []BotEdge, conditionResult bool, nodesByID map[string]BotNode) string {
+	if len(outgoing) < 2 || len(nodesByID) == 0 {
+		return ""
+	}
+	type candidate struct {
+		target    string
+		downScore float64
+	}
+	candidates := make([]candidate, 0, len(outgoing))
+	for _, edge := range outgoing {
+		target, ok := nodesByID[edge.Target]
+		if !ok {
+			continue
+		}
+		dx := target.Position["x"] - node.Position["x"]
+		dy := target.Position["y"] - node.Position["y"]
+		// Higher score = more downward relative to horizontal displacement.
+		candidates = append(candidates, candidate{target: edge.Target, downScore: dy - dx})
+	}
+	if len(candidates) < 2 {
+		return ""
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return candidates[i].downScore < candidates[j].downScore
+	})
+	trueTarget := candidates[0].target                  // least downward -> continues to the side
+	falseTarget := candidates[len(candidates)-1].target // most downward -> drops down
+	// Require a meaningful separation before trusting geometry.
+	if math.Abs(candidates[len(candidates)-1].downScore-candidates[0].downScore) < 1 {
+		return ""
+	}
+	if conditionResult {
+		return trueTarget
+	}
+	return falseTarget
 }
 
 // edgeMetaMatches reports whether an edge's semantic metadata (source/target handle
