@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -327,61 +326,60 @@ func chooseNextNodeID(node BotNode, outgoing []BotEdge, conditionResult *bool, n
 		return outgoing[0].Target
 	}
 
-	preferred := []string{"true", "then", "sim", "entao", "então", "yes", "1"}
+	trueTokens := []string{"true", "then", "sim", "entao", "então", "yes", "verdadeiro", "verdadeira"}
+	falseTokens := []string{"false", "else", "nao", "não", "senao", "senão", "no", "falso", "falsa"}
+
+	preferred, opposite := trueTokens, falseTokens
 	if !*conditionResult {
-		preferred = []string{"false", "else", "nao", "não", "senao", "senão", "no", "2"}
+		preferred, opposite = falseTokens, trueTokens
 	}
 
+	// 1. Match only against explicit edge metadata (handle/label), NEVER the edge ID.
+	// Auto-generated IDs (e.g. "edge_1719776001234") contain arbitrary digits/letters
+	// that would falsely match short tokens and always return the first edge.
 	for _, edge := range outgoing {
-		text := strings.ToLower(edge.SourceHandle + " " + edge.TargetHandle + " " + edge.Label + " " + edge.ID)
-		for _, token := range preferred {
-			if strings.Contains(text, token) {
-				return edge.Target
-			}
+		if edgeMetaMatches(edge, preferred) {
+			return edge.Target
 		}
 	}
 
-	if targetID := chooseConditionTargetByPosition(node, outgoing, *conditionResult, nodesByID); targetID != "" {
-		return targetID
+	// 2. If the opposite branch is explicitly labeled, take any edge that is NOT the opposite.
+	for _, edge := range outgoing {
+		if edgeMetaMatches(edge, opposite) {
+			for _, candidate := range outgoing {
+				if !edgeMetaMatches(candidate, opposite) {
+					return candidate.Target
+				}
+			}
+			break
+		}
 	}
 
+	// 3. Fall back to output order, matching the builder convention:
+	// Saída 1 (primeira aresta) = ENTÃO (verdadeiro), Saída 2 (última) = SENÃO (falso).
+	// buildOutgoingEdges sorts by handle/label/ID, so for handle-less condition edges
+	// this preserves creation order.
 	if *conditionResult {
 		return outgoing[0].Target
 	}
 	return outgoing[len(outgoing)-1].Target
 }
 
-func chooseConditionTargetByPosition(node BotNode, outgoing []BotEdge, conditionResult bool, nodesByID map[string]BotNode) string {
-	if len(outgoing) < 2 || len(nodesByID) == 0 {
-		return ""
-	}
-
-	type candidate struct {
-		target string
-		dx     float64
-	}
-	candidates := make([]candidate, 0, len(outgoing))
-	for _, edge := range outgoing {
-		target, ok := nodesByID[edge.Target]
-		if !ok {
+// edgeMetaMatches reports whether an edge's semantic metadata (source/target handle
+// or label) contains one of the given tokens. It intentionally ignores edge.ID.
+func edgeMetaMatches(edge BotEdge, tokens []string) bool {
+	for _, meta := range []string{edge.SourceHandle, edge.TargetHandle, edge.Label} {
+		meta = strings.ToLower(strings.TrimSpace(meta))
+		if meta == "" {
 			continue
 		}
-		candidates = append(candidates, candidate{
-			target: edge.Target,
-			dx:     math.Abs(target.Position["x"] - node.Position["x"]),
-		})
+		for _, token := range tokens {
+			if strings.Contains(meta, token) {
+				return true
+			}
+		}
 	}
-	if len(candidates) < 2 {
-		return ""
-	}
-
-	sort.SliceStable(candidates, func(i, j int) bool {
-		return candidates[i].dx < candidates[j].dx
-	})
-	if conditionResult {
-		return candidates[0].target
-	}
-	return candidates[len(candidates)-1].target
+	return false
 }
 
 func chooseNextNodeIDForResponse(outgoing []BotEdge, response string) string {

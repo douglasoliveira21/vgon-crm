@@ -306,15 +306,29 @@ export default function FlowEditorPage() {
   }
 
   const onConnect = useCallback((connection: Connection) => {
-    const edge: Edge = {
-      ...connection,
-      id: `edge_${Date.now()}`,
-      type: 'smoothstep',
-      animated: true,
-      markerEnd: { type: MarkerType.ArrowClosed },
-    } as Edge
-    setEdges((eds) => addEdge(edge, eds))
-  }, [setEdges])
+    const sourceNode = nodes.find((n) => n.id === connection.source)
+    const sourceType: string = sourceNode?.data?.nodeType || ''
+    const isCondition = sourceType.startsWith('condition')
+
+    setEdges((eds) => {
+      // For condition blocks the first output = ENTÃO (true), the second = SENÃO (false).
+      // Labeling the edge makes the branch explicit both visually and for the bot engine.
+      let label: string | undefined
+      if (isCondition) {
+        const existing = eds.filter((e) => e.source === connection.source).length
+        label = existing === 0 ? 'ENTÃO' : existing === 1 ? 'SENÃO' : undefined
+      }
+      const edge: Edge = {
+        ...connection,
+        id: `edge_${Date.now()}`,
+        type: 'smoothstep',
+        animated: true,
+        markerEnd: { type: MarkerType.ArrowClosed },
+        ...(label ? { label } : {}),
+      } as Edge
+      return addEdge(edge, eds)
+    })
+  }, [setEdges, nodes])
 
   const onNodeClick = useCallback((_: any, node: Node) => {
     setSelectedNode(node)
@@ -1037,9 +1051,10 @@ function NodeConfigPanel({
           />
         </div>
         <div className="p-3 bg-yellow-50 rounded-lg text-xs text-yellow-700">
-          💡 Conecte duas saídas deste bloco:<br/>
-          • Saída 1 → ENTÃO (condição verdadeira)<br/>
-          • Saída 2 → SENÃO (condição falsa)
+          💡 Conecte duas saídas deste bloco, nesta ordem:<br/>
+          • 1ª conexão → ENTÃO (condição verdadeira)<br/>
+          • 2ª conexão → SENÃO (condição falsa)<br/>
+          As saídas são rotuladas automaticamente. Para encadear opções, ligue a saída SENÃO na próxima condição.
         </div>
       </div>
     )
