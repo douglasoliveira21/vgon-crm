@@ -741,6 +741,8 @@ func CreateCampaign(svc *services.Container) fiber.Handler {
 			MessageContent string   `json:"message_content"`
 			MessageType    string   `json:"message_type"`
 			MediaURL       string   `json:"media_url"`
+			MediaBase64    string   `json:"media_base64"`
+			MediaFileName  string   `json:"media_filename"`
 			ScheduledAt    string   `json:"scheduled_at"`
 			SendSpeed      int      `json:"send_speed"`
 			TotalContacts  int      `json:"total_contacts"`
@@ -753,15 +755,33 @@ func CreateCampaign(svc *services.Container) fiber.Handler {
 		if strings.TrimSpace(body.Name) == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Nome da campanha é obrigatório"})
 		}
-		if strings.TrimSpace(body.MessageContent) == "" {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Mensagem da campanha é obrigatória"})
-		}
-
 		if body.SendSpeed == 0 {
 			body.SendSpeed = 30
 		}
 		if body.MessageType == "" {
 			body.MessageType = "text"
+		}
+		if body.MessageType == "text" && strings.TrimSpace(body.MessageContent) == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Mensagem da campanha é obrigatória"})
+		}
+		if body.MessageType != "text" && strings.TrimSpace(body.MediaBase64) == "" && strings.TrimSpace(body.MediaURL) == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Arquivo da campanha é obrigatório"})
+		}
+		if body.MessageType != "text" && strings.TrimSpace(body.MediaBase64) != "" {
+			ext := services.GetExtensionFromBase64(body.MediaBase64)
+			if ext == "" {
+				ext = services.GetExtensionFromType(body.MessageType)
+			}
+			if body.MediaFileName != "" {
+				if dotIdx := strings.LastIndex(body.MediaFileName, "."); dotIdx != -1 {
+					ext = body.MediaFileName[dotIdx:]
+				}
+			}
+			savedFileName, err := services.SaveBase64File(body.MediaBase64, ext)
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Erro ao salvar arquivo da campanha"})
+			}
+			body.MediaURL = "/uploads/" + savedFileName
 		}
 
 		id := uuid.New().String()
@@ -955,7 +975,7 @@ func prepareCampaignForSending(db *sql.DB, campaignID, companyID string) (string
 		JOIN contacts c ON c.id = cc.contact_id
 		WHERE cc.campaign_id = $1
 		  AND c.company_id = $2
-		  AND cc.status IN ('pending', 'failed')
+		  AND cc.status = 'pending'
 	`, campaignID, companyID).Scan(&pending)
 	if pending == 0 {
 		_, _ = db.Exec(`
@@ -969,13 +989,14 @@ func prepareCampaignForSending(db *sql.DB, campaignID, companyID string) (string
 }
 
 func runCampaignSender(svc *services.Container, campaignID, companyID, instanceName string) {
-	var message string
+	var message, messageType string
+	var mediaURL sql.NullString
 	var sendSpeed int
 	if err := svc.DB.QueryRow(`
-		SELECT message_content, COALESCE(send_speed, 30)
+		SELECT message_content, COALESCE(message_type, 'text'), media_url, COALESCE(send_speed, 30)
 		FROM campaigns
 		WHERE id = $1 AND company_id = $2
-	`, campaignID, companyID).Scan(&message, &sendSpeed); err != nil {
+	`, campaignID, companyID).Scan(&message, &messageType, &mediaURL, &sendSpeed); err != nil {
 		log.Printf("[CAMPAIGN] failed to load campaign %s: %v", campaignID, err)
 		return
 	}
@@ -987,24 +1008,7 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 		delay = time.Second
 	}
 
-	rows, err := svc.DB.Query(`
-		SELECT cc.id, c.id, COALESCE(c.name, ''), c.phone, COALESCE(c.email, ''), COALESCE(c.company_name, '')
-		FROM campaign_contacts cc
-		JOIN contacts c ON c.id = cc.contact_id
-		WHERE cc.campaign_id = $1
-		  AND c.company_id = $2
-		  AND cc.status IN ('pending', 'failed')
-		  AND c.phone IS NOT NULL
-		  AND COALESCE(c.is_opted_out, false) = false
-		ORDER BY cc.id
-	`, campaignID, companyID)
-	if err != nil {
-		log.Printf("[CAMPAIGN] failed to list recipients for %s: %v", campaignID, err)
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
+	for {
 		var status string
 		_ = svc.DB.QueryRow("SELECT status FROM campaigns WHERE id = $1 AND company_id = $2", campaignID, companyID).Scan(&status)
 		if status != "sending" {
@@ -1012,11 +1016,36 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 		}
 
 		var campaignContactID, contactID, name, phone, email, companyName string
-		if err := rows.Scan(&campaignContactID, &contactID, &name, &phone, &email, &companyName); err != nil {
+		err := svc.DB.QueryRow(`
+			SELECT cc.id, c.id, COALESCE(c.name, ''), c.phone, COALESCE(c.email, ''), COALESCE(c.company_name, '')
+			FROM campaign_contacts cc
+			JOIN contacts c ON c.id = cc.contact_id
+			WHERE cc.campaign_id = $1
+			  AND c.company_id = $2
+			  AND cc.status = 'pending'
+			  AND c.phone IS NOT NULL
+			  AND COALESCE(c.is_opted_out, false) = false
+			ORDER BY cc.id
+			LIMIT 1
+		`, campaignID, companyID).Scan(&campaignContactID, &contactID, &name, &phone, &email, &companyName)
+		if err == sql.ErrNoRows {
+			break
+		}
+		if err != nil {
+			log.Printf("[CAMPAIGN] failed to load next recipient for %s: %v", campaignID, err)
+			time.Sleep(delay)
 			continue
 		}
+
 		text := renderCampaignMessage(message, name, phone, email, companyName)
-		externalID, err := svc.Evolution.SendTextMessage(instanceName, phone, text)
+		var externalID string
+		if messageType == "audio" {
+			externalID, err = svc.Evolution.SendAudioMessage(instanceName, phone, publicCampaignMediaURL(svc, mediaURL.String))
+		} else if messageType == "image" || messageType == "video" || messageType == "document" {
+			externalID, err = svc.Evolution.SendMediaMessage(instanceName, phone, messageType, publicCampaignMediaURL(svc, mediaURL.String), text, "")
+		} else {
+			externalID, err = svc.Evolution.SendTextMessage(instanceName, phone, text)
+		}
 		if err != nil {
 			_, _ = svc.DB.Exec(`
 				UPDATE campaign_contacts SET status = 'failed', error_message = $1 WHERE id = $2
@@ -1035,9 +1064,18 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 	finalizeCampaignIfDone(svc.DB, campaignID)
 }
 
+func publicCampaignMediaURL(svc *services.Container, mediaURL string) string {
+	if strings.HasPrefix(mediaURL, "http://") || strings.HasPrefix(mediaURL, "https://") {
+		return mediaURL
+	}
+	publicURL := svc.Config.EvolutionWebhookURL
+	baseURL := strings.TrimSuffix(publicURL, "/api/webhooks/evolution")
+	return strings.TrimRight(baseURL, "/") + "/" + strings.TrimLeft(mediaURL, "/")
+}
+
 func finalizeCampaignIfDone(db *sql.DB, campaignID string) {
 	var remaining int
-	_ = db.QueryRow("SELECT COUNT(*) FROM campaign_contacts WHERE campaign_id = $1 AND status IN ('pending', 'failed')", campaignID).Scan(&remaining)
+	_ = db.QueryRow("SELECT COUNT(*) FROM campaign_contacts WHERE campaign_id = $1 AND status = 'pending'", campaignID).Scan(&remaining)
 	if remaining == 0 {
 		_, _ = db.Exec("UPDATE campaigns SET status = 'completed', completed_at = COALESCE(completed_at, NOW()), updated_at = NOW() WHERE id = $1 AND status = 'sending'", campaignID)
 	}

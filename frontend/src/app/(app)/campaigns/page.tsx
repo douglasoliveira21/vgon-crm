@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { Plus, Send, Pause, Play, BarChart3, Users, Check, Eye, X, Trash2 } from 'lucide-react'
+import { Plus, Send, Pause, Play, Users, Check, Eye, X, Trash2, AlertTriangle } from 'lucide-react'
 
 interface Campaign {
   id: string
@@ -135,7 +135,13 @@ export default function CampaignsPage() {
 
       {/* Campaigns List */}
       <div className="space-y-4">
-        {campaigns.map((campaign) => (
+        {campaigns.map((campaign) => {
+          const processedCount = campaign.sent_count + campaign.failed_count
+          const progress = campaign.total_contacts > 0
+            ? Math.min(100, Math.round((processedCount / campaign.total_contacts) * 100))
+            : 0
+
+          return (
           <div key={campaign.id} className="card p-5">
             <div className="flex items-center justify-between">
               <div>
@@ -148,6 +154,9 @@ export default function CampaignsPage() {
                   <span className="flex items-center gap-1"><Send size={14} /> {campaign.sent_count} enviadas</span>
                   <span className="flex items-center gap-1"><Check size={14} /> {campaign.delivered_count} entregues</span>
                   <span className="flex items-center gap-1"><Eye size={14} /> {campaign.read_count} lidas</span>
+                  {campaign.failed_count > 0 && (
+                    <span className="flex items-center gap-1 text-red-600"><AlertTriangle size={14} /> {campaign.failed_count} falhas</span>
+                  )}
                 </p>
               </div>
 
@@ -186,16 +195,17 @@ export default function CampaignsPage() {
                 <div className="w-full bg-gray-100 rounded-full h-2">
                   <div
                     className="bg-primary-600 h-2 rounded-full transition-all"
-                    style={{ width: `${Math.round((campaign.sent_count / campaign.total_contacts) * 100)}%` }}
+                    style={{ width: `${progress}%` }}
                   />
                 </div>
                 <p className="text-xs text-gray-400 mt-1">
-                  {Math.round((campaign.sent_count / campaign.total_contacts) * 100)}% enviado
+                  {progress}% processado
                 </p>
               </div>
             )}
           </div>
-        ))}
+          )
+        })}
 
         {campaigns.length === 0 && !loading && (
           <div className="card p-12 text-center">
@@ -227,6 +237,9 @@ function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campa
   const isEditing = Boolean(campaign)
   const [name, setName] = useState(campaign?.name || '')
   const [messageContent, setMessageContent] = useState(campaign?.message_content || '')
+  const [messageType, setMessageType] = useState(campaign?.message_type || 'text')
+  const [mediaBase64, setMediaBase64] = useState('')
+  const [mediaFileName, setMediaFileName] = useState('')
   const [sendSpeed, setSendSpeed] = useState(campaign?.send_speed || 30)
   const [targetType, setTargetType] = useState('all') // all, tag, selected
   const [filterTag, setFilterTag] = useState('')
@@ -292,15 +305,32 @@ function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campa
     setSelectedContacts(allContacts)
   }
 
+  const handleMediaFile = (file?: File) => {
+    if (!file) return
+    if (file.type.startsWith('image/')) setMessageType('image')
+    else if (file.type.startsWith('video/')) setMessageType('video')
+    else if (file.type.startsWith('audio/')) setMessageType('audio')
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      setMediaBase64(reader.result as string)
+      setMediaFileName(file.name)
+    }
+    reader.readAsDataURL(file)
+  }
+
   const handleCreate = async () => {
     if (!name.trim()) { toast.error('Nome é obrigatório'); return }
-    if (!messageContent.trim()) { toast.error('Mensagem é obrigatória'); return }
+    if (messageType === 'text' && !messageContent.trim()) { toast.error('Mensagem é obrigatória'); return }
+    if (messageType !== 'text' && !mediaBase64 && !isEditing) { toast.error('Selecione o arquivo da campanha'); return }
     setSaving(true)
     try {
       const payload = {
         name,
         message_content: messageContent,
-        message_type: 'text',
+        message_type: messageType,
+        media_base64: mediaBase64 || undefined,
+        media_filename: mediaFileName || undefined,
         send_speed: sendSpeed,
         filter_tag: targetType === 'tag' ? filterTag : undefined,
         contact_ids: targetType === 'selected' ? selectedContacts.map((contact) => contact.id) : undefined,
@@ -342,13 +372,51 @@ function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campa
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Mensagem</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de envio</label>
+            <div className="grid grid-cols-4 gap-2">
+              {[
+                { value: 'text', label: 'Texto' },
+                { value: 'image', label: 'Imagem' },
+                { value: 'video', label: 'Vídeo' },
+                { value: 'audio', label: 'Áudio' },
+              ].map((type) => (
+                <button
+                  key={type.value}
+                  type="button"
+                  onClick={() => setMessageType(type.value)}
+                  className={`rounded-lg border px-3 py-2 text-sm ${messageType === type.value ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                >
+                  {type.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {messageType !== 'text' && !isEditing && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Arquivo</label>
+              <input
+                type="file"
+                accept={messageType === 'image' ? 'image/*' : messageType === 'video' ? 'video/*' : 'audio/*'}
+                onChange={(e) => handleMediaFile(e.target.files?.[0])}
+                className="input"
+              />
+              {mediaFileName && (
+                <p className="mt-1 text-xs text-gray-500">Selecionado: {mediaFileName}</p>
+              )}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              {messageType === 'text' ? 'Mensagem' : messageType === 'audio' ? 'Legenda interna' : 'Legenda'}
+            </label>
             <textarea
               value={messageContent}
               onChange={(e) => setMessageContent(e.target.value)}
               className="input resize-none"
               rows={4}
-              placeholder="Olá {{nome}}, temos uma novidade para você!"
+              placeholder={messageType === 'text' ? 'Olá {{nome}}, temos uma novidade para você!' : 'Legenda opcional para acompanhar a mídia'}
             />
             <p className="text-xs text-gray-400 mt-1">
               Variáveis: {'{{nome}}'}, {'{{telefone}}'}, {'{{empresa}}'}, {'{{email}}'}
