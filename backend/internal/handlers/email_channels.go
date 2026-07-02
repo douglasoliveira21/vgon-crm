@@ -99,9 +99,17 @@ func DeleteEmailChannel(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
 		channelID := c.Params("id")
+
+		// Remove channel reference from related tables (don't delete the data)
+		svc.DB.Exec("UPDATE conversations SET channel_id = NULL WHERE channel_id = $1 AND company_id = $2", channelID, companyID)
+		svc.DB.Exec("UPDATE whatsapp_instances SET channel_id = NULL WHERE channel_id = $1", channelID)
+		svc.DB.Exec("UPDATE bot_flows SET channel_id = NULL WHERE channel_id = $1", channelID)
+		svc.DB.Exec("UPDATE call_queues SET channel_id = NULL WHERE channel_id = $1", channelID)
+
+		// Delete the channel
 		_, err := svc.DB.Exec("DELETE FROM channels WHERE id = $1 AND company_id = $2 AND type = 'email'", channelID, companyID)
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Falha ao remover canal: " + err.Error()})
 		}
 		return c.JSON(fiber.Map{"message": "Canal de e-mail removido"})
 	}
