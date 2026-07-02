@@ -865,6 +865,7 @@ func (s *EvolutionService) handleMessageUpdate(instanceName string, event map[st
 
 	// Update in database
 	s.db.Exec("UPDATE messages SET status = $1 WHERE external_id = $2", status, messageID)
+	s.updateCampaignMessageStatus(messageID, status)
 
 	// Broadcast status update via WebSocket
 	var companyID, conversationID string
@@ -877,6 +878,77 @@ func (s *EvolutionService) handleMessageUpdate(instanceName string, event map[st
 			"status":          status,
 		})
 	}
+}
+
+func (s *EvolutionService) updateCampaignMessageStatus(externalID, status string) {
+	var campaignID, campaignContactID string
+	err := s.db.QueryRow(`
+		UPDATE campaign_contact_messages
+		SET status = $1, updated_at = NOW()
+		WHERE external_id = $2
+		RETURNING campaign_id, campaign_contact_id
+	`, status, externalID).Scan(&campaignID, &campaignContactID)
+	if err != nil {
+		return
+	}
+
+	_, _ = s.db.Exec(`
+		UPDATE campaign_contacts cc
+		SET status = CASE
+				WHEN EXISTS (
+					SELECT 1 FROM campaign_contact_messages ccm
+					WHERE ccm.campaign_contact_id = cc.id AND ccm.status = 'read'
+				) THEN 'read'
+				WHEN EXISTS (
+					SELECT 1 FROM campaign_contact_messages ccm
+					WHERE ccm.campaign_contact_id = cc.id AND ccm.status = 'delivered'
+				) THEN 'delivered'
+				ELSE cc.status
+			END,
+			delivered_at = CASE
+				WHEN delivered_at IS NULL AND EXISTS (
+					SELECT 1 FROM campaign_contact_messages ccm
+					WHERE ccm.campaign_contact_id = cc.id AND ccm.status IN ('delivered', 'read')
+				) THEN NOW()
+				ELSE delivered_at
+			END,
+			read_at = CASE
+				WHEN read_at IS NULL AND EXISTS (
+					SELECT 1 FROM campaign_contact_messages ccm
+					WHERE ccm.campaign_contact_id = cc.id AND ccm.status = 'read'
+				) THEN NOW()
+				ELSE read_at
+			END
+		WHERE cc.id = $1 AND cc.status <> 'failed'
+	`, campaignContactID)
+
+	s.refreshCampaignCounters(campaignID)
+}
+
+func (s *EvolutionService) refreshCampaignCounters(campaignID string) {
+	_, _ = s.db.Exec(`
+		UPDATE campaigns c
+		SET total_contacts = stats.total_contacts,
+			sent_count = stats.sent_count,
+			delivered_count = stats.delivered_count,
+			read_count = stats.read_count,
+			replied_count = stats.replied_count,
+			failed_count = stats.failed_count,
+			updated_at = NOW()
+		FROM (
+			SELECT campaign_id,
+				   COUNT(*)::int AS total_contacts,
+				   COUNT(*) FILTER (WHERE status IN ('sent', 'delivered', 'read', 'replied'))::int AS sent_count,
+				   COUNT(*) FILTER (WHERE status IN ('delivered', 'read', 'replied'))::int AS delivered_count,
+				   COUNT(*) FILTER (WHERE status IN ('read', 'replied'))::int AS read_count,
+				   COUNT(*) FILTER (WHERE status = 'replied')::int AS replied_count,
+				   COUNT(*) FILTER (WHERE status = 'failed')::int AS failed_count
+			FROM campaign_contacts
+			WHERE campaign_id = $1
+			GROUP BY campaign_id
+		) stats
+		WHERE c.id = stats.campaign_id
+	`, campaignID)
 }
 
 func (s *EvolutionService) handleQRCodeUpdate(instanceName string, event map[string]interface{}) {

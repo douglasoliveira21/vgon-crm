@@ -1175,14 +1175,18 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 			continue
 		}
 
-		err = sendCampaignItems(svc, instanceName, phone, items, name, phone, email, companyName)
+		err = sendCampaignItems(svc, campaignID, campaignContactID, instanceName, phone, items, name, phone, email, companyName)
 		if err != nil {
 			_, _ = svc.DB.Exec(`
 				UPDATE campaign_contacts SET status = 'failed', error_message = $1 WHERE id = $2
 			`, err.Error(), campaignContactID)
 		} else {
 			_, _ = svc.DB.Exec(`
-				UPDATE campaign_contacts SET status = 'sent', sent_at = NOW(), error_message = NULL WHERE id = $1
+				UPDATE campaign_contacts
+				SET status = CASE WHEN status IN ('delivered', 'read', 'replied') THEN status ELSE 'sent' END,
+					sent_at = COALESCE(sent_at, NOW()),
+					error_message = NULL
+				WHERE id = $1
 			`, campaignContactID)
 		}
 		refreshCampaignCounters(svc.DB, campaignID)
@@ -1192,20 +1196,30 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 	finalizeCampaignIfDone(svc.DB, campaignID)
 }
 
-func sendCampaignItems(svc *services.Container, instanceName, phone string, items []campaignMessageItem, name, contactPhone, email, companyName string) error {
+func sendCampaignItems(svc *services.Container, campaignID, campaignContactID, instanceName, phone string, items []campaignMessageItem, name, contactPhone, email, companyName string) error {
 	for index, item := range items {
 		text := renderCampaignMessage(item.Content, name, contactPhone, email, companyName)
+		var externalID string
 		var err error
 		switch item.Type {
 		case "audio":
-			_, err = svc.Evolution.SendAudioMessage(instanceName, phone, publicCampaignMediaURL(svc, item.MediaURL))
+			externalID, err = svc.Evolution.SendAudioMessage(instanceName, phone, publicCampaignMediaURL(svc, item.MediaURL))
 		case "image", "video", "document":
-			_, err = svc.Evolution.SendMediaMessage(instanceName, phone, item.Type, publicCampaignMediaURL(svc, item.MediaURL), text, "")
+			externalID, err = svc.Evolution.SendMediaMessage(instanceName, phone, item.Type, publicCampaignMediaURL(svc, item.MediaURL), text, "")
 		default:
-			_, err = svc.Evolution.SendTextMessage(instanceName, phone, text)
+			externalID, err = svc.Evolution.SendTextMessage(instanceName, phone, text)
 		}
 		if err != nil {
 			return fmt.Errorf("%s %d: %w", campaignItemTypeLabel(item.Type), index+1, err)
+		}
+		if externalID != "" {
+			_, _ = svc.DB.Exec(`
+				INSERT INTO campaign_contact_messages (id, campaign_id, campaign_contact_id, external_id, message_type, item_index, status)
+				VALUES ($1, $2, $3, $4, $5, $6, 'sent')
+				ON CONFLICT (external_id) DO UPDATE SET
+					status = EXCLUDED.status,
+					updated_at = NOW()
+			`, uuid.New().String(), campaignID, campaignContactID, externalID, item.Type, index)
 		}
 		if index < len(items)-1 {
 			time.Sleep(time.Second)
@@ -1226,7 +1240,15 @@ func publicCampaignMediaURL(svc *services.Container, mediaURL string) string {
 func finalizeCampaignIfDone(db *sql.DB, campaignID string) {
 	refreshCampaignCounters(db, campaignID)
 	var remaining int
-	_ = db.QueryRow("SELECT COUNT(*) FROM campaign_contacts WHERE campaign_id = $1 AND status = 'pending'", campaignID).Scan(&remaining)
+	_ = db.QueryRow(`
+		SELECT COUNT(*)
+		FROM campaign_contacts cc
+		JOIN contacts c ON c.id = cc.contact_id
+		WHERE cc.campaign_id = $1
+		  AND cc.status = 'pending'
+		  AND c.phone IS NOT NULL
+		  AND COALESCE(c.is_opted_out, false) = false
+	`, campaignID).Scan(&remaining)
 	if remaining == 0 {
 		_, _ = db.Exec("UPDATE campaigns SET status = 'completed', completed_at = COALESCE(completed_at, NOW()), updated_at = NOW() WHERE id = $1 AND status = 'sending'", campaignID)
 	}
