@@ -3,7 +3,18 @@
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { Plus, Send, Pause, Play, Users, Check, Eye, X, Trash2, AlertTriangle } from 'lucide-react'
+import { Plus, Send, Pause, Play, Users, Check, Eye, X, Trash2, AlertTriangle, FileText, Image, Video, Music, ArrowUp, ArrowDown } from 'lucide-react'
+
+type CampaignContentType = 'text' | 'image' | 'video' | 'audio'
+
+interface CampaignContentItem {
+  client_id?: string
+  type: CampaignContentType
+  content: string
+  media_url?: string
+  media_base64?: string
+  media_filename?: string
+}
 
 interface Campaign {
   id: string
@@ -11,6 +22,8 @@ interface Campaign {
   status: string
   message_content?: string
   message_type: string
+  media_url?: string
+  content_items?: CampaignContentItem[]
   send_speed?: number
   total_contacts: number
   sent_count: number
@@ -151,6 +164,7 @@ export default function CampaignsPage() {
                 </div>
                 <p className="text-sm text-gray-500 mt-1 flex items-center gap-4">
                   <span className="flex items-center gap-1"><Users size={14} /> {campaign.total_contacts} contatos</span>
+                  <span className="flex items-center gap-1"><FileText size={14} /> {campaign.content_items?.length || 1} conteúdos</span>
                   <span className="flex items-center gap-1"><Send size={14} /> {campaign.sent_count} enviadas</span>
                   <span className="flex items-center gap-1"><Check size={14} /> {campaign.delivered_count} entregues</span>
                   <span className="flex items-center gap-1"><Eye size={14} /> {campaign.read_count} lidas</span>
@@ -236,10 +250,12 @@ export default function CampaignsPage() {
 function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campaign | null; onClose: () => void; onCreated: () => void }) {
   const isEditing = Boolean(campaign)
   const [name, setName] = useState(campaign?.name || '')
-  const [messageContent, setMessageContent] = useState(campaign?.message_content || '')
-  const [messageType, setMessageType] = useState(campaign?.message_type || 'text')
-  const [mediaBase64, setMediaBase64] = useState('')
-  const [mediaFileName, setMediaFileName] = useState('')
+  const initialItems: CampaignContentItem[] = campaign?.content_items?.length
+    ? campaign.content_items
+    : [{ type: (campaign?.message_type as CampaignContentType) || 'text', content: campaign?.message_content || '', media_url: campaign?.media_url }]
+  const [contentItems, setContentItems] = useState<CampaignContentItem[]>(
+    initialItems.map((item, index) => ({ ...item, client_id: `${Date.now()}-${index}` }))
+  )
   const [sendSpeed, setSendSpeed] = useState(campaign?.send_speed || 30)
   const [targetType, setTargetType] = useState('all') // all, tag, selected
   const [filterTag, setFilterTag] = useState('')
@@ -305,32 +321,61 @@ function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campa
     setSelectedContacts(allContacts)
   }
 
-  const handleMediaFile = (file?: File) => {
-    if (!file) return
-    if (file.type.startsWith('image/')) setMessageType('image')
-    else if (file.type.startsWith('video/')) setMessageType('video')
-    else if (file.type.startsWith('audio/')) setMessageType('audio')
+  const addContentItem = (type: CampaignContentType) => {
+    setContentItems((items) => [
+      ...items,
+      { client_id: `${Date.now()}-${type}`, type, content: '' },
+    ])
+  }
 
+  const updateContentItem = (index: number, patch: Partial<CampaignContentItem>) => {
+    setContentItems((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item))
+  }
+
+  const removeContentItem = (index: number) => {
+    setContentItems((items) => items.filter((_, itemIndex) => itemIndex !== index))
+  }
+
+  const moveContentItem = (index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction
+    if (nextIndex < 0 || nextIndex >= contentItems.length) return
+    const nextItems = [...contentItems]
+    const current = nextItems[index]
+    nextItems[index] = nextItems[nextIndex]
+    nextItems[nextIndex] = current
+    setContentItems(nextItems)
+  }
+
+  const handleMediaFile = (index: number, file?: File) => {
+    if (!file) return
     const reader = new FileReader()
     reader.onload = () => {
-      setMediaBase64(reader.result as string)
-      setMediaFileName(file.name)
+      updateContentItem(index, {
+        media_base64: reader.result as string,
+        media_filename: file.name,
+        media_url: undefined,
+      })
     }
     reader.readAsDataURL(file)
   }
 
   const handleCreate = async () => {
     if (!name.trim()) { toast.error('Nome é obrigatório'); return }
-    if (messageType === 'text' && !messageContent.trim()) { toast.error('Mensagem é obrigatória'); return }
-    if (messageType !== 'text' && !mediaBase64 && !isEditing) { toast.error('Selecione o arquivo da campanha'); return }
+    const validItems = contentItems.filter((item) =>
+      item.type === 'text'
+        ? item.content.trim()
+        : item.media_base64 || item.media_url
+    )
+    if (validItems.length === 0) { toast.error('Adicione pelo menos um texto ou arquivo'); return }
     setSaving(true)
     try {
+      const firstItem = validItems[0]
       const payload = {
         name,
-        message_content: messageContent,
-        message_type: messageType,
-        media_base64: mediaBase64 || undefined,
-        media_filename: mediaFileName || undefined,
+        message_content: firstItem.content,
+        message_type: firstItem.type,
+        media_url: firstItem.media_url,
+        content_items: validItems.map(({ client_id, ...item }) => item),
         send_speed: sendSpeed,
         filter_tag: targetType === 'tag' ? filterTag : undefined,
         contact_ids: targetType === 'selected' ? selectedContacts.map((contact) => contact.id) : undefined,
@@ -353,7 +398,7 @@ function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campa
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900">{isEditing ? 'Editar campanha' : 'Nova campanha'}</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
@@ -372,56 +417,85 @@ function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campa
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de envio</label>
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Conteúdo da campanha</label>
+                <p className="text-xs text-gray-400">Monte a ordem exata do que o contato vai receber.</p>
+              </div>
+            </div>
             <div className="grid grid-cols-4 gap-2">
-              {[
-                { value: 'text', label: 'Texto' },
-                { value: 'image', label: 'Imagem' },
-                { value: 'video', label: 'Vídeo' },
-                { value: 'audio', label: 'Áudio' },
-              ].map((type) => (
-                <button
-                  key={type.value}
-                  type="button"
-                  onClick={() => setMessageType(type.value)}
-                  className={`rounded-lg border px-3 py-2 text-sm ${messageType === type.value ? 'border-primary-500 bg-primary-50 text-primary-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-                >
-                  {type.label}
-                </button>
-              ))}
+              <button type="button" onClick={() => addContentItem('text')} className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"><FileText size={14} className="inline mr-1" /> Texto</button>
+              <button type="button" onClick={() => addContentItem('image')} className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"><Image size={14} className="inline mr-1" /> Imagem</button>
+              <button type="button" onClick={() => addContentItem('video')} className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"><Video size={14} className="inline mr-1" /> Vídeo</button>
+              <button type="button" onClick={() => addContentItem('audio')} className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"><Music size={14} className="inline mr-1" /> Áudio</button>
             </div>
           </div>
 
-          {messageType !== 'text' && !isEditing && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Arquivo</label>
-              <input
-                type="file"
-                accept={messageType === 'image' ? 'image/*' : messageType === 'video' ? 'video/*' : 'audio/*'}
-                onChange={(e) => handleMediaFile(e.target.files?.[0])}
-                className="input"
-              />
-              {mediaFileName && (
-                <p className="mt-1 text-xs text-gray-500">Selecionado: {mediaFileName}</p>
-              )}
+          <div className="space-y-3">
+            {contentItems.map((item, index) => (
+              <div key={item.client_id || index} className="rounded-lg border border-gray-200 p-3">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">
+                      {index + 1}. {item.type === 'text' ? 'Texto' : item.type === 'image' ? 'Imagem' : item.type === 'video' ? 'Vídeo' : 'Áudio'}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {item.type === 'text' ? 'Mensagem escrita' : item.type === 'audio' ? 'Arquivo de áudio' : 'Arquivo com legenda opcional'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button type="button" onClick={() => moveContentItem(index, -1)} disabled={index === 0} className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30"><ArrowUp size={14} /></button>
+                    <button type="button" onClick={() => moveContentItem(index, 1)} disabled={index === contentItems.length - 1} className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-30"><ArrowDown size={14} /></button>
+                    <button type="button" onClick={() => removeContentItem(index)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
+                  </div>
+                </div>
+
+                {item.type !== 'text' && (
+                  <div className="mb-3">
+                    <input
+                      type="file"
+                      accept={item.type === 'image' ? 'image/*' : item.type === 'video' ? 'video/*' : 'audio/*'}
+                      onChange={(e) => handleMediaFile(index, e.target.files?.[0])}
+                      className="input"
+                    />
+                    {(item.media_filename || item.media_url) && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        {item.media_filename ? `Selecionado: ${item.media_filename}` : 'Arquivo atual mantido'}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {(item.type === 'text' || item.type === 'image' || item.type === 'video') && (
+                  <textarea
+                    value={item.content}
+                    onChange={(e) => updateContentItem(index, { content: e.target.value })}
+                    className="input resize-none"
+                    rows={item.type === 'text' ? 4 : 2}
+                    placeholder={item.type === 'text' ? 'Olá {{nome}}, temos uma novidade para você!' : 'Legenda opcional'}
+                  />
+                )}
+                {item.type === 'audio' && (
+                  <p className="text-xs text-gray-400">Para enviar texto junto com áudio, adicione um bloco de texto antes ou depois do áudio.</p>
+                )}
+                <p className="text-xs text-gray-400 mt-1">
+                  Variáveis: {'{{nome}}'}, {'{{telefone}}'}, {'{{empresa}}'}, {'{{email}}'}
+                </p>
+              </div>
+            ))}
+
+            {contentItems.length === 0 && (
+              <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
+                Adicione texto, imagem, vídeo ou áudio para montar a campanha.
+              </div>
+            )}
+          </div>
+
+          {isEditing && (
+            <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
+              Ao editar uma campanha pausada, os contatos já enviados não recebem novamente. A nova sequência vale para os pendentes.
             </div>
           )}
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              {messageType === 'text' ? 'Mensagem' : messageType === 'audio' ? 'Legenda interna' : 'Legenda'}
-            </label>
-            <textarea
-              value={messageContent}
-              onChange={(e) => setMessageContent(e.target.value)}
-              className="input resize-none"
-              rows={4}
-              placeholder={messageType === 'text' ? 'Olá {{nome}}, temos uma novidade para você!' : 'Legenda opcional para acompanhar a mídia'}
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              Variáveis: {'{{nome}}'}, {'{{telefone}}'}, {'{{empresa}}'}, {'{{email}}'}
-            </p>
-          </div>
 
           {/* Target audience */}
           {!isEditing && (

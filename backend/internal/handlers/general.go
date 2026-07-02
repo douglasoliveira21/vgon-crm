@@ -698,13 +698,21 @@ func defaultBotFlowPriority(triggerType string) int {
 // CAMPAIGNS
 // ============================================
 
+type campaignMessageItem struct {
+	Type          string `json:"type"`
+	Content       string `json:"content"`
+	MediaURL      string `json:"media_url"`
+	MediaBase64   string `json:"media_base64,omitempty"`
+	MediaFileName string `json:"media_filename,omitempty"`
+}
+
 func GetCampaigns(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
 
 		rows, err := svc.DB.Query(`
-			SELECT id, name, status, message_content, message_type, send_speed, total_contacts, sent_count, delivered_count,
-				   read_count, replied_count, failed_count, scheduled_at, created_at
+			SELECT id, name, status, COALESCE(message_content, ''), COALESCE(message_type, 'text'), media_url, send_speed, total_contacts, sent_count, delivered_count,
+				   read_count, replied_count, failed_count, scheduled_at, created_at, COALESCE(variables, '[]'::jsonb)
 			FROM campaigns WHERE company_id = $1 ORDER BY created_at DESC
 		`, companyID)
 		if err != nil {
@@ -715,19 +723,125 @@ func GetCampaigns(svc *services.Container) fiber.Handler {
 		var campaigns []map[string]interface{}
 		for rows.Next() {
 			var id, name, status, msgContent, msgType string
+			var mediaURL sql.NullString
 			var total, sent, delivered, read, replied, failed, sendSpeed int
 			var scheduledAt, createdAt *string
-			rows.Scan(&id, &name, &status, &msgContent, &msgType, &sendSpeed, &total, &sent, &delivered, &read, &replied, &failed, &scheduledAt, &createdAt)
+			var variables []byte
+			rows.Scan(&id, &name, &status, &msgContent, &msgType, &mediaURL, &sendSpeed, &total, &sent, &delivered, &read, &replied, &failed, &scheduledAt, &createdAt, &variables)
+			contentItems := campaignItemsFromStored(json.RawMessage(variables), msgContent, msgType, mediaURL.String)
 			campaigns = append(campaigns, map[string]interface{}{
-				"id": id, "name": name, "status": status, "message_content": msgContent, "message_type": msgType, "send_speed": sendSpeed,
+				"id": id, "name": name, "status": status, "message_content": msgContent, "message_type": msgType, "media_url": mediaURL.String, "send_speed": sendSpeed,
 				"total_contacts": total, "sent_count": sent, "delivered_count": delivered,
 				"read_count": read, "replied_count": replied, "failed_count": failed,
-				"scheduled_at": scheduledAt, "created_at": createdAt,
+				"scheduled_at": scheduledAt, "created_at": createdAt, "content_items": contentItems,
 			})
 		}
 
 		return c.JSON(fiber.Map{"campaigns": campaigns})
 	}
+}
+
+func normalizeCampaignItems(items []campaignMessageItem, legacyContent, legacyType, legacyMediaURL, legacyMediaBase64, legacyMediaFileName string, allowExistingMedia bool) ([]campaignMessageItem, error) {
+	if len(items) == 0 {
+		items = []campaignMessageItem{{
+			Type:          legacyType,
+			Content:       legacyContent,
+			MediaURL:      legacyMediaURL,
+			MediaBase64:   legacyMediaBase64,
+			MediaFileName: legacyMediaFileName,
+		}}
+	}
+
+	normalized := make([]campaignMessageItem, 0, len(items))
+	for _, item := range items {
+		item.Type = strings.TrimSpace(strings.ToLower(item.Type))
+		item.Content = strings.TrimSpace(item.Content)
+		item.MediaURL = strings.TrimSpace(item.MediaURL)
+		item.MediaBase64 = strings.TrimSpace(item.MediaBase64)
+		item.MediaFileName = strings.TrimSpace(item.MediaFileName)
+		if item.Type == "" {
+			item.Type = "text"
+		}
+		if item.Type != "text" && item.Type != "image" && item.Type != "video" && item.Type != "audio" && item.Type != "document" {
+			return nil, fmt.Errorf("tipo de conteúdo inválido: %s", item.Type)
+		}
+		if item.Type == "text" {
+			if item.Content == "" {
+				continue
+			}
+			item.MediaURL = ""
+			item.MediaBase64 = ""
+			item.MediaFileName = ""
+			normalized = append(normalized, item)
+			continue
+		}
+		if item.MediaBase64 != "" {
+			ext := services.GetExtensionFromBase64(item.MediaBase64)
+			if ext == "" {
+				ext = services.GetExtensionFromType(item.Type)
+			}
+			if item.MediaFileName != "" {
+				if dotIdx := strings.LastIndex(item.MediaFileName, "."); dotIdx != -1 {
+					ext = item.MediaFileName[dotIdx:]
+				}
+			}
+			savedFileName, err := services.SaveBase64File(item.MediaBase64, ext)
+			if err != nil {
+				return nil, fmt.Errorf("erro ao salvar arquivo da campanha")
+			}
+			item.MediaURL = "/uploads/" + savedFileName
+		}
+		if item.MediaURL == "" && !allowExistingMedia {
+			return nil, fmt.Errorf("adicione o arquivo para %s", campaignItemTypeLabel(item.Type))
+		}
+		if item.MediaURL == "" {
+			continue
+		}
+		item.MediaBase64 = ""
+		item.MediaFileName = ""
+		normalized = append(normalized, item)
+	}
+	if len(normalized) == 0 {
+		return nil, fmt.Errorf("adicione pelo menos um texto ou arquivo para enviar")
+	}
+	return normalized, nil
+}
+
+func campaignItemTypeLabel(itemType string) string {
+	switch itemType {
+	case "image":
+		return "imagem"
+	case "video":
+		return "vídeo"
+	case "audio":
+		return "áudio"
+	case "document":
+		return "documento"
+	default:
+		return "texto"
+	}
+}
+
+func campaignPrimaryFields(items []campaignMessageItem) (string, string, string) {
+	if len(items) == 0 {
+		return "", "text", ""
+	}
+	first := items[0]
+	return first.Content, first.Type, first.MediaURL
+}
+
+func campaignItemsFromStored(raw json.RawMessage, legacyContent, legacyType, legacyMediaURL string) []campaignMessageItem {
+	var items []campaignMessageItem
+	if len(raw) > 0 && string(raw) != "null" {
+		_ = json.Unmarshal(raw, &items)
+	}
+	if len(items) == 0 {
+		if legacyType == "" {
+			legacyType = "text"
+		}
+		items = []campaignMessageItem{{Type: legacyType, Content: legacyContent, MediaURL: legacyMediaURL}}
+	}
+	return items
 }
 
 func CreateCampaign(svc *services.Container) fiber.Handler {
@@ -743,6 +857,7 @@ func CreateCampaign(svc *services.Container) fiber.Handler {
 			MediaURL       string   `json:"media_url"`
 			MediaBase64    string   `json:"media_base64"`
 			MediaFileName  string   `json:"media_filename"`
+			ContentItems   []campaignMessageItem `json:"content_items"`
 			ScheduledAt    string   `json:"scheduled_at"`
 			SendSpeed      int      `json:"send_speed"`
 			TotalContacts  int      `json:"total_contacts"`
@@ -761,28 +876,12 @@ func CreateCampaign(svc *services.Container) fiber.Handler {
 		if body.MessageType == "" {
 			body.MessageType = "text"
 		}
-		if body.MessageType == "text" && strings.TrimSpace(body.MessageContent) == "" {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Mensagem da campanha é obrigatória"})
+		contentItems, err := normalizeCampaignItems(body.ContentItems, body.MessageContent, body.MessageType, body.MediaURL, body.MediaBase64, body.MediaFileName, false)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
-		if body.MessageType != "text" && strings.TrimSpace(body.MediaBase64) == "" && strings.TrimSpace(body.MediaURL) == "" {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Arquivo da campanha é obrigatório"})
-		}
-		if body.MessageType != "text" && strings.TrimSpace(body.MediaBase64) != "" {
-			ext := services.GetExtensionFromBase64(body.MediaBase64)
-			if ext == "" {
-				ext = services.GetExtensionFromType(body.MessageType)
-			}
-			if body.MediaFileName != "" {
-				if dotIdx := strings.LastIndex(body.MediaFileName, "."); dotIdx != -1 {
-					ext = body.MediaFileName[dotIdx:]
-				}
-			}
-			savedFileName, err := services.SaveBase64File(body.MediaBase64, ext)
-			if err != nil {
-				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Erro ao salvar arquivo da campanha"})
-			}
-			body.MediaURL = "/uploads/" + savedFileName
-		}
+		body.MessageContent, body.MessageType, body.MediaURL = campaignPrimaryFields(contentItems)
+		contentItemsJSON, _ := json.Marshal(contentItems)
 
 		id := uuid.New().String()
 		tx, err := svc.DB.Begin()
@@ -792,9 +891,9 @@ func CreateCampaign(svc *services.Container) fiber.Handler {
 		defer tx.Rollback()
 
 		_, err = tx.Exec(`
-			INSERT INTO campaigns (id, company_id, channel_id, name, message_content, message_type, media_url, send_speed, total_contacts, created_by)
-			VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, $6, NULLIF($7, ''), $8, $9, $10)
-		`, id, companyID, body.ChannelID, body.Name, body.MessageContent, body.MessageType, body.MediaURL, body.SendSpeed, body.TotalContacts, userID)
+			INSERT INTO campaigns (id, company_id, channel_id, name, message_content, message_type, media_url, variables, send_speed, total_contacts, created_by)
+			VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, $6, NULLIF($7, ''), $8::jsonb, $9, $10, $11)
+		`, id, companyID, body.ChannelID, body.Name, body.MessageContent, body.MessageType, body.MediaURL, string(contentItemsJSON), body.SendSpeed, body.TotalContacts, userID)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -821,9 +920,14 @@ func UpdateCampaign(svc *services.Container) fiber.Handler {
 		campaignID := c.Params("id")
 
 		var body struct {
-			Name           string `json:"name"`
-			MessageContent string `json:"message_content"`
-			SendSpeed      int    `json:"send_speed"`
+			Name           string                `json:"name"`
+			MessageContent string                `json:"message_content"`
+			MessageType    string                `json:"message_type"`
+			MediaURL       string                `json:"media_url"`
+			MediaBase64    string                `json:"media_base64"`
+			MediaFileName  string                `json:"media_filename"`
+			ContentItems   []campaignMessageItem `json:"content_items"`
+			SendSpeed      int                   `json:"send_speed"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
@@ -831,18 +935,21 @@ func UpdateCampaign(svc *services.Container) fiber.Handler {
 		if strings.TrimSpace(body.Name) == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Nome da campanha é obrigatório"})
 		}
-		if strings.TrimSpace(body.MessageContent) == "" {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Mensagem da campanha é obrigatória"})
-		}
 		if body.SendSpeed <= 0 {
 			body.SendSpeed = 30
 		}
+		contentItems, err := normalizeCampaignItems(body.ContentItems, body.MessageContent, body.MessageType, body.MediaURL, body.MediaBase64, body.MediaFileName, true)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		}
+		body.MessageContent, body.MessageType, body.MediaURL = campaignPrimaryFields(contentItems)
+		contentItemsJSON, _ := json.Marshal(contentItems)
 
 		res, err := svc.DB.Exec(`
 			UPDATE campaigns
-			SET name = $1, message_content = $2, send_speed = $3, updated_at = NOW()
-			WHERE id = $4 AND company_id = $5 AND status IN ('draft', 'paused')
-		`, body.Name, body.MessageContent, body.SendSpeed, campaignID, companyID)
+			SET name = $1, message_content = $2, message_type = $3, media_url = NULLIF($4, ''), variables = $5::jsonb, send_speed = $6, updated_at = NOW()
+			WHERE id = $7 AND company_id = $8 AND status IN ('draft', 'paused')
+		`, body.Name, body.MessageContent, body.MessageType, body.MediaURL, string(contentItemsJSON), body.SendSpeed, campaignID, companyID)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -991,15 +1098,17 @@ func prepareCampaignForSending(db *sql.DB, campaignID, companyID string) (string
 func runCampaignSender(svc *services.Container, campaignID, companyID, instanceName string) {
 	var message, messageType string
 	var mediaURL sql.NullString
+	var variables []byte
 	var sendSpeed int
 	if err := svc.DB.QueryRow(`
-		SELECT message_content, COALESCE(message_type, 'text'), media_url, COALESCE(send_speed, 30)
+		SELECT COALESCE(message_content, ''), COALESCE(message_type, 'text'), media_url, COALESCE(variables, '[]'::jsonb), COALESCE(send_speed, 30)
 		FROM campaigns
 		WHERE id = $1 AND company_id = $2
-	`, campaignID, companyID).Scan(&message, &messageType, &mediaURL, &sendSpeed); err != nil {
+	`, campaignID, companyID).Scan(&message, &messageType, &mediaURL, &variables, &sendSpeed); err != nil {
 		log.Printf("[CAMPAIGN] failed to load campaign %s: %v", campaignID, err)
 		return
 	}
+	items := campaignItemsFromStored(json.RawMessage(variables), message, messageType, mediaURL.String)
 	if sendSpeed <= 0 {
 		sendSpeed = 30
 	}
@@ -1037,15 +1146,7 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 			continue
 		}
 
-		text := renderCampaignMessage(message, name, phone, email, companyName)
-		var externalID string
-		if messageType == "audio" {
-			externalID, err = svc.Evolution.SendAudioMessage(instanceName, phone, publicCampaignMediaURL(svc, mediaURL.String))
-		} else if messageType == "image" || messageType == "video" || messageType == "document" {
-			externalID, err = svc.Evolution.SendMediaMessage(instanceName, phone, messageType, publicCampaignMediaURL(svc, mediaURL.String), text, "")
-		} else {
-			externalID, err = svc.Evolution.SendTextMessage(instanceName, phone, text)
-		}
+		err = sendCampaignItems(svc, instanceName, phone, items, name, phone, email, companyName)
 		if err != nil {
 			_, _ = svc.DB.Exec(`
 				UPDATE campaign_contacts SET status = 'failed', error_message = $1 WHERE id = $2
@@ -1056,12 +1157,33 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 				UPDATE campaign_contacts SET status = 'sent', sent_at = NOW(), error_message = NULL WHERE id = $1
 			`, campaignContactID)
 			_, _ = svc.DB.Exec("UPDATE campaigns SET sent_count = sent_count + 1, updated_at = NOW() WHERE id = $1", campaignID)
-			_ = externalID
 		}
 		time.Sleep(delay)
 	}
 
 	finalizeCampaignIfDone(svc.DB, campaignID)
+}
+
+func sendCampaignItems(svc *services.Container, instanceName, phone string, items []campaignMessageItem, name, contactPhone, email, companyName string) error {
+	for index, item := range items {
+		text := renderCampaignMessage(item.Content, name, contactPhone, email, companyName)
+		var err error
+		switch item.Type {
+		case "audio":
+			_, err = svc.Evolution.SendAudioMessage(instanceName, phone, publicCampaignMediaURL(svc, item.MediaURL))
+		case "image", "video", "document":
+			_, err = svc.Evolution.SendMediaMessage(instanceName, phone, item.Type, publicCampaignMediaURL(svc, item.MediaURL), text, "")
+		default:
+			_, err = svc.Evolution.SendTextMessage(instanceName, phone, text)
+		}
+		if err != nil {
+			return fmt.Errorf("%s %d: %w", campaignItemTypeLabel(item.Type), index+1, err)
+		}
+		if index < len(items)-1 {
+			time.Sleep(time.Second)
+		}
+	}
+	return nil
 }
 
 func publicCampaignMediaURL(svc *services.Container, mediaURL string) string {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,6 +25,42 @@ type EvolutionService struct {
 	client    *http.Client
 	botEngine *BotEngine
 	glpiFlow  *GLPIFlowEngine
+}
+
+var nonDigitPhoneChars = regexp.MustCompile(`\D+`)
+
+func normalizeEvolutionPhone(phone string) string {
+	phone = strings.TrimSpace(phone)
+	if phone == "" || strings.Contains(phone, "@g.us") {
+		return phone
+	}
+	if at := strings.Index(phone, "@"); at >= 0 {
+		phone = phone[:at]
+	}
+	digits := nonDigitPhoneChars.ReplaceAllString(phone, "")
+	if len(digits) == 10 || len(digits) == 11 {
+		return "55" + digits
+	}
+	return digits
+}
+
+func evolutionSendError(kind string, statusCode int, body []byte) error {
+	var parsed struct {
+		Response struct {
+			Message []struct {
+				Number string `json:"number"`
+				Exists *bool  `json:"exists"`
+			} `json:"message"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal(body, &parsed); err == nil {
+		for _, msg := range parsed.Response.Message {
+			if msg.Exists != nil && !*msg.Exists {
+				return fmt.Errorf("número não encontrado no WhatsApp: %s", msg.Number)
+			}
+		}
+	}
+	return fmt.Errorf("evolution send %s returned %d: %s", kind, statusCode, string(body))
 }
 
 func NewEvolutionService(cfg *config.Config, db *sql.DB, wsHub *websocket.Hub) *EvolutionService {
@@ -387,6 +424,7 @@ func (s *EvolutionService) SendTextMessage(instanceName, phone, text string) (st
 
 // SendTextMessageWithQuote sends a text message with optional quoted message
 func (s *EvolutionService) SendTextMessageWithQuote(instanceName, phone, text, quotedMsgID string) (string, error) {
+	phone = normalizeEvolutionPhone(phone)
 	payload := map[string]interface{}{
 		"number":      phone,
 		"text":        text,
@@ -419,7 +457,7 @@ func (s *EvolutionService) SendTextMessageWithQuote(instanceName, phone, text, q
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("evolution send text returned %d: %s", resp.StatusCode, string(respBody))
+		return "", evolutionSendError("text", resp.StatusCode, respBody)
 	}
 
 	var result map[string]interface{}
@@ -438,6 +476,7 @@ func (s *EvolutionService) SendTextMessageWithQuote(instanceName, phone, text, q
 
 // SendMediaMessage sends a media message via WhatsApp
 func (s *EvolutionService) SendMediaMessage(instanceName, phone, mediaType, mediaURL, caption, fileName string) (string, error) {
+	phone = normalizeEvolutionPhone(phone)
 	payload := map[string]interface{}{
 		"number":    phone,
 		"mediatype": mediaType,
@@ -464,7 +503,7 @@ func (s *EvolutionService) SendMediaMessage(instanceName, phone, mediaType, medi
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("evolution send media returned %d: %s", resp.StatusCode, string(respBody))
+		return "", evolutionSendError("media", resp.StatusCode, respBody)
 	}
 
 	var result map[string]interface{}
@@ -483,6 +522,7 @@ func (s *EvolutionService) SendMediaMessage(instanceName, phone, mediaType, medi
 
 // SendAudioMessage sends an audio message via WhatsApp
 func (s *EvolutionService) SendAudioMessage(instanceName, phone, audioURL string) (string, error) {
+	phone = normalizeEvolutionPhone(phone)
 	payload := map[string]interface{}{
 		"number": phone,
 		"audio":  audioURL,
@@ -506,7 +546,7 @@ func (s *EvolutionService) SendAudioMessage(instanceName, phone, audioURL string
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("evolution send audio returned %d: %s", resp.StatusCode, string(respBody))
+		return "", evolutionSendError("audio", resp.StatusCode, respBody)
 	}
 
 	var result map[string]interface{}
@@ -525,6 +565,7 @@ func (s *EvolutionService) SendAudioMessage(instanceName, phone, audioURL string
 
 // SendAudioBase64 sends a base64 encoded audio via WhatsApp
 func (s *EvolutionService) SendAudioBase64(instanceName, phone, audioBase64 string) (string, error) {
+	phone = normalizeEvolutionPhone(phone)
 	// Remove data URI prefix if present (data:audio/ogg;base64,...)
 	base64Data := audioBase64
 	if len(base64Data) > 30 {
@@ -556,6 +597,9 @@ func (s *EvolutionService) SendAudioBase64(instanceName, phone, audioBase64 stri
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", evolutionSendError("audio", resp.StatusCode, respBody)
+	}
 
 	var result map[string]interface{}
 	json.Unmarshal(respBody, &result)
