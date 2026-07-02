@@ -711,9 +711,29 @@ func GetCampaigns(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 
 		rows, err := svc.DB.Query(`
-			SELECT id, name, status, COALESCE(message_content, ''), COALESCE(message_type, 'text'), media_url, send_speed, total_contacts, sent_count, delivered_count,
-				   read_count, replied_count, failed_count, scheduled_at, created_at, COALESCE(variables, '[]'::jsonb)
-			FROM campaigns WHERE company_id = $1 ORDER BY created_at DESC
+			SELECT c.id, c.name, c.status, COALESCE(c.message_content, ''), COALESCE(c.message_type, 'text'), c.media_url,
+				   COALESCE(c.send_speed, 30),
+				   COALESCE(NULLIF(stats.total_contacts, 0), c.total_contacts, 0) AS total_contacts,
+				   COALESCE(stats.sent_count, c.sent_count, 0) AS sent_count,
+				   COALESCE(stats.delivered_count, c.delivered_count, 0) AS delivered_count,
+				   COALESCE(stats.read_count, c.read_count, 0) AS read_count,
+				   COALESCE(stats.replied_count, c.replied_count, 0) AS replied_count,
+				   COALESCE(stats.failed_count, c.failed_count, 0) AS failed_count,
+				   c.scheduled_at, c.created_at, COALESCE(c.variables, '[]'::jsonb)
+			FROM campaigns c
+			LEFT JOIN (
+				SELECT campaign_id,
+					   COUNT(*)::int AS total_contacts,
+					   COUNT(*) FILTER (WHERE status IN ('sent', 'delivered', 'read', 'replied'))::int AS sent_count,
+					   COUNT(*) FILTER (WHERE status IN ('delivered', 'read', 'replied'))::int AS delivered_count,
+					   COUNT(*) FILTER (WHERE status IN ('read', 'replied'))::int AS read_count,
+					   COUNT(*) FILTER (WHERE status = 'replied')::int AS replied_count,
+					   COUNT(*) FILTER (WHERE status = 'failed')::int AS failed_count
+				FROM campaign_contacts
+				GROUP BY campaign_id
+			) stats ON stats.campaign_id = c.id
+			WHERE c.company_id = $1
+			ORDER BY c.created_at DESC
 		`, companyID)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -725,15 +745,17 @@ func GetCampaigns(svc *services.Container) fiber.Handler {
 			var id, name, status, msgContent, msgType string
 			var mediaURL sql.NullString
 			var total, sent, delivered, read, replied, failed, sendSpeed int
-			var scheduledAt, createdAt *string
+			var scheduledAt, createdAt sql.NullTime
 			var variables []byte
-			rows.Scan(&id, &name, &status, &msgContent, &msgType, &mediaURL, &sendSpeed, &total, &sent, &delivered, &read, &replied, &failed, &scheduledAt, &createdAt, &variables)
+			if err := rows.Scan(&id, &name, &status, &msgContent, &msgType, &mediaURL, &sendSpeed, &total, &sent, &delivered, &read, &replied, &failed, &scheduledAt, &createdAt, &variables); err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+			}
 			contentItems := campaignItemsFromStored(json.RawMessage(variables), msgContent, msgType, mediaURL.String)
 			campaigns = append(campaigns, map[string]interface{}{
 				"id": id, "name": name, "status": status, "message_content": msgContent, "message_type": msgType, "media_url": mediaURL.String, "send_speed": sendSpeed,
 				"total_contacts": total, "sent_count": sent, "delivered_count": delivered,
 				"read_count": read, "replied_count": replied, "failed_count": failed,
-				"scheduled_at": scheduledAt, "created_at": createdAt, "content_items": contentItems,
+				"scheduled_at": nullableTimeValue(scheduledAt), "created_at": nullableTimeValue(createdAt), "content_items": contentItems,
 			})
 		}
 
@@ -842,6 +864,13 @@ func campaignItemsFromStored(raw json.RawMessage, legacyContent, legacyType, leg
 		items = []campaignMessageItem{{Type: legacyType, Content: legacyContent, MediaURL: legacyMediaURL}}
 	}
 	return items
+}
+
+func nullableTimeValue(value sql.NullTime) interface{} {
+	if !value.Valid {
+		return nil
+	}
+	return value.Time
 }
 
 func CreateCampaign(svc *services.Container) fiber.Handler {
@@ -1151,13 +1180,12 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 			_, _ = svc.DB.Exec(`
 				UPDATE campaign_contacts SET status = 'failed', error_message = $1 WHERE id = $2
 			`, err.Error(), campaignContactID)
-			_, _ = svc.DB.Exec("UPDATE campaigns SET failed_count = failed_count + 1, updated_at = NOW() WHERE id = $1", campaignID)
 		} else {
 			_, _ = svc.DB.Exec(`
 				UPDATE campaign_contacts SET status = 'sent', sent_at = NOW(), error_message = NULL WHERE id = $1
 			`, campaignContactID)
-			_, _ = svc.DB.Exec("UPDATE campaigns SET sent_count = sent_count + 1, updated_at = NOW() WHERE id = $1", campaignID)
 		}
+		refreshCampaignCounters(svc.DB, campaignID)
 		time.Sleep(delay)
 	}
 
@@ -1196,11 +1224,38 @@ func publicCampaignMediaURL(svc *services.Container, mediaURL string) string {
 }
 
 func finalizeCampaignIfDone(db *sql.DB, campaignID string) {
+	refreshCampaignCounters(db, campaignID)
 	var remaining int
 	_ = db.QueryRow("SELECT COUNT(*) FROM campaign_contacts WHERE campaign_id = $1 AND status = 'pending'", campaignID).Scan(&remaining)
 	if remaining == 0 {
 		_, _ = db.Exec("UPDATE campaigns SET status = 'completed', completed_at = COALESCE(completed_at, NOW()), updated_at = NOW() WHERE id = $1 AND status = 'sending'", campaignID)
 	}
+}
+
+func refreshCampaignCounters(db *sql.DB, campaignID string) {
+	_, _ = db.Exec(`
+		UPDATE campaigns c
+		SET total_contacts = stats.total_contacts,
+			sent_count = stats.sent_count,
+			delivered_count = stats.delivered_count,
+			read_count = stats.read_count,
+			replied_count = stats.replied_count,
+			failed_count = stats.failed_count,
+			updated_at = NOW()
+		FROM (
+			SELECT campaign_id,
+				   COUNT(*)::int AS total_contacts,
+				   COUNT(*) FILTER (WHERE status IN ('sent', 'delivered', 'read', 'replied'))::int AS sent_count,
+				   COUNT(*) FILTER (WHERE status IN ('delivered', 'read', 'replied'))::int AS delivered_count,
+				   COUNT(*) FILTER (WHERE status IN ('read', 'replied'))::int AS read_count,
+				   COUNT(*) FILTER (WHERE status = 'replied')::int AS replied_count,
+				   COUNT(*) FILTER (WHERE status = 'failed')::int AS failed_count
+			FROM campaign_contacts
+			WHERE campaign_id = $1
+			GROUP BY campaign_id
+		) stats
+		WHERE c.id = stats.campaign_id
+	`, campaignID)
 }
 
 func renderCampaignMessage(template, name, phone, email, companyName string) string {
