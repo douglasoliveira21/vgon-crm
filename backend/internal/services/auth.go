@@ -97,11 +97,12 @@ func (s *AuthService) Login(req *LoginRequest) (*AuthResponse, error) {
 		return nil, fmt.Errorf("failed to generate tokens: %w", err)
 	}
 
-	// Save refresh token
+	// Save refresh token (hashed)
+	hashedRefresh := hashToken(refreshToken)
 	_, err = s.db.Exec(`
 		INSERT INTO refresh_tokens (id, user_id, token, expires_at)
 		VALUES ($1, $2, $3, $4)
-	`, uuid.New().String(), user.ID, refreshToken, time.Now().Add(s.cfg.JWTRefreshExpiry))
+	`, uuid.New().String(), user.ID, hashedRefresh, time.Now().Add(s.cfg.JWTRefreshExpiry))
 	if err != nil {
 		return nil, fmt.Errorf("failed to save refresh token: %w", err)
 	}
@@ -169,11 +170,11 @@ func (s *AuthService) Register(req *RegisterRequest) (*AuthResponse, error) {
 		return nil, fmt.Errorf("failed to generate tokens: %w", err)
 	}
 
-	// Save refresh token
+	// Save refresh token (hashed)
 	s.db.Exec(`
 		INSERT INTO refresh_tokens (id, user_id, token, expires_at)
 		VALUES ($1, $2, $3, $4)
-	`, uuid.New().String(), userID, refreshToken, time.Now().Add(s.cfg.JWTRefreshExpiry))
+	`, uuid.New().String(), userID, hashToken(refreshToken), time.Now().Add(s.cfg.JWTRefreshExpiry))
 
 	user := &models.User{
 		ID:        userID,
@@ -202,11 +203,12 @@ func (s *AuthService) RefreshToken(refreshTokenStr string) (*AuthResponse, error
 
 	claims = token.Claims.(*middleware.Claims)
 
-	// Check if token exists in DB
+	// Check if token exists in DB (compare hashed)
+	hashedRefresh := hashToken(refreshTokenStr)
 	var tokenID string
 	err = s.db.QueryRow(`
 		SELECT id FROM refresh_tokens WHERE token = $1 AND user_id = $2 AND expires_at > NOW()
-	`, refreshTokenStr, claims.UserID).Scan(&tokenID)
+	`, hashedRefresh, claims.UserID).Scan(&tokenID)
 	if err != nil {
 		return nil, fmt.Errorf("refresh token not found or expired")
 	}
@@ -222,11 +224,11 @@ func (s *AuthService) RefreshToken(refreshTokenStr string) (*AuthResponse, error
 		return nil, fmt.Errorf("failed to generate tokens: %w", err)
 	}
 
-	// Save new refresh token
+	// Save new refresh token (hashed)
 	s.db.Exec(`
 		INSERT INTO refresh_tokens (id, user_id, token, expires_at)
 		VALUES ($1, $2, $3, $4)
-	`, uuid.New().String(), claims.UserID, newRefreshToken, time.Now().Add(s.cfg.JWTRefreshExpiry))
+	`, uuid.New().String(), claims.UserID, hashToken(newRefreshToken), time.Now().Add(s.cfg.JWTRefreshExpiry))
 
 	return &AuthResponse{
 		AccessToken:  accessToken,
@@ -424,4 +426,11 @@ func (s *AuthService) GetUserByID(userID string) (*models.User, error) {
 		return nil, err
 	}
 	return &user, nil
+}
+
+
+// hashToken creates a SHA256 hash of a token for secure storage
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
 }

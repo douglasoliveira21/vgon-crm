@@ -83,6 +83,16 @@ func main() {
 		return c.SendStatus(fiber.StatusNoContent)
 	})
 
+	// Security headers
+	app.Use(func(c *fiber.Ctx) error {
+		c.Set("X-Frame-Options", "DENY")
+		c.Set("X-Content-Type-Options", "nosniff")
+		c.Set("X-XSS-Protection", "1; mode=block")
+		c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Set("Permissions-Policy", "camera=(), microphone=(self), geolocation=()")
+		return c.Next()
+	})
+
 	// Rate limiting
 	app.Use(middleware.RateLimiter(rdb, cfg.RateLimitMax, cfg.RateLimitWindow))
 

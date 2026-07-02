@@ -147,7 +147,6 @@ func RateLimiter(rdb *redis.Client, maxRequests int, window time.Duration) fiber
 		path := c.Path()
 		if c.Method() == fiber.MethodOptions ||
 			path == "/ws" ||
-			strings.HasPrefix(path, "/api/auth/") ||
 			strings.HasPrefix(path, "/api/webhooks/") {
 			return c.Next()
 		}
@@ -159,6 +158,17 @@ func RateLimiter(rdb *redis.Client, maxRequests int, window time.Duration) fiber
 			ip = realIP
 		}
 
+		// Stricter rate limit for auth endpoints (brute-force protection)
+		limit := maxRequests
+		dur := window
+		if strings.HasPrefix(path, "/api/auth/login") || strings.HasPrefix(path, "/api/auth/register") {
+			limit = 5
+			dur = time.Minute
+		} else if strings.HasPrefix(path, "/api/auth/") {
+			limit = 10
+			dur = time.Minute
+		}
+
 		key := fmt.Sprintf("rate_limit:%s:%s:%s", ip, c.Method(), path)
 
 		ctx := context.Background()
@@ -168,11 +178,11 @@ func RateLimiter(rdb *redis.Client, maxRequests int, window time.Duration) fiber
 		}
 
 		if count == 1 {
-			rdb.Expire(ctx, key, window)
+			rdb.Expire(ctx, key, dur)
 		}
 
-		if count > int64(maxRequests) {
-			c.Set("Retry-After", fmt.Sprintf("%.0f", window.Seconds()))
+		if count > int64(limit) {
+			c.Set("Retry-After", fmt.Sprintf("%.0f", dur.Seconds()))
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
 				"error": "Rate limit exceeded",
 			})
