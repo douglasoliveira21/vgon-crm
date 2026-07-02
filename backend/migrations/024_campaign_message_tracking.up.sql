@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS campaign_contact_messages (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY,
     campaign_id UUID NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
     campaign_contact_id UUID NOT NULL REFERENCES campaign_contacts(id) ON DELETE CASCADE,
     external_id TEXT NOT NULL UNIQUE,
