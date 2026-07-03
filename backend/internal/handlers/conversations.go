@@ -245,14 +245,15 @@ func CloseConversation(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 		conversationID := c.Params("id")
 
-		if err := svc.Message.CloseConversation(conversationID, companyID); err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-		}
-
-		// Notify widget visitor that the conversation was closed
+		// Notify widget visitor BEFORE closing (ensures WS is still active)
 		svc.WSHub.BroadcastToRoom("widget:"+conversationID, "conversation_closed", map[string]interface{}{
 			"conversation_id": conversationID,
 		})
+		log.Printf("[WIDGET] Sent conversation_closed to widget:%s", conversationID)
+
+		if err := svc.Message.CloseConversation(conversationID, companyID); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
 
 		// Fire any "conversation closed" bot flow (e.g. a farewell message).
 		// Runs asynchronously so it never blocks the close response.
