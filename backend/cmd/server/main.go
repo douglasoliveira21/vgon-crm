@@ -73,15 +73,28 @@ func main() {
 	app.Use(logger.New(logger.Config{
 		Format: "[${time}] ${status} - ${method} ${path} ${latency}\n",
 	}))
+
+	// Open CORS for widget routes (must be before the restrictive CORS)
+	app.Use(func(c *fiber.Ctx) error {
+		if strings.Contains(c.Path(), "/widget/") {
+			c.Set("Access-Control-Allow-Origin", "*")
+			c.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			c.Set("Access-Control-Allow-Headers", "Content-Type")
+			if c.Method() == "OPTIONS" {
+				return c.SendStatus(204)
+			}
+		}
+		return c.Next()
+	})
+
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     buildAllowedOrigins(cfg.FrontendURL),
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, X-Requested-With",
 		AllowMethods:     "GET, POST, PUT, DELETE, PATCH, OPTIONS",
 		AllowCredentials: false,
 		Next: func(c *fiber.Ctx) bool {
-			// Skip restrictive CORS for widget routes — they use their own open CORS.
-			path := c.Path()
-			return strings.Contains(path, "/widget/")
+			// Widget routes already handled above.
+			return strings.Contains(c.Path(), "/widget/")
 		},
 	}))
 	app.Options("*", func(c *fiber.Ctx) error {
