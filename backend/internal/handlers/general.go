@@ -1673,6 +1673,42 @@ func SendWidgetMessage(svc *services.Container) fiber.Handler {
 	}
 }
 
+func CloseWidgetConversation(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		widgetID := c.Params("id")
+		var body struct {
+			ConversationID string `json:"conversation_id"`
+			VisitorID      string `json:"visitor_id"`
+		}
+		if err := c.BodyParser(&body); err != nil || body.ConversationID == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "conversation_id required"})
+		}
+
+		var companyID string
+		if err := svc.DB.QueryRow("SELECT company_id FROM widgets WHERE id = $1 AND is_active = true", widgetID).Scan(&companyID); err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Widget not found"})
+		}
+
+		// Verify the conversation belongs to this company
+		var exists bool
+		svc.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM conversations WHERE id = $1 AND company_id = $2)", body.ConversationID, companyID).Scan(&exists)
+		if !exists {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Conversation not found"})
+		}
+
+		if err := svc.Message.CloseConversation(body.ConversationID, companyID); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		// Notify other widget connections and the CRM
+		svc.WSHub.BroadcastToRoom("widget:"+body.ConversationID, "conversation_closed", map[string]interface{}{
+			"conversation_id": body.ConversationID,
+		})
+
+		return c.JSON(fiber.Map{"message": "Conversation closed"})
+	}
+}
+
 func GetWidgetMessages(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		widgetID := c.Params("id")
@@ -1862,9 +1898,14 @@ func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
     css(panel,{position:"fixed",bottom:"92px",[side]:"22px",width:"370px",maxWidth:"calc(100vw - 32px)",height:"520px",maxHeight:"calc(100vh - 120px)",background:"#fff",borderRadius:"14px",boxShadow:"0 18px 50px rgba(0,0,0,.22)",overflow:"hidden",zIndex:"2147483647",fontFamily:"system-ui,-apple-system,sans-serif",display:"none",flexDirection:"column"});
     var hasIdentity=!!(savedName&&savedContact);
     var formHTML=hasIdentity?'':'<div id="vgon-identity" style="padding:12px;border-bottom:1px solid #e5e7eb;background:#fff"><input id="vgon-name" placeholder="Seu nome" value="'+esc(savedName)+'" style="width:100%%;box-sizing:border-box;margin-bottom:8px;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px"><input id="vgon-email" placeholder="Seu e-mail ou telefone" value="'+esc(savedContact)+'" style="width:100%%;box-sizing:border-box;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px"></div>';
-    panel.innerHTML='<div style="background:'+color+';color:white;padding:16px;font-weight:700;font-size:15px">'+(cfg.greeting_message||"Olá! Como podemos ajudar?")+'</div>'+formHTML+'<div id="vgon-log" style="flex:1;overflow-y:auto;padding:14px;background:#f8fafc;font-size:14px"></div><div id="vgon-typing" style="display:none;padding:4px 14px;font-size:12px;color:#6b7280;font-style:italic"></div><form id="vgon-form" style="padding:12px;border-top:1px solid #e5e7eb;background:#fff;display:flex;gap:8px"><input id="vgon-message" placeholder="Digite sua mensagem..." required style="flex:1;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px"><button type="submit" style="background:'+color+';color:white;border:0;border-radius:8px;padding:0 14px;cursor:pointer;font-size:18px">➤</button></form>';
+    panel.innerHTML='<div style="background:'+color+';color:white;padding:16px;font-weight:700;font-size:15px;display:flex;justify-content:space-between;align-items:center"><span>'+(cfg.greeting_message||"Olá! Como podemos ajudar?")+'</span><button id="vgon-close-btn" type="button" title="Encerrar conversa" style="background:none;border:none;color:white;font-size:18px;cursor:pointer;opacity:0.8;padding:0 4px">✕</button></div>'+formHTML+'<div id="vgon-log" style="flex:1;overflow-y:auto;padding:14px;background:#f8fafc;font-size:14px"></div><div id="vgon-typing" style="display:none;padding:4px 14px;font-size:12px;color:#6b7280;font-style:italic"></div><form id="vgon-form" style="padding:12px;border-top:1px solid #e5e7eb;background:#fff;display:flex;gap:8px"><input id="vgon-message" placeholder="Digite sua mensagem..." required style="flex:1;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px"><button type="submit" style="background:'+color+';color:white;border:0;border-radius:8px;padding:0 14px;cursor:pointer;font-size:18px">➤</button></form>';
     document.body.appendChild(panel);document.body.appendChild(bubble);
     bubble.onclick=function(){var showing=panel.style.display!=="none";panel.style.display=showing?"none":"flex";if(!showing){poll();connectWS();}};
+    panel.querySelector("#vgon-close-btn").onclick=function(){
+      if(!conversationId){panel.style.display="none";return;}
+      if(!confirm("Deseja encerrar esta conversa?"))return;
+      fetch(apiBase+"/api/widget/"+widgetId+"/close",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({conversation_id:conversationId,visitor_id:visitorId})}).then(function(){handleConversationClosed();}).catch(function(){handleConversationClosed();});
+    };
     poll();if(conversationId)connectWS();
     pollTimer=setInterval(poll,5000);
     panel.querySelector("#vgon-form").onsubmit=function(e){
