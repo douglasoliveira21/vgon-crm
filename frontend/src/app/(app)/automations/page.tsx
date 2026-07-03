@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { Plus, Bot, Play, Pause, Edit2, Trash2, Zap, Ticket, Search, Building2, Link2, Eye } from 'lucide-react'
+import { Plus, Bot, Play, Pause, Edit2, Trash2, Zap, Ticket, Search, Building2, Link2, Eye, Copy } from 'lucide-react'
 
 interface BotFlow {
   id: string
@@ -94,6 +94,20 @@ export default function AutomationsPage() {
       toast.success('Fluxo removido')
     } catch {
       toast.error('Erro ao remover')
+    }
+  }
+
+  const duplicateFlow = async (flow: BotFlow) => {
+    try {
+      const response = await api.post(`/bot-flows/${flow.id}/duplicate`)
+      toast.success('Automação duplicada')
+      await fetchFlows()
+      const newFlowId = response.data?.id
+      if (newFlowId && confirm('Deseja abrir a cópia para editar agora?')) {
+        router.push(`/automations/${newFlowId}`)
+      }
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error || 'Erro ao duplicar automação')
     }
   }
 
@@ -255,12 +269,21 @@ export default function AutomationsPage() {
                 <button
                   onClick={() => router.push(`/automations/${flow.id}`)}
                   className="p-2 text-gray-400 dark:text-gray-500 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-500/10 rounded-lg"
+                  title="Editar"
                 >
                   <Edit2 size={18} />
                 </button>
                 <button
+                  onClick={() => duplicateFlow(flow)}
+                  className="p-2 text-gray-400 dark:text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg"
+                  title="Duplicar"
+                >
+                  <Copy size={18} />
+                </button>
+                <button
                   onClick={() => deleteFlow(flow.id)}
                   className="p-2 text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg"
+                  title="Remover"
                 >
                   <Trash2 size={18} />
                 </button>

@@ -671,6 +671,40 @@ func UpdateBotFlow(svc *services.Container) fiber.Handler {
 	}
 }
 
+func DuplicateBotFlow(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		flowID := c.Params("id")
+
+		var name, botName, description, triggerType, triggerValue string
+		var priority int
+		var stopOnMatch bool
+		var nodes, edges json.RawMessage
+
+		err := svc.DB.QueryRow(`
+			SELECT name, COALESCE(bot_name, 'Assistente'), COALESCE(description, ''), trigger_type, COALESCE(trigger_value, ''),
+			       COALESCE(priority, 10), COALESCE(stop_on_match, true), COALESCE(nodes, '[]'::jsonb), COALESCE(edges, '[]'::jsonb)
+			FROM bot_flows
+			WHERE id = $1 AND company_id = $2
+		`, flowID, companyID).Scan(&name, &botName, &description, &triggerType, &triggerValue, &priority, &stopOnMatch, &nodes, &edges)
+		if err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Fluxo não encontrado"})
+		}
+
+		newID := uuid.New().String()
+		newName := strings.TrimSpace(name) + " (cópia)"
+		_, err = svc.DB.Exec(`
+			INSERT INTO bot_flows (id, company_id, name, bot_name, description, trigger_type, trigger_value, is_active, priority, stop_on_match, nodes, edges)
+			VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), false, $8, $9, $10, $11)
+		`, newID, companyID, newName, botName, description, triggerType, triggerValue, priority, stopOnMatch, nodes, edges)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"id": newID, "name": newName})
+	}
+}
+
 func DeleteBotFlow(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)

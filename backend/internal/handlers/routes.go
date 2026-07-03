@@ -163,6 +163,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	bots.Get("/", GetBotFlows(svc))
 	bots.Get("/:id", GetBotFlow(svc))
 	bots.Post("/", CreateBotFlow(svc))
+	bots.Post("/:id/duplicate", DuplicateBotFlow(svc))
 	bots.Put("/:id", UpdateBotFlow(svc))
 	bots.Delete("/:id", DeleteBotFlow(svc))
 
