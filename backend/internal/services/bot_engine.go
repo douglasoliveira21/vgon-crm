@@ -1549,42 +1549,7 @@ func (e *BotEngine) nodeSendMessage(node BotNode, companyID, conversationID, ins
 		return nil
 	}
 
-	// Replace variables
-	message = e.replaceVariables(message, companyID, conversationID, phone)
-	botName := e.botNameForConversation(companyID, conversationID)
-	outboundMessage := formatBotOutboundMessage(botName, message)
-
-	// Send via WhatsApp
-	var externalID string
-	if instanceName == "" || phone == "" {
-		return fmt.Errorf("cannot send bot message: instanceName='%s' phone='%s'", instanceName, phone)
-	}
-	var err error
-	externalID, err = e.evo.SendTextMessage(instanceName, phone, outboundMessage)
-	if err != nil {
-		log.Printf("[BOT] Failed to send message to %s via %s: %v", phone, instanceName, err)
-		return err
-	}
-	log.Printf("[BOT] Sent message to %s via %s", phone, instanceName)
-
-	// Save message
-	msgID := uuid.New().String()
-	e.db.Exec(`
-		INSERT INTO messages (id, conversation_id, company_id, sender_type, content, message_type, external_id, status, metadata)
-		VALUES ($1, $2, $3, 'bot', $4, 'text', $5, 'sent', jsonb_build_object('bot_name', $6::text))
-	`, msgID, conversationID, companyID, message, externalID, botName)
-
-	e.db.Exec("UPDATE conversations SET last_message_at = NOW(), last_message_preview = $1 WHERE id = $2", message, conversationID)
-
-	e.wsHub.BroadcastToCompany(companyID, "new_message", map[string]interface{}{
-		"id": msgID, "conversation_id": conversationID,
-		"sender_type": "bot", "content": message, "message_type": "text",
-		"sender_name": botName,
-		"metadata":    map[string]interface{}{"bot_name": botName},
-		"status":      "sent", "created_at": time.Now(),
-	})
-
-	return nil
+	return e.sendBotText(companyID, conversationID, instanceName, phone, message, "text")
 }
 
 func (e *BotEngine) nodeSendMedia(config map[string]interface{}, companyID, conversationID, instanceName, phone, mediaType string) error {
