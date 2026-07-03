@@ -1598,12 +1598,21 @@ func (e *BotEngine) nodeSendMedia(config map[string]interface{}, companyID, conv
 		return nil
 	}
 
-	var externalID string
+	// For webchat, save directly (no Evolution API)
 	if instanceName == "" || phone == "" {
+		var channelType string
+		e.db.QueryRow(`
+			SELECT COALESCE(ch.type, '')
+			FROM conversations c LEFT JOIN channels ch ON ch.id = c.channel_id
+			WHERE c.id = $1 AND c.company_id = $2
+		`, conversationID, companyID).Scan(&channelType)
+		if channelType == "webchat" {
+			return e.saveBotMessage(companyID, conversationID, e.replaceVariables(caption, companyID, conversationID, phone), mediaType, mediaURL, "")
+		}
 		return fmt.Errorf("cannot send bot media: instanceName='%s' phone='%s'", instanceName, phone)
 	}
-	var err error
-	externalID, err = e.evo.SendMediaMessage(instanceName, phone, mediaType, mediaURL, e.replaceVariables(caption, companyID, conversationID, phone), fileName)
+
+	externalID, err := e.evo.SendMediaMessage(instanceName, phone, mediaType, mediaURL, e.replaceVariables(caption, companyID, conversationID, phone), fileName)
 	if err != nil {
 		return err
 	}
@@ -1616,12 +1625,20 @@ func (e *BotEngine) nodeSendAudio(config map[string]interface{}, companyID, conv
 		return nil
 	}
 
-	var externalID string
 	if instanceName == "" || phone == "" {
+		var channelType string
+		e.db.QueryRow(`
+			SELECT COALESCE(ch.type, '')
+			FROM conversations c LEFT JOIN channels ch ON ch.id = c.channel_id
+			WHERE c.id = $1 AND c.company_id = $2
+		`, conversationID, companyID).Scan(&channelType)
+		if channelType == "webchat" {
+			return e.saveBotMessage(companyID, conversationID, "", "audio", audioURL, "")
+		}
 		return fmt.Errorf("cannot send bot audio: instanceName='%s' phone='%s'", instanceName, phone)
 	}
-	var err error
-	externalID, err = e.evo.SendAudioMessage(instanceName, phone, audioURL)
+
+	externalID, err := e.evo.SendAudioMessage(instanceName, phone, audioURL)
 	if err != nil {
 		return err
 	}
@@ -1765,36 +1782,32 @@ func (e *BotEngine) nodeAskQuestion(node BotNode, companyID, conversationID, ins
 		}
 	}
 
-	// Send via WhatsApp
-	var externalID string
-	botName := e.botNameForConversation(companyID, conversationID)
-	outboundMessage := formatBotOutboundMessage(botName, message)
+	// For webchat conversations, just save the message (delivered via WebSocket)
 	if instanceName == "" || phone == "" {
+		var channelType string
+		e.db.QueryRow(`
+			SELECT COALESCE(ch.type, '')
+			FROM conversations c LEFT JOIN channels ch ON ch.id = c.channel_id
+			WHERE c.id = $1 AND c.company_id = $2
+		`, conversationID, companyID).Scan(&channelType)
+		if channelType == "webchat" {
+			log.Printf("[BOT] Sending webchat question for conversation %s", conversationID)
+			return e.saveBotMessage(companyID, conversationID, message, "text", "", "")
+		}
 		return fmt.Errorf("cannot send bot question: instanceName='%s' phone='%s'", instanceName, phone)
 	}
-	var err error
-	externalID, err = e.evo.SendTextMessage(instanceName, phone, outboundMessage)
+
+	// Send via WhatsApp
+	botName := e.botNameForConversation(companyID, conversationID)
+	outboundMessage := formatBotOutboundMessage(botName, message)
+	externalID, err := e.evo.SendTextMessage(instanceName, phone, outboundMessage)
 	if err != nil {
 		log.Printf("[BOT] Failed to send question to %s via %s: %v", phone, instanceName, err)
 		return err
 	}
 
 	// Save message
-	msgID := uuid.New().String()
-	e.db.Exec(`
-		INSERT INTO messages (id, conversation_id, company_id, sender_type, content, message_type, external_id, status, metadata)
-		VALUES ($1, $2, $3, 'bot', $4, 'text', $5, 'sent', jsonb_build_object('bot_name', $6::text))
-	`, msgID, conversationID, companyID, message, externalID, botName)
-
-	e.wsHub.BroadcastToCompany(companyID, "new_message", map[string]interface{}{
-		"id": msgID, "conversation_id": conversationID,
-		"sender_type": "bot", "content": message, "message_type": "text",
-		"sender_name": botName,
-		"metadata":    map[string]interface{}{"bot_name": botName},
-		"status":      "sent", "created_at": time.Now(),
-	})
-
-	return nil
+	return e.saveBotMessage(companyID, conversationID, message, "text", "", externalID)
 }
 
 func (e *BotEngine) nodeDelay(node BotNode) error {

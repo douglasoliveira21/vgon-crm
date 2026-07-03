@@ -1854,7 +1854,8 @@ func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
     if(id&&seen[id])return;if(id)seen[id]=true;
     hideTyping();
     var d=document.createElement("div");d.style.textAlign=own?"right":"left";d.style.margin="8px 0";
-    var nameHtml=(!own&&senderName)?'<div style="font-size:11px;color:#6b7280;margin-bottom:2px;display:flex;align-items:center;gap:4px">'+(senderAvatar?'<img src="'+esc(senderAvatar)+'" style="width:18px;height:18px;border-radius:50%%">':'')+esc(senderName)+'</div>':'';
+    var avatarSrc=senderAvatar?(senderAvatar.indexOf("http")===0?senderAvatar:apiBase+senderAvatar):"";
+    var nameHtml=(!own&&senderName)?'<div style="font-size:11px;color:#6b7280;margin-bottom:2px;display:flex;align-items:center;gap:4px">'+(avatarSrc?'<img src="'+esc(avatarSrc)+'" style="width:18px;height:18px;border-radius:50%%;object-fit:cover">':'')+esc(senderName)+'</div>':'';
     d.innerHTML=nameHtml+'<span style="display:inline-block;max-width:80%%;background:'+(own?color:'#e5e7eb')+';color:'+(own?'#fff':'#111827')+';padding:8px 12px;border-radius:12px;font-size:14px;line-height:1.4;word-wrap:break-word;white-space:pre-wrap">'+esc(text)+'</span>';
     log.appendChild(d);log.scrollTop=log.scrollHeight;
   }
