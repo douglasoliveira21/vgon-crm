@@ -1730,12 +1730,35 @@ func getOrCreateWidgetContact(db *sql.DB, companyID, visitorID, name, email, pho
 	phone = strings.TrimSpace(phone)
 	email = strings.TrimSpace(email)
 	name = strings.TrimSpace(name)
-	if phone != "" {
-		if err := db.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2 LIMIT 1", companyID, phone).Scan(&contactID); err == nil {
-			_, _ = db.Exec("UPDATE contacts SET name = COALESCE(NULLIF($1, ''), name), email = COALESCE(NULLIF($2, ''), email), updated_at = NOW() WHERE id = $3", name, email, contactID)
+
+	// 1. Try to find by visitor_id (most reliable for widget - persisted in browser localStorage)
+	if visitorID != "" {
+		if err := db.QueryRow(
+			"SELECT id FROM contacts WHERE company_id = $1 AND custom_fields->>'visitor_id' = $2 LIMIT 1",
+			companyID, visitorID,
+		).Scan(&contactID); err == nil {
+			_, _ = db.Exec("UPDATE contacts SET name = COALESCE(NULLIF($1, ''), name), email = COALESCE(NULLIF($2, ''), email), phone = COALESCE(NULLIF($3, ''), phone), updated_at = NOW() WHERE id = $4", name, email, phone, contactID)
 			return contactID, nil
 		}
 	}
+
+	// 2. Try to find by phone
+	if phone != "" {
+		if err := db.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2 LIMIT 1", companyID, phone).Scan(&contactID); err == nil {
+			_, _ = db.Exec("UPDATE contacts SET name = COALESCE(NULLIF($1, ''), name), email = COALESCE(NULLIF($2, ''), email), custom_fields = COALESCE(custom_fields, '{}'::jsonb) || jsonb_build_object('visitor_id', $3::text), updated_at = NOW() WHERE id = $4", name, email, visitorID, contactID)
+			return contactID, nil
+		}
+	}
+
+	// 3. Try to find by email
+	if email != "" {
+		if err := db.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND email = $2 LIMIT 1", companyID, email).Scan(&contactID); err == nil {
+			_, _ = db.Exec("UPDATE contacts SET name = COALESCE(NULLIF($1, ''), name), phone = COALESCE(NULLIF($2, ''), phone), custom_fields = COALESCE(custom_fields, '{}'::jsonb) || jsonb_build_object('visitor_id', $3::text), updated_at = NOW() WHERE id = $4", name, phone, visitorID, contactID)
+			return contactID, nil
+		}
+	}
+
+	// 4. Create new contact
 	contactID = uuid.New().String()
 	if name == "" {
 		name = "Visitante do site"
