@@ -1772,73 +1772,82 @@ func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
 		widgetID := c.Params("id")
 		apiBase := c.Protocol() + "://" + c.Hostname()
 		script := fmt.Sprintf(`(function(){
-  if (window.__vgonWidgetLoaded) return; window.__vgonWidgetLoaded = true;
-  var widgetId = %q, apiBase = %q;
-  var wsBase = apiBase.replace(/^http/, "ws");
-  var visitorId = localStorage.getItem("vgon_widget_visitor_id") || (Date.now()+"-"+Math.random().toString(16).slice(2));
-  var conversationId = localStorage.getItem("vgon_widget_conversation_id") || "";
-  var seen = {};
-  var ws = null;
-  localStorage.setItem("vgon_widget_visitor_id", visitorId);
-  function css(el, styles){ for(var k in styles){ el.style[k]=styles[k]; } }
-  function escapeHtml(s){ return String(s||"").replace(/[<>&]/g,function(x){return {"<":"&lt;",">":"&gt;","&":"&amp;"}[x]}); }
-  function appendMsg(log, text, own, color, id){
-    if(id && seen[id]) return; if(id) seen[id]=true;
-    log.innerHTML += '<div style="text-align:'+(own?'right':'left')+';margin:8px 0"><span style="display:inline-block;max-width:82%%;background:'+(own?color:'#e5e7eb')+';color:'+(own?'white':'#111827')+';padding:8px 10px;border-radius:12px;font-size:14px;line-height:1.4;word-wrap:break-word;white-space:pre-wrap">'+escapeHtml(text)+'</span></div>';
-    log.scrollTop = log.scrollHeight;
+  if(window.__vgonWidgetLoaded) return; window.__vgonWidgetLoaded=true;
+  var widgetId=%q, apiBase=%q;
+  var wsBase=apiBase.replace(/^http/,"ws");
+  var visitorId=localStorage.getItem("vgon_wv")||""; if(!visitorId){visitorId=Date.now()+"-"+Math.random().toString(16).slice(2);localStorage.setItem("vgon_wv",visitorId);}
+  var conversationId=localStorage.getItem("vgon_wc")||"";
+  var savedName=localStorage.getItem("vgon_wn")||"";
+  var savedContact=localStorage.getItem("vgon_we")||"";
+  var seen={}, ws=null, pollTimer=null, typingTimer=null;
+  function css(el,s){for(var k in s)el.style[k]=s[k];}
+  function esc(s){return String(s||"").replace(/[<>&]/g,function(x){return{"<":"&lt;",">":"&gt;","&":"&amp;"}[x]});}
+  function appendMsg(log,text,own,color,id){
+    if(id&&seen[id])return;if(id)seen[id]=true;
+    hideTyping();
+    var d=document.createElement("div");d.style.textAlign=own?"right":"left";d.style.margin="8px 0";
+    d.innerHTML='<span style="display:inline-block;max-width:80%%;background:'+(own?color:'#e5e7eb')+';color:'+(own?'#fff':'#111827')+';padding:8px 12px;border-radius:12px;font-size:14px;line-height:1.4;word-wrap:break-word;white-space:pre-wrap">'+esc(text)+'</span>';
+    log.appendChild(d);log.scrollTop=log.scrollHeight;
   }
+  function showTyping(name){
+    var el=document.getElementById("vgon-typing");if(!el)return;
+    el.textContent=(name||"Atendente")+" está digitando...";el.style.display="block";
+    clearTimeout(typingTimer);typingTimer=setTimeout(hideTyping,5000);
+  }
+  function hideTyping(){var el=document.getElementById("vgon-typing");if(el)el.style.display="none";}
   function connectWS(){
-    if(!conversationId) return;
-    try {
-      ws = new WebSocket(wsBase + "/ws/widget?conversation_id=" + encodeURIComponent(conversationId));
-      ws.onmessage = function(evt){
-        try {
-          var msg = JSON.parse(evt.data);
-          if(msg.event === "new_message"){
-            var d = typeof msg.data === "string" ? JSON.parse(msg.data) : msg.data;
-            if(d.sender_type !== "contact"){
-              var log = document.getElementById("vgon-log");
-              if(log) appendMsg(log, d.content, false, window.__vgonColor || "#3B82F6", d.id);
-            }
-          }
-        } catch(e){}
-      };
-      ws.onclose = function(){ setTimeout(connectWS, 4000); };
-    } catch(e){ setTimeout(connectWS, 4000); }
+    if(!conversationId||ws&&ws.readyState<2)return;
+    try{
+      ws=new WebSocket(wsBase+"/ws/widget?conversation_id="+encodeURIComponent(conversationId));
+      ws.onmessage=function(evt){try{
+        var msg=JSON.parse(evt.data);
+        if(msg.event==="new_message"){
+          var d=typeof msg.data==="string"?JSON.parse(msg.data):msg.data;
+          if(d.sender_type!=="contact"){var log=document.getElementById("vgon-log");if(log)appendMsg(log,d.content,false,window.__vgonColor||"#3B82F6",d.id);}
+        }
+        if(msg.event==="typing"){var td=typeof msg.data==="string"?JSON.parse(msg.data):msg.data;if(td.is_typing)showTyping(td.user_name||td.user_id);else hideTyping();}
+      }catch(e){}};
+      ws.onclose=function(){ws=null;setTimeout(connectWS,4000);};
+      ws.onerror=function(){};
+    }catch(e){setTimeout(connectWS,4000);}
   }
-  fetch(apiBase + "/api/widget/" + widgetId + "/config").then(function(r){ return r.json(); }).then(function(cfg){
-    var color = cfg.primary_color || "#3B82F6";
-    window.__vgonColor = color;
-    var side = cfg.position === "bottom-left" ? "left" : "right";
-    var bubble = document.createElement("button");
-    bubble.type = "button"; bubble.innerHTML = "💬";
-    css(bubble,{position:"fixed",bottom:"22px",[side]:"22px",width:"58px",height:"58px",borderRadius:"50%%",border:"0",background:color,color:"#fff",fontSize:"24px",boxShadow:"0 12px 30px rgba(0,0,0,.25)",zIndex:"2147483647",cursor:"pointer"});
-    var panel = document.createElement("div");
+  function poll(){
+    if(!conversationId)return;
+    fetch(apiBase+"/api/widget/"+widgetId+"/messages?conversation_id="+encodeURIComponent(conversationId)).then(function(r){return r.json();}).then(function(data){
+      var log=document.getElementById("vgon-log");if(!log)return;
+      (data.messages||[]).forEach(function(m){appendMsg(log,m.content,m.sender_type==="contact",window.__vgonColor||"#3B82F6",m.id);});
+    }).catch(function(){});
+  }
+  fetch(apiBase+"/api/widget/"+widgetId+"/config").then(function(r){return r.json();}).then(function(cfg){
+    var color=cfg.primary_color||"#3B82F6";window.__vgonColor=color;
+    var side=cfg.position==="bottom-left"?"left":"right";
+    var bubble=document.createElement("button");bubble.type="button";bubble.innerHTML="💬";
+    css(bubble,{position:"fixed",bottom:"22px",[side]:"22px",width:"58px",height:"58px",borderRadius:"50%%",border:"0",background:color,color:"#fff",fontSize:"24px",boxShadow:"0 12px 30px rgba(0,0,0,.25)",zIndex:"2147483647",cursor:"pointer",transition:"transform .2s"});
+    var panel=document.createElement("div");
     css(panel,{position:"fixed",bottom:"92px",[side]:"22px",width:"370px",maxWidth:"calc(100vw - 32px)",height:"520px",maxHeight:"calc(100vh - 120px)",background:"#fff",borderRadius:"14px",boxShadow:"0 18px 50px rgba(0,0,0,.22)",overflow:"hidden",zIndex:"2147483647",fontFamily:"system-ui,-apple-system,sans-serif",display:"none",flexDirection:"column"});
-    panel.innerHTML = '<div style="background:'+color+';color:white;padding:16px;font-weight:700;font-size:15px">'+(cfg.greeting_message || "Olá! Como podemos ajudar?")+'</div><div id="vgon-log" style="flex:1;overflow-y:auto;padding:14px;background:#f8fafc;font-size:14px"></div><form id="vgon-form" style="padding:12px;border-top:1px solid #e5e7eb;background:#fff"><input id="vgon-name" placeholder="Seu nome" style="width:100%%;box-sizing:border-box;margin-bottom:8px;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px"><input id="vgon-email" placeholder="Seu e-mail ou telefone" style="width:100%%;box-sizing:border-box;margin-bottom:8px;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px"><div style="display:flex;gap:8px"><input id="vgon-message" placeholder="Digite sua mensagem..." required style="flex:1;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px"><button style="background:'+color+';color:white;border:0;border-radius:8px;padding:0 14px;cursor:pointer;font-size:15px">➤</button></div></form>';
-    document.body.appendChild(panel); document.body.appendChild(bubble);
-    bubble.onclick = function(){ var showing = panel.style.display !== "none"; panel.style.display = showing ? "none" : "flex"; if(!showing && conversationId) connectWS(); };
-    function poll(){
-      if(!conversationId) return;
-      fetch(apiBase + "/api/widget/" + widgetId + "/messages?conversation_id=" + encodeURIComponent(conversationId)).then(function(r){ return r.json(); }).then(function(data){
-        var log = document.getElementById("vgon-log");
-        (data.messages || []).forEach(function(m){ appendMsg(log, m.content, m.sender_type === "contact", color, m.id); });
-      }).catch(function(){});
-    }
-    poll();
-    if(conversationId) connectWS();
-    panel.querySelector("#vgon-form").onsubmit = function(e){
+    var hasIdentity=!!(savedName&&savedContact);
+    var formHTML=hasIdentity?'':'<div id="vgon-identity" style="padding:12px;border-bottom:1px solid #e5e7eb;background:#fff"><input id="vgon-name" placeholder="Seu nome" value="'+esc(savedName)+'" style="width:100%%;box-sizing:border-box;margin-bottom:8px;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px"><input id="vgon-email" placeholder="Seu e-mail ou telefone" value="'+esc(savedContact)+'" style="width:100%%;box-sizing:border-box;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px"></div>';
+    panel.innerHTML='<div style="background:'+color+';color:white;padding:16px;font-weight:700;font-size:15px">'+(cfg.greeting_message||"Olá! Como podemos ajudar?")+'</div>'+formHTML+'<div id="vgon-log" style="flex:1;overflow-y:auto;padding:14px;background:#f8fafc;font-size:14px"></div><div id="vgon-typing" style="display:none;padding:4px 14px;font-size:12px;color:#6b7280;font-style:italic"></div><form id="vgon-form" style="padding:12px;border-top:1px solid #e5e7eb;background:#fff;display:flex;gap:8px"><input id="vgon-message" placeholder="Digite sua mensagem..." required style="flex:1;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px"><button type="submit" style="background:'+color+';color:white;border:0;border-radius:8px;padding:0 14px;cursor:pointer;font-size:18px">➤</button></form>';
+    document.body.appendChild(panel);document.body.appendChild(bubble);
+    bubble.onclick=function(){var showing=panel.style.display!=="none";panel.style.display=showing?"none":"flex";if(!showing){poll();connectWS();}};
+    poll();if(conversationId)connectWS();
+    pollTimer=setInterval(poll,5000);
+    panel.querySelector("#vgon-form").onsubmit=function(e){
       e.preventDefault();
-      var msg = panel.querySelector("#vgon-message").value.trim(); if(!msg) return;
-      var log = document.getElementById("vgon-log");
-      var contact = panel.querySelector("#vgon-email").value.trim();
-      var tempId = "temp-" + Date.now(); appendMsg(log, msg, true, color, tempId);
-      panel.querySelector("#vgon-message").value="";
-      fetch(apiBase + "/api/widget/" + widgetId + "/message",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({visitor_id:visitorId,name:panel.querySelector("#vgon-name").value,email:contact.indexOf("@")>=0?contact:"",phone:contact.indexOf("@")>=0?"":contact,message:msg,page_url:location.href})}).then(function(r){ return r.json(); }).then(function(data){
-        if(data.conversation_id && !conversationId){ conversationId = data.conversation_id; localStorage.setItem("vgon_widget_conversation_id", conversationId); connectWS(); }
-        if(data.conversation_id) conversationId = data.conversation_id;
-        if(data.message_id){ seen[data.message_id]=true; }
-      }).catch(function(){ alert("Não foi possível enviar a mensagem."); });
+      var msgInput=panel.querySelector("#vgon-message");var msg=msgInput.value.trim();if(!msg)return;
+      var nameEl=panel.querySelector("#vgon-name");var emailEl=panel.querySelector("#vgon-email");
+      var name=nameEl?nameEl.value.trim():savedName;
+      var contact=emailEl?emailEl.value.trim():savedContact;
+      if(!savedName&&name){savedName=name;localStorage.setItem("vgon_wn",name);}
+      if(!savedContact&&contact){savedContact=contact;localStorage.setItem("vgon_we",contact);}
+      var idBlock=document.getElementById("vgon-identity");if(idBlock&&name&&contact){idBlock.style.display="none";}
+      var log=document.getElementById("vgon-log");
+      var tempId="t-"+Date.now();appendMsg(log,msg,true,color,tempId);
+      msgInput.value="";
+      fetch(apiBase+"/api/widget/"+widgetId+"/message",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({visitor_id:visitorId,name:name,email:contact.indexOf("@")>=0?contact:"",phone:contact.indexOf("@")>=0?"":contact,message:msg,page_url:location.href})}).then(function(r){return r.json();}).then(function(data){
+        if(data.conversation_id){conversationId=data.conversation_id;localStorage.setItem("vgon_wc",conversationId);connectWS();}
+        if(data.message_id)seen[data.message_id]=true;
+      }).catch(function(){});
     };
   });
 })();`, widgetID, apiBase)

@@ -236,6 +236,6 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	// ============================================
 	// WebSocket
 	// ============================================
-	app.Get("/ws", WebSocketHandler(wsHub, svc.Config))
+	app.Get("/ws", WebSocketHandler(wsHub, svc.Config, svc))
 	app.Get("/ws/widget", WidgetWebSocketHandler(wsHub))
 }

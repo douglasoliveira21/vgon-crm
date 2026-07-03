@@ -7,6 +7,7 @@ import (
 
 	"github.com/evocrm/backend/internal/config"
 	"github.com/evocrm/backend/internal/middleware"
+	"github.com/evocrm/backend/internal/services"
 	ws "github.com/evocrm/backend/internal/websocket"
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
@@ -14,7 +15,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func WebSocketHandler(hub *ws.Hub, cfg *config.Config) fiber.Handler {
+func WebSocketHandler(hub *ws.Hub, cfg *config.Config, svc *services.Container) fiber.Handler {
 	return websocket.New(func(c *websocket.Conn) {
 		// Authenticate via query param token
 		token := c.Query("token")
@@ -95,11 +96,20 @@ func WebSocketHandler(hub *ws.Hub, cfg *config.Config) fiber.Handler {
 					IsTyping       bool   `json:"is_typing"`
 				}
 				json.Unmarshal(wsMsg.Data, &data)
-				hub.BroadcastToRoom("conversation:"+data.ConversationID, "typing", map[string]interface{}{
+				// Get agent name
+				var userName string
+				if svc != nil && svc.DB != nil {
+					svc.DB.QueryRow("SELECT COALESCE(name, '') FROM users WHERE id = $1", claims.UserID).Scan(&userName)
+				}
+				typingPayload := map[string]interface{}{
 					"user_id":         claims.UserID,
+					"user_name":       userName,
 					"conversation_id": data.ConversationID,
 					"is_typing":       data.IsTyping,
-				})
+				}
+				hub.BroadcastToRoom("conversation:"+data.ConversationID, "typing", typingPayload)
+				// Also broadcast to widget visitor
+				hub.BroadcastToRoom("widget:"+data.ConversationID, "typing", typingPayload)
 
 			default:
 				log.Printf("Unknown WebSocket event: %s", wsMsg.Event)
