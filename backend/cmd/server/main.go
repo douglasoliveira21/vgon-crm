@@ -78,6 +78,11 @@ func main() {
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, X-Requested-With",
 		AllowMethods:     "GET, POST, PUT, DELETE, PATCH, OPTIONS",
 		AllowCredentials: false,
+		Next: func(c *fiber.Ctx) bool {
+			// Skip restrictive CORS for widget routes — they use their own open CORS.
+			path := c.Path()
+			return strings.Contains(path, "/widget/")
+		},
 	}))
 	app.Options("*", func(c *fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusNoContent)

@@ -39,11 +39,23 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	api.Post("/webhooks/evolution/:instanceName", HandleEvolutionWebhook(svc))
 
 	// ============================================
-	// Widget Public Routes
+	// Widget Public Routes (CORS open - widget can be embedded on any site)
 	// ============================================
-	api.Get("/widget/:id/config", GetWidgetPublicConfig(svc))
-	api.Post("/widget/:id/message", SendWidgetMessage(svc))
-	api.Get("/widget/:id/messages", GetWidgetMessages(svc))
+	widgetCORS := func(c *fiber.Ctx) error {
+		c.Set("Access-Control-Allow-Origin", "*")
+		c.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Set("Access-Control-Allow-Headers", "Content-Type")
+		if c.Method() == "OPTIONS" {
+			return c.SendStatus(204)
+		}
+		return c.Next()
+	}
+	api.Options("/widget/:id/config", widgetCORS)
+	api.Options("/widget/:id/message", widgetCORS)
+	api.Options("/widget/:id/messages", widgetCORS)
+	api.Get("/widget/:id/config", widgetCORS, GetWidgetPublicConfig(svc))
+	api.Post("/widget/:id/message", widgetCORS, SendWidgetMessage(svc))
+	api.Get("/widget/:id/messages", widgetCORS, GetWidgetMessages(svc))
 	app.Get("/widget/:id/embed.js", GetWidgetEmbedScript(svc))
 	api.Get("/oauth/email/:provider/callback", EmailOAuthCallback(svc))
 
