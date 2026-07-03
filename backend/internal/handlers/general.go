@@ -1747,7 +1747,12 @@ func GetWidgetMessages(svc *services.Container) fiber.Handler {
 				})
 			}
 		}
-		return c.JSON(fiber.Map{"messages": messages})
+
+		// Check conversation status so the widget can detect closure via polling
+		var convStatus string
+		svc.DB.QueryRow("SELECT COALESCE(status, 'open') FROM conversations WHERE id = $1 AND company_id = $2", conversationID, companyID).Scan(&convStatus)
+
+		return c.JSON(fiber.Map{"messages": messages, "status": convStatus})
 	}
 }
 
@@ -1885,6 +1890,7 @@ func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
   function poll(){
     if(!conversationId)return;
     fetch(apiBase+"/api/widget/"+widgetId+"/messages?conversation_id="+encodeURIComponent(conversationId)).then(function(r){return r.json();}).then(function(data){
+      if(data.status==="resolved"){handleConversationClosed();return;}
       var log=document.getElementById("vgon-log");if(!log)return;
       (data.messages||[]).forEach(function(m){appendMsg(log,m.content,m.sender_type==="contact",window.__vgonColor||"#3B82F6",m.id,m.sender_name||"",m.sender_avatar||"");});
     }).catch(function(){});
@@ -1906,7 +1912,7 @@ func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
       if(!confirm("Deseja encerrar esta conversa?"))return;
       fetch(apiBase+"/api/widget/"+widgetId+"/close",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({conversation_id:conversationId,visitor_id:visitorId})}).then(function(){handleConversationClosed();}).catch(function(){handleConversationClosed();});
     };
-    poll();if(conversationId)connectWS();
+    connectWS();poll();
     pollTimer=setInterval(poll,5000);
     panel.querySelector("#vgon-form").onsubmit=function(e){
       e.preventDefault();
