@@ -249,6 +249,11 @@ func CloseConversation(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
+		// Notify widget visitor that the conversation was closed
+		svc.WSHub.BroadcastToRoom("widget:"+conversationID, "conversation_closed", map[string]interface{}{
+			"conversation_id": conversationID,
+		})
+
 		// Fire any "conversation closed" bot flow (e.g. a farewell message).
 		// Runs asynchronously so it never blocks the close response.
 		go svc.Bot.TriggerConversationClosed(companyID, conversationID)
@@ -468,9 +473,12 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 
 		// Push agent message to the widget visitor in real-time (if this is not a private note)
 		if !body.IsPrivate {
+			var agentNameForWidget, agentAvatarForWidget string
+			svc.DB.QueryRow("SELECT COALESCE(name, ''), COALESCE(avatar_url, '') FROM users WHERE id = $1", userID).Scan(&agentNameForWidget, &agentAvatarForWidget)
 			svc.WSHub.BroadcastToRoom("widget:"+conversationID, "new_message", map[string]interface{}{
 				"id": msg.ID, "conversation_id": conversationID,
 				"sender_type": "user", "content": body.Content, "message_type": "text",
+				"sender_name": agentNameForWidget, "sender_avatar": agentAvatarForWidget,
 				"created_at": msg.CreatedAt,
 			})
 		}

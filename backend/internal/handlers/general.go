@@ -1686,10 +1686,13 @@ func GetWidgetMessages(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Widget not found"})
 		}
 		rows, err := svc.DB.Query(`
-			SELECT id, sender_type, COALESCE(content, ''), message_type, created_at
-			FROM messages
-			WHERE conversation_id = $1 AND company_id = $2 AND is_private = false
-			ORDER BY created_at ASC
+			SELECT m.id, m.sender_type, COALESCE(m.content, ''), m.message_type, m.created_at,
+			       COALESCE(u.name, COALESCE(m.metadata->>'bot_name', '')),
+			       COALESCE(u.avatar_url, '')
+			FROM messages m
+			LEFT JOIN users u ON m.sender_type = 'user' AND m.sender_id = u.id
+			WHERE m.conversation_id = $1 AND m.company_id = $2 AND m.is_private = false
+			ORDER BY m.created_at ASC
 			LIMIT 100
 		`, conversationID, companyID)
 		if err != nil {
@@ -1698,12 +1701,13 @@ func GetWidgetMessages(svc *services.Container) fiber.Handler {
 		defer rows.Close()
 		messages := []fiber.Map{}
 		for rows.Next() {
-			var id, senderType, content, msgType string
+			var id, senderType, content, msgType, senderName, senderAvatar string
 			var createdAt time.Time
-			if err := rows.Scan(&id, &senderType, &content, &msgType, &createdAt); err == nil {
+			if err := rows.Scan(&id, &senderType, &content, &msgType, &createdAt, &senderName, &senderAvatar); err == nil {
 				messages = append(messages, fiber.Map{
 					"id": id, "sender_type": senderType, "content": content,
 					"message_type": msgType, "created_at": createdAt,
+					"sender_name": senderName, "sender_avatar": senderAvatar,
 				})
 			}
 		}
@@ -1805,11 +1809,12 @@ func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
   var seen={}, ws=null, pollTimer=null, typingTimer=null;
   function css(el,s){for(var k in s)el.style[k]=s[k];}
   function esc(s){return String(s||"").replace(/[<>&]/g,function(x){return{"<":"&lt;",">":"&gt;","&":"&amp;"}[x]});}
-  function appendMsg(log,text,own,color,id){
+  function appendMsg(log,text,own,color,id,senderName,senderAvatar){
     if(id&&seen[id])return;if(id)seen[id]=true;
     hideTyping();
     var d=document.createElement("div");d.style.textAlign=own?"right":"left";d.style.margin="8px 0";
-    d.innerHTML='<span style="display:inline-block;max-width:80%%;background:'+(own?color:'#e5e7eb')+';color:'+(own?'#fff':'#111827')+';padding:8px 12px;border-radius:12px;font-size:14px;line-height:1.4;word-wrap:break-word;white-space:pre-wrap">'+esc(text)+'</span>';
+    var nameHtml=(!own&&senderName)?'<div style="font-size:11px;color:#6b7280;margin-bottom:2px;display:flex;align-items:center;gap:4px">'+(senderAvatar?'<img src="'+esc(senderAvatar)+'" style="width:18px;height:18px;border-radius:50%%">':'')+esc(senderName)+'</div>':'';
+    d.innerHTML=nameHtml+'<span style="display:inline-block;max-width:80%%;background:'+(own?color:'#e5e7eb')+';color:'+(own?'#fff':'#111827')+';padding:8px 12px;border-radius:12px;font-size:14px;line-height:1.4;word-wrap:break-word;white-space:pre-wrap">'+esc(text)+'</span>';
     log.appendChild(d);log.scrollTop=log.scrollHeight;
   }
   function showTyping(name){
@@ -1818,6 +1823,12 @@ func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
     clearTimeout(typingTimer);typingTimer=setTimeout(hideTyping,5000);
   }
   function hideTyping(){var el=document.getElementById("vgon-typing");if(el)el.style.display="none";}
+  function handleConversationClosed(){
+    conversationId="";localStorage.removeItem("vgon_wc");
+    if(ws){try{ws.close();}catch(e){}}ws=null;
+    var log=document.getElementById("vgon-log");
+    if(log){var d=document.createElement("div");d.style.textAlign="center";d.style.margin="12px 0";d.innerHTML='<span style="background:#f3f4f6;color:#6b7280;padding:6px 14px;border-radius:20px;font-size:12px">Conversa encerrada</span>';log.appendChild(d);log.scrollTop=log.scrollHeight;}
+  }
   function connectWS(){
     if(!conversationId||ws&&ws.readyState<2)return;
     try{
@@ -1826,11 +1837,12 @@ func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
         var msg=JSON.parse(evt.data);
         if(msg.event==="new_message"){
           var d=typeof msg.data==="string"?JSON.parse(msg.data):msg.data;
-          if(d.sender_type!=="contact"){var log=document.getElementById("vgon-log");if(log)appendMsg(log,d.content,false,window.__vgonColor||"#3B82F6",d.id);}
+          if(d.sender_type!=="contact"){var log=document.getElementById("vgon-log");if(log)appendMsg(log,d.content,false,window.__vgonColor||"#3B82F6",d.id,d.sender_name||"",d.sender_avatar||"");}
         }
         if(msg.event==="typing"){var td=typeof msg.data==="string"?JSON.parse(msg.data):msg.data;if(td.is_typing)showTyping(td.user_name||td.user_id);else hideTyping();}
+        if(msg.event==="conversation_closed"){handleConversationClosed();}
       }catch(e){}};
-      ws.onclose=function(){ws=null;setTimeout(connectWS,4000);};
+      ws.onclose=function(){ws=null;if(conversationId)setTimeout(connectWS,4000);};
       ws.onerror=function(){};
     }catch(e){setTimeout(connectWS,4000);}
   }
@@ -1838,7 +1850,7 @@ func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
     if(!conversationId)return;
     fetch(apiBase+"/api/widget/"+widgetId+"/messages?conversation_id="+encodeURIComponent(conversationId)).then(function(r){return r.json();}).then(function(data){
       var log=document.getElementById("vgon-log");if(!log)return;
-      (data.messages||[]).forEach(function(m){appendMsg(log,m.content,m.sender_type==="contact",window.__vgonColor||"#3B82F6",m.id);});
+      (data.messages||[]).forEach(function(m){appendMsg(log,m.content,m.sender_type==="contact",window.__vgonColor||"#3B82F6",m.id,m.sender_name||"",m.sender_avatar||"");});
     }).catch(function(){});
   }
   fetch(apiBase+"/api/widget/"+widgetId+"/config").then(function(r){return r.json();}).then(function(cfg){
