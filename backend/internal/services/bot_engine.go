@@ -1632,10 +1632,24 @@ func (e *BotEngine) sendBotText(companyID, conversationID, instanceName, phone, 
 	message = e.replaceVariables(message, companyID, conversationID, phone)
 	botName := e.botNameForConversation(companyID, conversationID)
 	outboundMessage := formatBotOutboundMessage(botName, message)
-	var externalID string
+
+	// For webchat conversations (no phone/instance), just save the message.
+	// The visitor receives it via WebSocket broadcast from saveBotMessage.
 	if instanceName == "" || phone == "" {
+		var channelType string
+		e.db.QueryRow(`
+			SELECT COALESCE(ch.type, '')
+			FROM conversations c LEFT JOIN channels ch ON ch.id = c.channel_id
+			WHERE c.id = $1 AND c.company_id = $2
+		`, conversationID, companyID).Scan(&channelType)
+		if channelType == "webchat" {
+			log.Printf("[BOT] Sending webchat message for conversation %s", conversationID)
+			return e.saveBotMessage(companyID, conversationID, message, messageType, "", "")
+		}
 		return fmt.Errorf("cannot send bot text: instanceName='%s' phone='%s'", instanceName, phone)
 	}
+
+	var externalID string
 	var err error
 	externalID, err = e.evo.SendTextMessage(instanceName, phone, outboundMessage)
 	if err != nil {
@@ -1666,6 +1680,13 @@ func (e *BotEngine) saveBotMessage(companyID, conversationID, content, messageTy
 		"sender_type": "bot", "content": content, "message_type": messageType,
 		"media_url": mediaURL, "sender_name": botName, "metadata": map[string]interface{}{"bot_name": botName},
 		"status": "sent", "created_at": time.Now(),
+	})
+
+	// Also push to widget visitor WebSocket room so the embed chat updates instantly.
+	e.wsHub.BroadcastToRoom("widget:"+conversationID, "new_message", map[string]interface{}{
+		"id": msgID, "conversation_id": conversationID,
+		"sender_type": "bot", "content": content, "message_type": messageType,
+		"created_at": time.Now(),
 	})
 	return nil
 }

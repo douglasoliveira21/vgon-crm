@@ -107,3 +107,46 @@ func WebSocketHandler(hub *ws.Hub, cfg *config.Config) fiber.Handler {
 		}
 	})
 }
+
+// WidgetWebSocketHandler provides a public (no JWT) WebSocket connection for
+// website visitors using the chat widget. The visitor joins a room keyed by
+// their conversation_id so they receive agent/bot replies in real-time.
+func WidgetWebSocketHandler(hub *ws.Hub) fiber.Handler {
+	return websocket.New(func(c *websocket.Conn) {
+		conversationID := c.Query("conversation_id")
+		if conversationID == "" {
+			c.Close()
+			return
+		}
+
+		clientID := uuid.New().String()
+		client := &ws.Client{
+			ID:        clientID,
+			UserID:    "visitor",
+			CompanyID: "widget",
+			Send:      make(chan []byte, 64),
+			Hub:       hub,
+		}
+
+		hub.Register(client)
+		hub.JoinRoom(clientID, "widget:"+conversationID)
+		defer hub.Unregister(client)
+
+		// Write pump — sends messages to the visitor browser
+		go func() {
+			for msg := range client.Send {
+				if err := c.WriteMessage(websocket.TextMessage, msg); err != nil {
+					break
+				}
+			}
+		}()
+
+		// Read pump — keep connection alive (visitor doesn't send meaningful frames)
+		for {
+			_, _, err := c.ReadMessage()
+			if err != nil {
+				break
+			}
+		}
+	})
+}

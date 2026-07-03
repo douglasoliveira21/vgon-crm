@@ -879,19 +879,19 @@ func CreateCampaign(svc *services.Container) fiber.Handler {
 		userID := c.Locals("user_id").(string)
 
 		var body struct {
-			Name           string   `json:"name"`
-			ChannelID      string   `json:"channel_id"`
-			MessageContent string   `json:"message_content"`
-			MessageType    string   `json:"message_type"`
-			MediaURL       string   `json:"media_url"`
-			MediaBase64    string   `json:"media_base64"`
-			MediaFileName  string   `json:"media_filename"`
+			Name           string                `json:"name"`
+			ChannelID      string                `json:"channel_id"`
+			MessageContent string                `json:"message_content"`
+			MessageType    string                `json:"message_type"`
+			MediaURL       string                `json:"media_url"`
+			MediaBase64    string                `json:"media_base64"`
+			MediaFileName  string                `json:"media_filename"`
 			ContentItems   []campaignMessageItem `json:"content_items"`
-			ScheduledAt    string   `json:"scheduled_at"`
-			SendSpeed      int      `json:"send_speed"`
-			TotalContacts  int      `json:"total_contacts"`
-			FilterTag      string   `json:"filter_tag"`
-			ContactIDs     []string `json:"contact_ids"`
+			ScheduledAt    string                `json:"scheduled_at"`
+			SendSpeed      int                   `json:"send_speed"`
+			TotalContacts  int                   `json:"total_contacts"`
+			FilterTag      string                `json:"filter_tag"`
+			ContactIDs     []string              `json:"contact_ids"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
@@ -1659,6 +1659,16 @@ func SendWidgetMessage(svc *services.Container) fiber.Handler {
 			"sender_id": contactID, "content": body.Message, "message_type": "text",
 			"status": "delivered", "created_at": time.Now(),
 		})
+
+		// Broadcast to widget visitor WebSocket room so they get agent replies in real-time
+		svc.WSHub.BroadcastToRoom("widget:"+conversationID, "new_message", fiber.Map{
+			"id": messageID, "conversation_id": conversationID, "sender_type": "contact",
+			"content": body.Message, "message_type": "text", "created_at": time.Now(),
+		})
+
+		// Trigger bot automation (same as WhatsApp incoming messages)
+		go svc.Bot.TriggerBot(companyID, conversationID, contactID, channelID, body.Message, "", "")
+
 		return c.JSON(fiber.Map{"conversation_id": conversationID, "visitor_id": body.VisitorID, "message_id": messageID})
 	}
 }
@@ -1764,47 +1774,70 @@ func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
 		script := fmt.Sprintf(`(function(){
   if (window.__vgonWidgetLoaded) return; window.__vgonWidgetLoaded = true;
   var widgetId = %q, apiBase = %q;
+  var wsBase = apiBase.replace(/^http/, "ws");
   var visitorId = localStorage.getItem("vgon_widget_visitor_id") || (Date.now()+"-"+Math.random().toString(16).slice(2));
   var conversationId = localStorage.getItem("vgon_widget_conversation_id") || "";
   var seen = {};
+  var ws = null;
   localStorage.setItem("vgon_widget_visitor_id", visitorId);
   function css(el, styles){ for(var k in styles){ el.style[k]=styles[k]; } }
   function escapeHtml(s){ return String(s||"").replace(/[<>&]/g,function(x){return {"<":"&lt;",">":"&gt;","&":"&amp;"}[x]}); }
   function appendMsg(log, text, own, color, id){
     if(id && seen[id]) return; if(id) seen[id]=true;
-    log.innerHTML += '<div style="text-align:'+(own?'right':'left')+';margin:8px 0"><span style="display:inline-block;max-width:82%%;background:'+(own?color:'#e5e7eb')+';color:'+(own?'white':'#111827')+';padding:8px 10px;border-radius:12px">'+escapeHtml(text)+'</span></div>';
+    log.innerHTML += '<div style="text-align:'+(own?'right':'left')+';margin:8px 0"><span style="display:inline-block;max-width:82%%;background:'+(own?color:'#e5e7eb')+';color:'+(own?'white':'#111827')+';padding:8px 10px;border-radius:12px;font-size:14px;line-height:1.4;word-wrap:break-word;white-space:pre-wrap">'+escapeHtml(text)+'</span></div>';
     log.scrollTop = log.scrollHeight;
+  }
+  function connectWS(){
+    if(!conversationId) return;
+    try {
+      ws = new WebSocket(wsBase + "/ws/widget?conversation_id=" + encodeURIComponent(conversationId));
+      ws.onmessage = function(evt){
+        try {
+          var msg = JSON.parse(evt.data);
+          if(msg.event === "new_message"){
+            var d = typeof msg.data === "string" ? JSON.parse(msg.data) : msg.data;
+            if(d.sender_type !== "contact"){
+              var log = document.getElementById("vgon-log");
+              if(log) appendMsg(log, d.content, false, window.__vgonColor || "#3B82F6", d.id);
+            }
+          }
+        } catch(e){}
+      };
+      ws.onclose = function(){ setTimeout(connectWS, 4000); };
+    } catch(e){ setTimeout(connectWS, 4000); }
   }
   fetch(apiBase + "/api/widget/" + widgetId + "/config").then(function(r){ return r.json(); }).then(function(cfg){
     var color = cfg.primary_color || "#3B82F6";
+    window.__vgonColor = color;
     var side = cfg.position === "bottom-left" ? "left" : "right";
     var bubble = document.createElement("button");
     bubble.type = "button"; bubble.innerHTML = "💬";
     css(bubble,{position:"fixed",bottom:"22px",[side]:"22px",width:"58px",height:"58px",borderRadius:"50%%",border:"0",background:color,color:"#fff",fontSize:"24px",boxShadow:"0 12px 30px rgba(0,0,0,.25)",zIndex:"2147483647",cursor:"pointer"});
     var panel = document.createElement("div");
-    css(panel,{position:"fixed",bottom:"92px",[side]:"22px",width:"340px",maxWidth:"calc(100vw - 32px)",background:"#fff",borderRadius:"14px",boxShadow:"0 18px 50px rgba(0,0,0,.22)",overflow:"hidden",zIndex:"2147483647",fontFamily:"Arial,sans-serif",display:"none"});
-    panel.innerHTML = '<div style="background:'+color+';color:white;padding:16px;font-weight:700">'+(cfg.greeting_message || "Olá! Como podemos ajudar?")+'</div><div id="vgon-log" style="height:240px;overflow:auto;padding:14px;background:#f8fafc;font-size:14px"></div><form id="vgon-form" style="padding:12px;border-top:1px solid #e5e7eb"><input id="vgon-name" placeholder="Seu nome" style="width:100%%;box-sizing:border-box;margin-bottom:8px;padding:10px;border:1px solid #d1d5db;border-radius:8px"><input id="vgon-email" placeholder="Seu e-mail ou telefone" style="width:100%%;box-sizing:border-box;margin-bottom:8px;padding:10px;border:1px solid #d1d5db;border-radius:8px"><div style="display:flex;gap:8px"><input id="vgon-message" placeholder="Digite sua mensagem" required style="flex:1;padding:10px;border:1px solid #d1d5db;border-radius:8px"><button style="background:'+color+';color:white;border:0;border-radius:8px;padding:0 14px;cursor:pointer">Enviar</button></div></form>';
+    css(panel,{position:"fixed",bottom:"92px",[side]:"22px",width:"370px",maxWidth:"calc(100vw - 32px)",height:"520px",maxHeight:"calc(100vh - 120px)",background:"#fff",borderRadius:"14px",boxShadow:"0 18px 50px rgba(0,0,0,.22)",overflow:"hidden",zIndex:"2147483647",fontFamily:"system-ui,-apple-system,sans-serif",display:"none",flexDirection:"column"});
+    panel.innerHTML = '<div style="background:'+color+';color:white;padding:16px;font-weight:700;font-size:15px">'+(cfg.greeting_message || "Olá! Como podemos ajudar?")+'</div><div id="vgon-log" style="flex:1;overflow-y:auto;padding:14px;background:#f8fafc;font-size:14px"></div><form id="vgon-form" style="padding:12px;border-top:1px solid #e5e7eb;background:#fff"><input id="vgon-name" placeholder="Seu nome" style="width:100%%;box-sizing:border-box;margin-bottom:8px;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px"><input id="vgon-email" placeholder="Seu e-mail ou telefone" style="width:100%%;box-sizing:border-box;margin-bottom:8px;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px"><div style="display:flex;gap:8px"><input id="vgon-message" placeholder="Digite sua mensagem..." required style="flex:1;padding:10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px"><button style="background:'+color+';color:white;border:0;border-radius:8px;padding:0 14px;cursor:pointer;font-size:15px">➤</button></div></form>';
     document.body.appendChild(panel); document.body.appendChild(bubble);
-    bubble.onclick = function(){ panel.style.display = panel.style.display === "none" ? "block" : "none"; };
+    bubble.onclick = function(){ var showing = panel.style.display !== "none"; panel.style.display = showing ? "none" : "flex"; if(!showing && conversationId) connectWS(); };
     function poll(){
       if(!conversationId) return;
       fetch(apiBase + "/api/widget/" + widgetId + "/messages?conversation_id=" + encodeURIComponent(conversationId)).then(function(r){ return r.json(); }).then(function(data){
-        var log = panel.querySelector("#vgon-log");
+        var log = document.getElementById("vgon-log");
         (data.messages || []).forEach(function(m){ appendMsg(log, m.content, m.sender_type === "contact", color, m.id); });
       }).catch(function(){});
     }
-    setInterval(poll, 3500); poll();
+    poll();
+    if(conversationId) connectWS();
     panel.querySelector("#vgon-form").onsubmit = function(e){
       e.preventDefault();
       var msg = panel.querySelector("#vgon-message").value.trim(); if(!msg) return;
-      var log = panel.querySelector("#vgon-log");
+      var log = document.getElementById("vgon-log");
       var contact = panel.querySelector("#vgon-email").value.trim();
       var tempId = "temp-" + Date.now(); appendMsg(log, msg, true, color, tempId);
+      panel.querySelector("#vgon-message").value="";
       fetch(apiBase + "/api/widget/" + widgetId + "/message",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({visitor_id:visitorId,name:panel.querySelector("#vgon-name").value,email:contact.indexOf("@")>=0?contact:"",phone:contact.indexOf("@")>=0?"":contact,message:msg,page_url:location.href})}).then(function(r){ return r.json(); }).then(function(data){
-        if(data.conversation_id){ conversationId = data.conversation_id; localStorage.setItem("vgon_widget_conversation_id", conversationId); }
+        if(data.conversation_id && !conversationId){ conversationId = data.conversation_id; localStorage.setItem("vgon_widget_conversation_id", conversationId); connectWS(); }
+        if(data.conversation_id) conversationId = data.conversation_id;
         if(data.message_id){ seen[data.message_id]=true; }
-        panel.querySelector("#vgon-message").value="";
-        poll();
       }).catch(function(){ alert("Não foi possível enviar a mensagem."); });
     };
   });

@@ -466,6 +466,15 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 				*body.ReplyToID, replyContent, replySender, msg.ID)
 		}
 
+		// Push agent message to the widget visitor in real-time (if this is not a private note)
+		if !body.IsPrivate {
+			svc.WSHub.BroadcastToRoom("widget:"+conversationID, "new_message", map[string]interface{}{
+				"id": msg.ID, "conversation_id": conversationID,
+				"sender_type": "user", "content": body.Content, "message_type": "text",
+				"created_at": msg.CreatedAt,
+			})
+		}
+
 		return c.Status(fiber.StatusCreated).JSON(msg)
 	}
 }
