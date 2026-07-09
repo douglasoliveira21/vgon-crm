@@ -226,7 +226,7 @@ func RemoveContactTag(svc *services.Container) fiber.Handler {
 }
 
 func updateContactConsentState(db *sql.DB, companyID, contactID, userID, status, source, reason, consentText string) (fiber.Map, error) {
-	isOptedOut := status == "opted_out" || status == "revoked"
+	shouldOptOut := status == "opted_out" || status == "revoked"
 	_, err := db.Exec(`
 		UPDATE contacts
 		SET consent_status = $1,
@@ -241,7 +241,7 @@ func updateContactConsentState(db *sql.DB, companyID, contactID, userID, status,
 			opt_out_source = CASE WHEN $5 THEN NULLIF($2, '') ELSE NULL END,
 			updated_at = NOW()
 		WHERE id = $7 AND company_id = $8
-	`, status, source, consentText, userID, isOptedOut, reason, contactID, companyID)
+	`, status, source, consentText, userID, shouldOptOut, reason, contactID, companyID)
 	if err != nil {
 		return nil, err
 	}
