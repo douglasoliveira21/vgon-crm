@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import api from '@/lib/api'
 import wsService from '@/lib/websocket'
 import toast from 'react-hot-toast'
@@ -17,6 +17,8 @@ import {
   X,
   Mail,
 } from 'lucide-react'
+
+const QR_CODE_TTL_SECONDS = 45
 
 interface WhatsAppInstance {
   id: string
@@ -72,8 +74,12 @@ export default function ChannelsPage() {
   const [savingEmail, setSavingEmail] = useState(false)
   const [qrCode, setQrCode] = useState<string | null>(null)
   const [qrInstanceId, setQrInstanceId] = useState<string | null>(null)
+  const [qrSecondsLeft, setQrSecondsLeft] = useState(QR_CODE_TTL_SECONDS)
+  const [refreshingQRCode, setRefreshingQRCode] = useState(false)
   const [emailForm, setEmailForm] = useState(defaultEmailForm)
   const [showImapForm, setShowImapForm] = useState(false)
+  const instancesRef = useRef<WhatsAppInstance[]>([])
+  const qrInstanceIdRef = useRef<string | null>(null)
 
   const applyEmailProvider = (provider: 'gmail' | 'outlook' | 'imap') => {
     const currentName = emailForm.name
@@ -118,6 +124,14 @@ export default function ChannelsPage() {
   }
 
   useEffect(() => {
+    instancesRef.current = instances
+  }, [instances])
+
+  useEffect(() => {
+    qrInstanceIdRef.current = qrInstanceId
+  }, [qrInstanceId])
+
+  useEffect(() => {
     fetchInstances()
     fetchEmailChannels()
 
@@ -127,9 +141,20 @@ export default function ChannelsPage() {
           inst.instance_name === data.instance_name ? { ...inst, status: data.status } : inst
         )
       )
+      if (data.status === 'connected' && instancesRef.current.find((inst) => inst.id === qrInstanceIdRef.current)?.instance_name === data.instance_name) {
+        setQrCode(null)
+        setQrInstanceId(null)
+        setQrSecondsLeft(QR_CODE_TTL_SECONDS)
+      }
     }
     const handleQRCode = (data: any) => {
-      if (data.qrcode) setQrCode(data.qrcode)
+      if (!data.qrcode) return
+      setQrCode(data.qrcode)
+      setQrSecondsLeft(QR_CODE_TTL_SECONDS)
+      if (data.instance_name) {
+        const matched = instancesRef.current.find((inst) => inst.instance_name === data.instance_name)
+        if (matched) setQrInstanceId(matched.id)
+      }
     }
 
     wsService.on('channel_status', handleStatus)
@@ -139,6 +164,23 @@ export default function ChannelsPage() {
       wsService.off('qrcode_update', handleQRCode)
     }
   }, [])
+
+  useEffect(() => {
+    if (!qrCode || !qrInstanceId) return
+
+    setQrSecondsLeft(QR_CODE_TTL_SECONDS)
+    const timer = window.setInterval(() => {
+      setQrSecondsLeft((current) => {
+        if (current <= 1) {
+          fetchQRCode(qrInstanceId, true)
+          return QR_CODE_TTL_SECONDS
+        }
+        return current - 1
+      })
+    }, 1000)
+
+    return () => window.clearInterval(timer)
+  }, [qrCode, qrInstanceId])
 
   const fetchInstances = async () => {
     try {
@@ -175,6 +217,7 @@ export default function ChannelsPage() {
       if (instance.qrcode) {
         setQrCode(instance.qrcode)
         setQrInstanceId(instance.id)
+        setQrSecondsLeft(QR_CODE_TTL_SECONDS)
       }
       setInstanceName('')
       setShowCreateModal(false)
@@ -219,13 +262,20 @@ export default function ChannelsPage() {
     }
   }
 
-  const fetchQRCode = async (instanceId: string) => {
+  const fetchQRCode = async (instanceId: string, automatic = false) => {
+    if (refreshingQRCode) return
+    setRefreshingQRCode(true)
     try {
       const response = await api.get(`/whatsapp/instances/${instanceId}/qrcode`)
       setQrCode(response.data.qrcode)
       setQrInstanceId(instanceId)
+      setQrSecondsLeft(response.data.expires_in || QR_CODE_TTL_SECONDS)
+      setInstances((prev) => prev.map((inst) => inst.id === instanceId ? { ...inst, status: 'qr_code', qrcode: response.data.qrcode } : inst))
+      if (!automatic) toast.success('QR Code atualizado')
     } catch {
-      toast.error('Erro ao buscar QR Code')
+      if (!automatic) toast.error('Erro ao buscar QR Code')
+    } finally {
+      setRefreshingQRCode(false)
     }
   }
 
@@ -353,18 +403,31 @@ export default function ChannelsPage() {
             <div className="card p-8 mb-6 text-center">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">Escaneie o QR Code</h3>
-                <button onClick={() => { setQrCode(null); setQrInstanceId(null) }} className="text-gray-400 hover:text-gray-600">
+                <button onClick={() => { setQrCode(null); setQrInstanceId(null); setQrSecondsLeft(QR_CODE_TTL_SECONDS) }} className="text-gray-400 hover:text-gray-600">
                   <X size={20} />
                 </button>
               </div>
-              <p className="text-sm text-gray-500 mb-6">Abra o WhatsApp no celular e escaneie o codigo abaixo.</p>
+              <p className="text-sm text-gray-500 mb-2">Abra o WhatsApp no celular e escaneie o codigo abaixo.</p>
+              <p className="text-xs text-gray-400 mb-6">
+                Atualizacao automatica em {qrSecondsLeft}s. O QR Code expira rapidamente por seguranca.
+              </p>
               <div className="inline-block p-4 bg-white rounded-2xl shadow-lg border border-gray-100">
                 <img src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`} alt="QR Code WhatsApp" className="w-64 h-64" />
               </div>
-              <div className="mt-4">
-                <button onClick={() => qrInstanceId && fetchQRCode(qrInstanceId)} className="btn-secondary text-sm">
-                  <RefreshCw size={14} />
-                  Atualizar QR Code
+              <div className="mt-4 flex flex-col items-center gap-2">
+                <div className="h-2 w-64 overflow-hidden rounded-full bg-gray-100">
+                  <div
+                    className="h-full rounded-full bg-primary-600 transition-all"
+                    style={{ width: `${Math.max(0, Math.min(100, (qrSecondsLeft / QR_CODE_TTL_SECONDS) * 100))}%` }}
+                  />
+                </div>
+                <button
+                  onClick={() => qrInstanceId && fetchQRCode(qrInstanceId)}
+                  disabled={!qrInstanceId || refreshingQRCode}
+                  className="btn-secondary text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw size={14} className={refreshingQRCode ? 'animate-spin' : ''} />
+                  {refreshingQRCode ? 'Atualizando...' : 'Atualizar QR Code'}
                 </button>
               </div>
             </div>

@@ -73,7 +73,7 @@ func GetWhatsAppQRCode(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		return c.JSON(fiber.Map{"qrcode": qrcode})
+		return c.JSON(fiber.Map{"qrcode": qrcode, "expires_in": 45})
 	}
 }
 

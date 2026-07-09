@@ -247,9 +247,10 @@ func (s *EvolutionService) GetQRCode(instanceName string) (string, error) {
 		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	if base64, ok := result["base64"].(string); ok {
-		// Update in database
-		s.db.Exec("UPDATE whatsapp_instances SET qrcode = $1, updated_at = NOW() WHERE instance_name = $2", base64, instanceName)
+	base64 := extractEvolutionQRCode(result)
+	if base64 != "" {
+		s.db.Exec("UPDATE whatsapp_instances SET qrcode = $1, status = 'qr_code', updated_at = NOW() WHERE instance_name = $2", base64, instanceName)
+		s.db.Exec("UPDATE channels SET status = 'connecting', updated_at = NOW() WHERE id = (SELECT channel_id FROM whatsapp_instances WHERE instance_name = $1)", instanceName)
 		return base64, nil
 	}
 
@@ -974,11 +975,7 @@ func (s *EvolutionService) refreshCampaignCounters(campaignID string) {
 
 func (s *EvolutionService) handleQRCodeUpdate(instanceName string, event map[string]interface{}) {
 	data, _ := event["data"].(map[string]interface{})
-	qrcode, _ := data["qrcode"].(map[string]interface{})
-	base64, _ := qrcode["base64"].(string)
-	if base64 == "" {
-		base64, _ = data["base64"].(string)
-	}
+	base64 := extractEvolutionQRCode(data)
 	if base64 == "" {
 		log.Printf("[WEBHOOK] Ignoring QR update without base64 for instance %s", instanceName)
 		return
@@ -1172,6 +1169,26 @@ func normalizeEvolutionEventType(eventType string) string {
 	eventType = strings.ToLower(strings.TrimSpace(eventType))
 	eventType = strings.ReplaceAll(eventType, "_", ".")
 	return eventType
+}
+
+func extractEvolutionQRCode(payload map[string]interface{}) string {
+	if payload == nil {
+		return ""
+	}
+	if base64, ok := payload["base64"].(string); ok && base64 != "" {
+		return base64
+	}
+	if qrcode, ok := payload["qrcode"].(map[string]interface{}); ok {
+		if base64, ok := qrcode["base64"].(string); ok && base64 != "" {
+			return base64
+		}
+	}
+	if data, ok := payload["data"].(map[string]interface{}); ok {
+		if base64 := extractEvolutionQRCode(data); base64 != "" {
+			return base64
+		}
+	}
+	return ""
 }
 
 func (s *EvolutionService) getStoredInstanceStatus(instanceName string) string {
