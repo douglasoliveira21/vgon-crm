@@ -524,6 +524,12 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 				"created_at": msg.CreatedAt,
 			})
 		}
+		if !body.IsPrivate {
+			var contactID string
+			if err := svc.DB.QueryRow("SELECT contact_id FROM conversations WHERE id = $1 AND company_id = $2", conversationID, companyID).Scan(&contactID); err == nil {
+				logAuditEvent(svc.DB, c, "message.send", "contact", contactID, fiber.Map{"conversation_id": conversationID, "message_id": msg.ID, "message_type": "text"})
+			}
+		}
 
 		return c.Status(fiber.StatusCreated).JSON(msg)
 	}

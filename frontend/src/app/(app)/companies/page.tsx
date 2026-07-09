@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { Building2, Edit2, FileDown, Plus, Search, Trash2 } from 'lucide-react'
@@ -46,6 +47,7 @@ function formatCNPJ(value: string) {
 }
 
 export default function CompaniesPage() {
+  const searchParams = useSearchParams()
   const [companies, setCompanies] = useState<CustomerCompany[]>([])
   const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
@@ -54,6 +56,11 @@ export default function CompaniesPage() {
   useEffect(() => {
     fetchCompanies()
   }, [search])
+
+  useEffect(() => {
+    const urlSearch = searchParams.get('search') || ''
+    if (urlSearch) setSearch(urlSearch)
+  }, [searchParams])
 
   const fetchCompanies = async () => {
     const res = await api.get('/customer-companies', { params: { search } })

@@ -1,10 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { Search, Plus, Edit2, Trash2, MapPin, MessageSquare, X } from 'lucide-react'
+import { Search, Plus, Edit2, Trash2, MapPin, MessageSquare, X, ShieldCheck, Download, History } from 'lucide-react'
 
 const PAGE_SIZE = 25
 
@@ -20,6 +20,15 @@ interface Contact {
   city?: string
   origin?: string
   avatar_url?: string
+  is_opted_out?: boolean
+  opted_out_at?: string
+  opt_out_reason?: string
+  opt_out_source?: string
+  consent_status?: string
+  consent_source?: string
+  consent_text?: string
+  consent_given_at?: string
+  consent_revoked_at?: string
   tags?: Array<{ id: string; name: string; color: string }>
   created_at: string
 }
@@ -40,6 +49,7 @@ interface Channel {
 
 export default function ContactsPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [contacts, setContacts] = useState<Contact[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -48,6 +58,7 @@ export default function ContactsPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingContact, setEditingContact] = useState<Contact | null>(null)
   const [conversationContact, setConversationContact] = useState<Contact | null>(null)
+  const [privacyContact, setPrivacyContact] = useState<Contact | null>(null)
   const [channels, setChannels] = useState<Channel[]>([])
   const [loadingChannels, setLoadingChannels] = useState(false)
   const [startingConversation, setStartingConversation] = useState(false)
@@ -59,9 +70,11 @@ export default function ContactsPage() {
   }, [search, page])
 
   useEffect(() => {
+    const urlSearch = searchParams.get('search') || ''
+    if (urlSearch) setSearch(urlSearch)
     fetchCompanies()
     fetchChannels()
-  }, [])
+  }, [searchParams])
 
   const fetchContacts = async () => {
     setLoading(true)
@@ -234,12 +247,21 @@ export default function ContactsPage() {
                     <button
                       onClick={() => { setEditingContact(contact); setShowForm(true) }}
                       className="p-1.5 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded"
+                      title="Editar contato"
                     >
                       <Edit2 size={14} />
                     </button>
                     <button
+                      onClick={() => setPrivacyContact(contact)}
+                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"
+                      title="LGPD e auditoria"
+                    >
+                      <ShieldCheck size={14} />
+                    </button>
+                    <button
                       onClick={() => deleteContact(contact.id)}
                       className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
+                      title="Remover contato"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -304,6 +326,207 @@ export default function ContactsPage() {
           onStart={confirmStartConversation}
         />
       )}
+
+      {privacyContact && (
+        <ContactPrivacyModal
+          contact={privacyContact}
+          onClose={() => setPrivacyContact(null)}
+          onUpdated={() => {
+            fetchContacts()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function getConsentLabel(status?: string) {
+  const labels: Record<string, string> = {
+    granted: 'Autorizado',
+    revoked: 'Revogado',
+    opted_out: 'Opt-out',
+    unknown: 'Não informado',
+  }
+  return labels[status || 'unknown'] || 'Não informado'
+}
+
+function ContactPrivacyModal({
+  contact,
+  onClose,
+  onUpdated,
+}: {
+  contact: Contact
+  onClose: () => void
+  onUpdated: () => void
+}) {
+  const [status, setStatus] = useState(contact.consent_status || (contact.is_opted_out ? 'opted_out' : 'unknown'))
+  const [source, setSource] = useState(contact.consent_source || contact.opt_out_source || 'manual')
+  const [reason, setReason] = useState(contact.opt_out_reason || '')
+  const [consentText, setConsentText] = useState(contact.consent_text || '')
+  const [saving, setSaving] = useState(false)
+  const [loadingAudit, setLoadingAudit] = useState(true)
+  const [consents, setConsents] = useState<Array<any>>([])
+  const [audit, setAudit] = useState<Array<any>>([])
+
+  useEffect(() => {
+    loadAudit()
+  }, [])
+
+  const loadAudit = async () => {
+    setLoadingAudit(true)
+    try {
+      const response = await api.get(`/contacts/${contact.id}/audit`)
+      setConsents(response.data.consents || [])
+      setAudit(response.data.audit || [])
+    } catch {
+      toast.error('Erro ao carregar histórico LGPD')
+    } finally {
+      setLoadingAudit(false)
+    }
+  }
+
+  const saveConsent = async (nextStatus = status) => {
+    setSaving(true)
+    try {
+      await api.post(`/contacts/${contact.id}/consent`, {
+        status: nextStatus,
+        source,
+        reason,
+        consent_text: consentText,
+      })
+      setStatus(nextStatus)
+      toast.success('Consentimento atualizado')
+      await loadAudit()
+      onUpdated()
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao atualizar consentimento')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const exportContact = async () => {
+    try {
+      const response = await api.get(`/contacts/${contact.id}/export`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/json' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `contato-${contact.id}-lgpd.json`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      toast.success('Exportação gerada')
+      await loadAudit()
+    } catch {
+      toast.error('Erro ao exportar dados do contato')
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">LGPD e auditoria</h3>
+            <p className="text-sm text-gray-500 mt-1">{contact.name || contact.email || contact.phone}</p>
+          </div>
+          <button type="button" onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">
+          <div className="space-y-4">
+            <div className="rounded-xl border border-gray-200 p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <ShieldCheck size={18} className="text-primary-600" />
+                <h4 className="font-medium text-gray-900">Consentimento e opt-out</h4>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                  <select value={status} onChange={(e) => setStatus(e.target.value)} className="input">
+                    <option value="unknown">Não informado</option>
+                    <option value="granted">Autorizado</option>
+                    <option value="revoked">Revogado</option>
+                    <option value="opted_out">Opt-out</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Origem</label>
+                  <input value={source} onChange={(e) => setSource(e.target.value)} className="input" placeholder="manual, site, whatsapp..." />
+                </div>
+              </div>
+              <div className="mt-3">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Texto/base da autorização</label>
+                <textarea value={consentText} onChange={(e) => setConsentText(e.target.value)} className="input resize-none" rows={3} />
+              </div>
+              {(status === 'revoked' || status === 'opted_out') && (
+                <div className="mt-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Motivo</label>
+                  <input value={reason} onChange={(e) => setReason(e.target.value)} className="input" placeholder="Solicitado pelo cliente, descadastro..." />
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2 mt-4">
+                <button type="button" disabled={saving} onClick={() => saveConsent()} className="btn-primary">
+                  {saving ? 'Salvando...' : 'Salvar status'}
+                </button>
+                <button type="button" disabled={saving} onClick={() => saveConsent('granted')} className="btn-secondary">
+                  Marcar autorizado
+                </button>
+                <button type="button" disabled={saving} onClick={() => saveConsent('opted_out')} className="btn-secondary text-red-600">
+                  Registrar opt-out
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <History size={18} className="text-gray-500" />
+                  <h4 className="font-medium text-gray-900">Histórico</h4>
+                </div>
+                <button type="button" onClick={loadAudit} className="text-xs text-primary-600 hover:underline">Atualizar</button>
+              </div>
+              {loadingAudit ? (
+                <p className="text-sm text-gray-500">Carregando histórico...</p>
+              ) : (
+                <div className="space-y-3">
+                  {[...consents, ...audit].slice(0, 30).map((item, index) => (
+                    <div key={`${item.id}-${index}`} className="rounded-lg bg-gray-50 p-3 text-sm">
+                      <p className="font-medium text-gray-900">{item.action || `Consentimento: ${getConsentLabel(item.status)}`}</p>
+                      <p className="text-xs text-gray-500">
+                        {item.user_name || 'Sistema'} · {item.created_at ? new Date(item.created_at).toLocaleString('pt-BR') : ''}
+                      </p>
+                      {(item.reason || item.source) && (
+                        <p className="text-xs text-gray-500 mt-1">{item.source} {item.reason ? `- ${item.reason}` : ''}</p>
+                      )}
+                    </div>
+                  ))}
+                  {consents.length === 0 && audit.length === 0 && (
+                    <p className="text-sm text-gray-500">Nenhum histórico registrado.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="rounded-xl border border-gray-200 p-4">
+              <p className="text-xs text-gray-500">Status atual</p>
+              <p className="text-lg font-semibold text-gray-900">{getConsentLabel(status)}</p>
+              <p className="text-xs text-gray-500 mt-2">
+                Opt-out impede campanhas e registra a solicitação do titular.
+              </p>
+            </div>
+            <button type="button" onClick={exportContact} className="btn-secondary w-full justify-center">
+              <Download size={16} />
+              Exportar dados LGPD
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -435,6 +658,9 @@ function ContactFormModal({
     position: contact?.position || '',
     city: contact?.city || '',
     origin: contact?.origin || '',
+    consent_status: contact?.consent_status || (contact?.is_opted_out ? 'opted_out' : 'unknown'),
+    consent_source: contact?.consent_source || '',
+    consent_text: contact?.consent_text || '',
   })
   const [saving, setSaving] = useState(false)
 
@@ -546,6 +772,47 @@ function ContactFormModal({
                 onChange={(e) => setForm({ ...form, origin: e.target.value })}
                 className="input"
                 placeholder="WhatsApp, site, indicação..."
+              />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <ShieldCheck size={16} className="text-primary-600" />
+              <p className="text-sm font-medium text-gray-900">LGPD e consentimento</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select
+                  value={form.consent_status}
+                  onChange={(e) => setForm({ ...form, consent_status: e.target.value })}
+                  className="input"
+                >
+                  <option value="unknown">Não informado</option>
+                  <option value="granted">Autorizado</option>
+                  <option value="revoked">Revogado</option>
+                  <option value="opted_out">Opt-out</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Origem da autorização</label>
+                <input
+                  type="text"
+                  value={form.consent_source}
+                  onChange={(e) => setForm({ ...form, consent_source: e.target.value })}
+                  className="input"
+                  placeholder="site, whatsapp, contrato..."
+                />
+              </div>
+            </div>
+            <div className="mt-3">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Texto/base da autorização</label>
+              <textarea
+                value={form.consent_text}
+                onChange={(e) => setForm({ ...form, consent_text: e.target.value })}
+                className="input resize-none"
+                rows={2}
               />
             </div>
           </div>

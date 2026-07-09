@@ -1139,6 +1139,7 @@ func (s *EvolutionService) GetInstances(companyID string) ([]models.WhatsAppInst
 		SELECT id, company_id, channel_id, instance_name, instance_id, token,
 		       COALESCE(status, 'disconnected'),
 		       phone_number, webhook_url, connected_at,
+		       last_status_check_at, last_status_error, disconnected_alerted_at,
 		       COALESCE(created_at, NOW()), COALESCE(updated_at, NOW())
 		FROM whatsapp_instances
 		WHERE company_id = $1
@@ -1154,7 +1155,8 @@ func (s *EvolutionService) GetInstances(companyID string) ([]models.WhatsAppInst
 		var inst models.WhatsAppInstance
 		err := rows.Scan(&inst.ID, &inst.CompanyID, &inst.ChannelID, &inst.InstanceName,
 			&inst.InstanceID, &inst.Token, &inst.Status, &inst.PhoneNumber,
-			&inst.WebhookURL, &inst.ConnectedAt, &inst.CreatedAt, &inst.UpdatedAt)
+			&inst.WebhookURL, &inst.ConnectedAt, &inst.LastStatusCheckAt, &inst.LastStatusError,
+			&inst.DisconnectedAlertedAt, &inst.CreatedAt, &inst.UpdatedAt)
 		if err != nil {
 			continue
 		}

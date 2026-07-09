@@ -99,6 +99,9 @@ type WhatsAppInstance struct {
 	PhoneNumber  *string    `json:"phone_number,omitempty"`
 	WebhookURL   *string    `json:"webhook_url,omitempty"`
 	ConnectedAt  *time.Time `json:"connected_at,omitempty"`
+	LastStatusCheckAt *time.Time `json:"last_status_check_at,omitempty"`
+	LastStatusError   *string    `json:"last_status_error,omitempty"`
+	DisconnectedAlertedAt *time.Time `json:"disconnected_alerted_at,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 }
@@ -121,6 +124,14 @@ type Contact struct {
 	Notes               *string   `json:"notes,omitempty"`
 	AssignedTo          *string   `json:"assigned_to,omitempty"`
 	IsOptedOut          bool      `json:"is_opted_out"`
+	OptedOutAt          *time.Time `json:"opted_out_at,omitempty"`
+	OptOutReason        *string   `json:"opt_out_reason,omitempty"`
+	OptOutSource        *string   `json:"opt_out_source,omitempty"`
+	ConsentStatus       *string   `json:"consent_status,omitempty"`
+	ConsentSource       *string   `json:"consent_source,omitempty"`
+	ConsentText         *string   `json:"consent_text,omitempty"`
+	ConsentGivenAt      *time.Time `json:"consent_given_at,omitempty"`
+	ConsentRevokedAt    *time.Time `json:"consent_revoked_at,omitempty"`
 	Tags                []Tag     `json:"tags,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`

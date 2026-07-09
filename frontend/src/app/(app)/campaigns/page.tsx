@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { Plus, Send, Pause, Play, Users, Check, Eye, X, Trash2, AlertTriangle, FileText, Image, Video, Music, ArrowUp, ArrowDown } from 'lucide-react'
+import { Plus, Send, Pause, Play, Users, Check, Eye, X, Trash2, AlertTriangle, FileText, Image, Video, Music, ArrowUp, ArrowDown, Mail } from 'lucide-react'
 
 type CampaignContentType = 'text' | 'image' | 'video' | 'audio'
 
@@ -118,10 +119,16 @@ export default function CampaignsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Marketing em Massa</h1>
           <p className="text-gray-500 mt-1">Envie campanhas para seus contatos via WhatsApp</p>
         </div>
-        <button onClick={() => { setEditingCampaign(null); setShowForm(true) }} className="btn-primary">
-          <Plus size={18} />
-          Nova campanha
-        </button>
+        <div className="flex items-center gap-2">
+          <Link href="/campaigns/email" className="btn-secondary">
+            <Mail size={18} />
+            Campanha por e-mail
+          </Link>
+          <button onClick={() => { setEditingCampaign(null); setShowForm(true) }} className="btn-primary">
+            <Plus size={18} />
+            Nova campanha
+          </button>
+        </div>
       </div>
 
       {/* Stats */}

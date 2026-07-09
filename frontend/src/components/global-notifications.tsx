@@ -20,6 +20,12 @@ type ConversationInfo = {
   assigned_to?: string | null
 }
 
+type OperationalAlert = {
+  title?: string
+  content?: string
+  type?: string
+}
+
 const getJsonSetting = (key: string) => {
   try {
     return JSON.parse(localStorage.getItem(key) || '{}')
@@ -69,6 +75,28 @@ const showBrowserNotification = (msg: IncomingMessage, preview: string) => {
     notification.onclick = () => {
       window.focus()
       window.location.href = `/conversations?conversation=${msg.conversation_id}`
+      notification.close()
+    }
+  } catch {}
+}
+
+const showOperationalBrowserNotification = (alert: OperationalAlert) => {
+  try {
+    const settings = getJsonSetting('notification_settings')
+    if (settings.browserEnabled === false) return
+    if (!('Notification' in window) || Notification.permission !== 'granted') return
+
+    const notification = new Notification(alert.title || 'Alerta operacional', {
+      body: alert.content || 'Verifique o sistema.',
+      icon: '/favicon.png',
+      badge: '/favicon.png',
+      tag: `operational-${alert.type || 'alert'}`,
+      silent: false,
+      requireInteraction: true,
+    })
+    notification.onclick = () => {
+      window.focus()
+      window.location.href = '/channels'
       notification.close()
     }
   } catch {}
@@ -126,6 +154,19 @@ export function GlobalNotifications() {
     wsService.on('new_message', handleNewMessage)
     return () => wsService.off('new_message', handleNewMessage)
   }, [isAuthenticated, user?.id])
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+
+    const handleOperationalAlert = (alert: OperationalAlert) => {
+      toast.error(alert.content || alert.title || 'Alerta operacional', { duration: 8000 })
+      showOperationalBrowserNotification(alert)
+      playNotificationSound()
+    }
+
+    wsService.on('operational_alert', handleOperationalAlert)
+    return () => wsService.off('operational_alert', handleOperationalAlert)
+  }, [isAuthenticated])
 
   return null
 }

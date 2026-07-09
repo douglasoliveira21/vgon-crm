@@ -68,6 +68,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 
 	// Dashboard
 	protected.Get("/dashboard", GetDashboard(svc))
+	protected.Get("/search", GlobalSearch(svc))
 
 	// User profile
 	protected.Get("/me", GetCurrentUser(svc))
@@ -110,6 +111,9 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	// Contacts
 	contacts := protected.Group("/contacts")
 	contacts.Get("/", GetContacts(svc))
+	contacts.Get("/:id/export", ExportContactData(svc))
+	contacts.Get("/:id/audit", GetContactAudit(svc))
+	contacts.Post("/:id/consent", UpdateContactConsent(svc))
 	contacts.Get("/:id", GetContact(svc))
 	contacts.Post("/", CreateContact(svc))
 	contacts.Put("/:id", UpdateContact(svc))
@@ -173,12 +177,14 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	campaigns.Post("/", CreateCampaign(svc))
 	campaigns.Put("/:id", UpdateCampaign(svc))
 	campaigns.Delete("/:id", DeleteCampaign(svc))
+	campaigns.Post("/email/send", SendEmailCampaign(svc))
 	campaigns.Post("/:id/start", StartCampaign(svc))
 	campaigns.Post("/:id/pause", PauseCampaign(svc))
 
 	// Metrics
 	protected.Get("/metrics", GetMetrics(svc))
 	protected.Get("/metrics/attendance", GetAttendanceMetrics(svc))
+	protected.Get("/audit-logs", GetAuditLogs(svc))
 
 	// GLPI
 	glpi := protected.Group("/glpi")

@@ -202,6 +202,61 @@ func (s *EmailService) SendReply(companyID, conversationID, content string) (str
 	return externalID, nil
 }
 
+func (s *EmailService) SendMarketingEmail(companyID, channelID, to, subject, content string) (string, error) {
+	channelID = strings.TrimSpace(channelID)
+	to = strings.TrimSpace(to)
+	subject = strings.TrimSpace(subject)
+	content = strings.TrimSpace(content)
+	if channelID == "" {
+		return "", fmt.Errorf("selecione uma caixa de entrada de e-mail")
+	}
+	if to == "" {
+		return "", fmt.Errorf("destinatário sem e-mail")
+	}
+	if subject == "" {
+		return "", fmt.Errorf("assunto do e-mail é obrigatório")
+	}
+	if content == "" {
+		return "", fmt.Errorf("mensagem do e-mail é obrigatória")
+	}
+
+	var rawSettings []byte
+	var status string
+	err := s.db.QueryRow(`
+		SELECT settings, COALESCE(status, 'disconnected')
+		FROM channels
+		WHERE id = $1 AND company_id = $2 AND type = 'email' AND COALESCE(is_active, true) = true
+	`, channelID, companyID).Scan(&rawSettings, &status)
+	if err != nil {
+		return "", fmt.Errorf("caixa de entrada de e-mail não encontrada")
+	}
+	if status != "connected" {
+		return "", fmt.Errorf("caixa de entrada de e-mail não conectada")
+	}
+
+	settings, err := parseEmailSettings(rawSettings)
+	if err != nil {
+		return "", err
+	}
+
+	var externalID string
+	switch settings.Provider {
+	case "gmail":
+		externalID, err = s.sendGmailReply(&settings, to, subject, content)
+	case "outlook":
+		externalID, err = s.sendOutlookReply(&settings, to, subject, content)
+	default:
+		externalID, err = sendSMTPReply(settings, to, subject, content)
+	}
+	if err != nil {
+		return "", err
+	}
+
+	updatedSettings, _ := json.Marshal(settings)
+	_, _ = s.db.Exec("UPDATE channels SET settings = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3", updatedSettings, channelID, companyID)
+	return externalID, nil
+}
+
 func (s *EmailService) getEmailSendTarget(companyID, conversationID string) (emailSendTarget, error) {
 	var target emailSendTarget
 	err := s.db.QueryRow(`

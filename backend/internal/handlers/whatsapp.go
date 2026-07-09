@@ -51,6 +51,7 @@ func CreateWhatsAppInstance(svc *services.Container) fiber.Handler {
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
+		logAuditEvent(svc.DB, c, "whatsapp.instance.create", "whatsapp_instance", instance.ID, fiber.Map{"instance_name": instance.InstanceName, "channel_name": body.ChannelName})
 
 		return c.Status(fiber.StatusCreated).JSON(instance)
 	}
@@ -111,6 +112,7 @@ func DisconnectWhatsAppInstance(svc *services.Container) fiber.Handler {
 		if err := svc.Evolution.DisconnectInstance(instanceName); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
+		logAuditEvent(svc.DB, c, "whatsapp.instance.disconnect", "whatsapp_instance", instanceID, fiber.Map{"instance_name": instanceName})
 
 		return c.JSON(fiber.Map{"message": "Instance disconnected"})
 	}
@@ -130,6 +132,7 @@ func DeleteWhatsAppInstance(svc *services.Container) fiber.Handler {
 		if err := svc.Evolution.DeleteInstance(instanceName); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
+		logAuditEvent(svc.DB, c, "whatsapp.instance.delete", "whatsapp_instance", instanceID, fiber.Map{"instance_name": instanceName})
 
 		return c.JSON(fiber.Map{"message": "Instance deleted"})
 	}
@@ -153,6 +156,7 @@ func SyncWhatsAppContacts(svc *services.Container) fiber.Handler {
 
 		// Sync photos in background
 		go svc.Evolution.SyncAllContactPhotos(instanceName, companyID)
+		logAuditEvent(svc.DB, c, "whatsapp.contacts.sync", "whatsapp_instance", instanceID, fiber.Map{"instance_name": instanceName, "count": count})
 
 		return c.JSON(fiber.Map{"message": "Contacts synced", "count": count})
 	}
@@ -170,6 +174,7 @@ func SyncWhatsAppPhotos(svc *services.Container) fiber.Handler {
 		}
 
 		go svc.Evolution.SyncAllContactPhotos(instanceName, companyID)
+		logAuditEvent(svc.DB, c, "whatsapp.photos.sync", "whatsapp_instance", instanceID, fiber.Map{"instance_name": instanceName})
 
 		return c.JSON(fiber.Map{"message": "Photo sync started in background"})
 	}

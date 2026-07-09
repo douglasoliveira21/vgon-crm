@@ -29,15 +29,18 @@ import {
   Sun,
   UserCircle,
   ShieldCheck,
+  FileText,
   ChevronUp,
   ChevronDown,
   AtSign,
   SlidersHorizontal,
+  Search,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
 const menuItems = [
   { label: 'Painel', href: '/dashboard', icon: LayoutDashboard },
+  { label: 'Busca Global', href: '/search', icon: Search },
   { label: 'Caixa de Entrada', href: '/inbox', icon: Inbox },
   { label: 'Conversas', href: '/conversations', icon: MessageSquare, expandable: 'conversations' },
   { label: 'Contatos', href: '/contacts', icon: Users },
@@ -48,6 +51,7 @@ const menuItems = [
   { label: 'Bots e Automações', href: '/automations', icon: Bot },
   { label: 'Marketing', href: '/campaigns', icon: Megaphone },
   { label: 'Métricas', href: '/metrics', icon: BarChart3 },
+  { label: 'Logs Administrativos', href: '/audit-logs', icon: FileText },
   { label: 'Widget', href: '/widget', icon: Globe },
   { label: 'Respostas Rápidas', href: '/quick-replies', icon: Zap },
 ]

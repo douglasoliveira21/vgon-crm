@@ -212,6 +212,7 @@ func sanitizeChannelSettings(channelType string, raw []byte) map[string]interfac
 	}
 	if channelType == "email" {
 		delete(settings, "password")
+		delete(settings, "smtp_password")
 	}
 	return settings
 }
@@ -1195,12 +1196,17 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 			WHERE cc.campaign_id = $1
 			  AND c.company_id = $2
 			  AND cc.status = 'pending'
+			  AND COALESCE(cc.next_attempt_at, NOW()) <= NOW()
 			  AND c.phone IS NOT NULL
 			  AND COALESCE(c.is_opted_out, false) = false
 			ORDER BY cc.id
 			LIMIT 1
 		`, campaignID, companyID).Scan(&campaignContactID, &contactID, &name, &phone, &email, &companyName)
 		if err == sql.ErrNoRows {
+			if campaignHasPendingRetry(svc.DB, campaignID) {
+				time.Sleep(delay)
+				continue
+			}
 			break
 		}
 		if err != nil {
@@ -1209,16 +1215,16 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 			continue
 		}
 
+		_, _ = svc.DB.Exec("UPDATE campaign_contacts SET locked_at = NOW(), last_attempt_at = NOW() WHERE id = $1", campaignContactID)
 		err = sendCampaignItems(svc, campaignID, campaignContactID, instanceName, phone, items, name, phone, email, companyName)
 		if err != nil {
-			_, _ = svc.DB.Exec(`
-				UPDATE campaign_contacts SET status = 'failed', error_message = $1 WHERE id = $2
-			`, err.Error(), campaignContactID)
+			requeueCampaignContact(svc.DB, campaignContactID, err)
 		} else {
 			_, _ = svc.DB.Exec(`
 				UPDATE campaign_contacts
 				SET status = CASE WHEN status IN ('delivered', 'read', 'replied') THEN status ELSE 'sent' END,
 					sent_at = COALESCE(sent_at, NOW()),
+					locked_at = NULL,
 					error_message = NULL
 				WHERE id = $1
 			`, campaignContactID)
@@ -1228,6 +1234,47 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 	}
 
 	finalizeCampaignIfDone(svc.DB, campaignID)
+}
+
+func campaignHasPendingRetry(db *sql.DB, campaignID string) bool {
+	var pending int
+	_ = db.QueryRow(`
+		SELECT COUNT(*)
+		FROM campaign_contacts
+		WHERE campaign_id = $1
+		  AND status = 'pending'
+	`, campaignID).Scan(&pending)
+	return pending > 0
+}
+
+func requeueCampaignContact(db *sql.DB, campaignContactID string, sendErr error) {
+	var retryCount int
+	_ = db.QueryRow("SELECT COALESCE(retry_count, 0) FROM campaign_contacts WHERE id = $1", campaignContactID).Scan(&retryCount)
+	retryCount++
+	if retryCount >= 4 {
+		_, _ = db.Exec(`
+			UPDATE campaign_contacts
+			SET status = 'failed', retry_count = $1, locked_at = NULL, error_message = $2
+			WHERE id = $3
+		`, retryCount, sendErr.Error(), campaignContactID)
+		return
+	}
+
+	delayMinutes := 1
+	if retryCount == 2 {
+		delayMinutes = 5
+	} else if retryCount >= 3 {
+		delayMinutes = 15
+	}
+	_, _ = db.Exec(`
+		UPDATE campaign_contacts
+		SET status = 'pending',
+			retry_count = $1,
+			next_attempt_at = NOW() + ($2 || ' minutes')::interval,
+			locked_at = NULL,
+			error_message = $3
+		WHERE id = $4
+	`, retryCount, delayMinutes, sendErr.Error(), campaignContactID)
 }
 
 func sendCampaignItems(svc *services.Container, campaignID, campaignContactID, instanceName, phone string, items []campaignMessageItem, name, contactPhone, email, companyName string) error {
@@ -1322,6 +1369,175 @@ func renderCampaignMessage(template, name, phone, email, companyName string) str
 		"{{empresa}}", companyName,
 	)
 	return replacer.Replace(template)
+}
+
+type emailCampaignRecipient struct {
+	ID          string
+	Name        string
+	Phone       string
+	Email       string
+	CompanyName string
+}
+
+func SendEmailCampaign(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
+
+		var body struct {
+			ChannelID  string   `json:"channel_id"`
+			Subject    string   `json:"subject"`
+			Content    string   `json:"content"`
+			SendToAll  bool     `json:"send_to_all"`
+			ContactIDs []string `json:"contact_ids"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+		body.ChannelID = strings.TrimSpace(body.ChannelID)
+		body.Subject = strings.TrimSpace(body.Subject)
+		body.Content = strings.TrimSpace(body.Content)
+		if body.ChannelID == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Selecione a caixa de entrada de envio"})
+		}
+		if body.Subject == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Assunto é obrigatório"})
+		}
+		if body.Content == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Mensagem é obrigatória"})
+		}
+		if !body.SendToAll && len(body.ContactIDs) == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Selecione pelo menos um contato"})
+		}
+		if !body.SendToAll {
+			for _, contactID := range body.ContactIDs {
+				if _, err := uuid.Parse(contactID); err != nil {
+					return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Contato selecionado inválido"})
+				}
+			}
+		}
+
+		recipients, err := loadEmailCampaignRecipients(svc.DB, companyID, body.SendToAll, body.ContactIDs)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		if len(recipients) == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Nenhum contato com e-mail válido encontrado"})
+		}
+
+		failures := make([]fiber.Map, 0)
+		sentCount := 0
+		for _, recipient := range recipients {
+			subject := renderCampaignMessage(body.Subject, recipient.Name, recipient.Phone, recipient.Email, recipient.CompanyName)
+			content := renderCampaignMessage(body.Content, recipient.Name, recipient.Phone, recipient.Email, recipient.CompanyName)
+			externalID, err := svc.Email.SendMarketingEmail(companyID, body.ChannelID, recipient.Email, subject, content)
+			if err != nil {
+				failures = append(failures, fiber.Map{
+					"contact_id": recipient.ID,
+					"name":       recipient.Name,
+					"email":      recipient.Email,
+					"error":      err.Error(),
+				})
+				continue
+			}
+			sentCount++
+			if err := recordEmailCampaignMessage(svc.DB, companyID, body.ChannelID, userID, recipient, subject, content, externalID); err != nil {
+				log.Printf("[EMAIL_CAMPAIGN] failed to record sent email for contact %s: %v", recipient.ID, err)
+			}
+			logAuditEvent(svc.DB, c, "message.email_campaign.send", "contact", recipient.ID, fiber.Map{"channel_id": body.ChannelID, "subject": subject, "external_id": externalID})
+		}
+		logAuditEvent(svc.DB, c, "campaign.email.send", "campaign", "", fiber.Map{"total": len(recipients), "sent_count": sentCount, "failed_count": len(failures), "channel_id": body.ChannelID})
+
+		return c.JSON(fiber.Map{
+			"total":        len(recipients),
+			"sent_count":   sentCount,
+			"failed_count": len(failures),
+			"failures":     failures,
+		})
+	}
+}
+
+func loadEmailCampaignRecipients(db *sql.DB, companyID string, sendToAll bool, contactIDs []string) ([]emailCampaignRecipient, error) {
+	args := []interface{}{companyID}
+	filter := ""
+	if !sendToAll {
+		filter = "AND c.id = ANY($2::uuid[])"
+		args = append(args, "{"+strings.Join(contactIDs, ",")+"}")
+	}
+	rows, err := db.Query(fmt.Sprintf(`
+		SELECT c.id, COALESCE(NULLIF(c.name, ''), c.email), COALESCE(c.phone, ''), c.email, COALESCE(c.company_name, '')
+		FROM contacts c
+		WHERE c.company_id = $1
+		  AND NULLIF(TRIM(c.email), '') IS NOT NULL
+		  AND COALESCE(c.is_opted_out, false) = false
+		  %s
+		ORDER BY LOWER(COALESCE(NULLIF(c.name, ''), c.email)), c.email
+	`, filter), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	recipients := []emailCampaignRecipient{}
+	for rows.Next() {
+		var recipient emailCampaignRecipient
+		if err := rows.Scan(&recipient.ID, &recipient.Name, &recipient.Phone, &recipient.Email, &recipient.CompanyName); err != nil {
+			return nil, err
+		}
+		recipient.Email = strings.TrimSpace(recipient.Email)
+		if recipient.Email != "" {
+			recipients = append(recipients, recipient)
+		}
+	}
+	return recipients, rows.Err()
+}
+
+func recordEmailCampaignMessage(db *sql.DB, companyID, channelID, userID string, recipient emailCampaignRecipient, subject, content, externalID string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var conversationID string
+	err = tx.QueryRow(`
+		SELECT id
+		FROM conversations
+		WHERE company_id = $1 AND contact_id = $2 AND channel_id = $3
+		ORDER BY COALESCE(last_message_at, created_at) DESC
+		LIMIT 1
+	`, companyID, recipient.ID, channelID).Scan(&conversationID)
+	if err == sql.ErrNoRows {
+		conversationID = uuid.New().String()
+		_, err = tx.Exec(`
+			INSERT INTO conversations (id, company_id, contact_id, channel_id, status, subject, last_message_at, last_message_preview)
+			VALUES ($1, $2, $3, $4, 'open', $5, NOW(), $6)
+		`, conversationID, companyID, recipient.ID, channelID, subject, content)
+	}
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(`
+		INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, external_id, status, metadata, created_at)
+		VALUES ($1, $2, $3, 'user', NULLIF($4, '')::uuid, $5, 'email', NULLIF($6, ''), 'sent', $7::jsonb, NOW())
+	`, uuid.New().String(), conversationID, companyID, userID, content, externalID, fmt.Sprintf(`{"source":"email_campaign","subject":%q}`, subject))
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(`
+		UPDATE conversations
+		SET subject = COALESCE(NULLIF(subject, ''), $1),
+			last_message_at = NOW(),
+			last_message_preview = $2,
+			updated_at = NOW()
+		WHERE id = $3 AND company_id = $4
+	`, subject, content, conversationID, companyID)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func PauseCampaign(svc *services.Container) fiber.Handler {

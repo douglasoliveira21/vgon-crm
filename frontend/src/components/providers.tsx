@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'react-hot-toast'
 import { useState } from 'react'
 import { GlobalNotifications } from '@/components/global-notifications'
+import { GlobalRequestFeedback } from '@/components/global-request-feedback'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({
@@ -18,6 +19,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <GlobalNotifications />
+      <GlobalRequestFeedback />
       {children}
       <Toaster
         position="top-right"

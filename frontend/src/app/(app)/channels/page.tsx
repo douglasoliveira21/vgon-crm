@@ -26,6 +26,9 @@ interface WhatsAppInstance {
   status: string
   phone_number?: string
   qrcode?: string
+  last_status_check_at?: string
+  last_status_error?: string
+  disconnected_alerted_at?: string
   created_at: string
 }
 
@@ -446,6 +449,12 @@ export default function ChannelsPage() {
                       {getStatusBadge(instance.status)}
                       {instance.phone_number && <span className="text-xs text-gray-400">{instance.phone_number}</span>}
                     </div>
+                    {(instance.last_status_check_at || instance.last_status_error) && (
+                      <p className="text-xs text-gray-400 mt-1">
+                        Monitor: {instance.last_status_check_at ? new Date(instance.last_status_check_at).toLocaleString('pt-BR') : 'sem checagem'}
+                        {instance.last_status_error ? ` - erro: ${instance.last_status_error}` : ''}
+                      </p>
+                    )}
                   </div>
                 </div>
 

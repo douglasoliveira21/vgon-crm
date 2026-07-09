@@ -10,19 +10,35 @@ export const api = axios.create({
   },
 })
 
+const emitRequestActivity = (active: boolean) => {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent('api:activity', { detail: { active } }))
+}
+
 // Request interceptor to add auth token
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+api.interceptors.request.use(
+  (config) => {
+    emitRequestActivity(true)
+    const token = localStorage.getItem('access_token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => {
+    emitRequestActivity(false)
+    return Promise.reject(error)
   }
-  return config
-})
+)
 
 // Response interceptor for token refresh
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    emitRequestActivity(false)
+    return response
+  },
   async (error) => {
+    emitRequestActivity(false)
     const originalRequest = error.config
 
     if (error.response?.status === 429) {
