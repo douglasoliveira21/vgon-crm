@@ -1343,6 +1343,7 @@ func PauseCampaign(svc *services.Container) fiber.Handler {
 func GetMetrics(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
+		assignedTo := c.Query("assigned_to")
 
 		var totalConversations, openConversations, resolvedConversations int
 		var totalMessages int
@@ -1351,38 +1352,75 @@ func GetMetrics(svc *services.Container) fiber.Handler {
 		var totalContacts int
 		var slaWithin, slaBreached int
 
+		conversationFilter := "company_id = $1"
+		conversationArgs := []interface{}{companyID}
+		if assignedTo != "" {
+			conversationFilter += ` AND (
+				assigned_to = $2
+				OR EXISTS (
+					SELECT 1 FROM messages m
+					WHERE m.conversation_id = conversations.id
+					  AND m.company_id = conversations.company_id
+					  AND m.sender_type = 'user'
+					  AND m.sender_id = $2
+					  AND COALESCE(m.is_private, false) = false
+				)
+			)`
+			conversationArgs = append(conversationArgs, assignedTo)
+		}
+
 		// Conversations metrics
-		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1", companyID).Scan(&totalConversations)
-		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1 AND status = 'open'", companyID).Scan(&openConversations)
-		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1 AND status = 'resolved'", companyID).Scan(&resolvedConversations)
+		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE "+conversationFilter, conversationArgs...).Scan(&totalConversations)
+		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE "+conversationFilter+" AND status = 'open'", conversationArgs...).Scan(&openConversations)
+		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE "+conversationFilter+" AND status = 'resolved'", conversationArgs...).Scan(&resolvedConversations)
 
 		// Messages
-		svc.DB.QueryRow("SELECT COUNT(*) FROM messages WHERE company_id = $1", companyID).Scan(&totalMessages)
+		if assignedTo != "" {
+			svc.DB.QueryRow(`
+				SELECT COUNT(*) FROM messages
+				WHERE company_id = $1
+				  AND sender_type = 'user'
+				  AND sender_id = $2
+				  AND COALESCE(is_private, false) = false
+			`, companyID, assignedTo).Scan(&totalMessages)
+		} else {
+			svc.DB.QueryRow("SELECT COUNT(*) FROM messages WHERE company_id = $1", companyID).Scan(&totalMessages)
+		}
 
 		// Deals
-		svc.DB.QueryRow("SELECT COALESCE(SUM(value), 0) FROM deals WHERE company_id = $1 AND status = 'won'", companyID).Scan(&dealsWonValue)
-		svc.DB.QueryRow("SELECT COALESCE(SUM(value), 0) FROM deals WHERE company_id = $1 AND status = 'open'", companyID).Scan(&dealsOpenValue)
-		svc.DB.QueryRow("SELECT COUNT(*) FROM deals WHERE company_id = $1 AND status = 'won'", companyID).Scan(&dealsWonCount)
+		dealFilter := "company_id = $1"
+		dealArgs := []interface{}{companyID}
+		if assignedTo != "" {
+			dealFilter += " AND assigned_to = $2"
+			dealArgs = append(dealArgs, assignedTo)
+		}
+		svc.DB.QueryRow("SELECT COALESCE(SUM(value), 0) FROM deals WHERE "+dealFilter+" AND status = 'won'", dealArgs...).Scan(&dealsWonValue)
+		svc.DB.QueryRow("SELECT COALESCE(SUM(value), 0) FROM deals WHERE "+dealFilter+" AND status = 'open'", dealArgs...).Scan(&dealsOpenValue)
+		svc.DB.QueryRow("SELECT COUNT(*) FROM deals WHERE "+dealFilter+" AND status = 'won'", dealArgs...).Scan(&dealsWonCount)
 
 		// Contacts
-		svc.DB.QueryRow("SELECT COUNT(*) FROM contacts WHERE company_id = $1", companyID).Scan(&totalContacts)
+		if assignedTo != "" {
+			svc.DB.QueryRow("SELECT COUNT(*) FROM contacts WHERE company_id = $1 AND assigned_to = $2", companyID, assignedTo).Scan(&totalContacts)
+		} else {
+			svc.DB.QueryRow("SELECT COUNT(*) FROM contacts WHERE company_id = $1", companyID).Scan(&totalContacts)
+		}
 
 		svc.DB.QueryRow(`
 			SELECT COUNT(*) FROM conversations
-			WHERE company_id = $1 AND customer_company_id IS NOT NULL AND status = 'resolved'
+			WHERE `+conversationFilter+` AND customer_company_id IS NOT NULL AND status = 'resolved'
 			  AND (
 			    (first_response_due_at IS NULL OR (first_response_at IS NOT NULL AND first_response_at <= first_response_due_at))
 			    AND (resolution_due_at IS NULL OR (resolved_at IS NOT NULL AND resolved_at <= resolution_due_at))
 			  )
-		`, companyID).Scan(&slaWithin)
+		`, conversationArgs...).Scan(&slaWithin)
 		svc.DB.QueryRow(`
 			SELECT COUNT(*) FROM conversations
-			WHERE company_id = $1 AND customer_company_id IS NOT NULL
+			WHERE `+conversationFilter+` AND customer_company_id IS NOT NULL
 			  AND (
 			    (first_response_due_at IS NOT NULL AND COALESCE(first_response_at, NOW()) > first_response_due_at)
 			    OR (resolution_due_at IS NOT NULL AND COALESCE(resolved_at, NOW()) > resolution_due_at)
 			  )
-		`, companyID).Scan(&slaBreached)
+		`, conversationArgs...).Scan(&slaBreached)
 
 		metrics := fiber.Map{
 			"total_conversations":    totalConversations,
@@ -1409,30 +1447,54 @@ func GetAttendanceMetrics(svc *services.Container) fiber.Handler {
 		var attended, resolved int
 		var totalTimeMinutes, avgTimeMinutes float64
 
-		// Base filter
-		baseFilter := "company_id = $1"
+		// Base filter. For a selected attendant, keep historical attribution by
+		// considering conversations where the attendant sent a public message.
+		baseFilter := "c.company_id = $1"
 		args := []interface{}{companyID}
 		argIdx := 2
 
 		if assignedTo != "" {
-			baseFilter += fmt.Sprintf(" AND assigned_to = $%d", argIdx)
+			baseFilter += fmt.Sprintf(` AND (
+				c.assigned_to = $%d
+				OR EXISTS (
+					SELECT 1 FROM messages m
+					WHERE m.conversation_id = c.id
+					  AND m.company_id = c.company_id
+					  AND m.sender_type = 'user'
+					  AND m.sender_id = $%d
+					  AND COALESCE(m.is_private, false) = false
+				)
+			)`, argIdx, argIdx)
 			args = append(args, assignedTo)
 			argIdx++
 		}
 
-		// Attended = conversations that have assigned_to set (in_progress or resolved)
-		queryAttended := fmt.Sprintf("SELECT COUNT(*) FROM conversations WHERE %s AND assigned_to IS NOT NULL", baseFilter)
+		// Attended = conversations assigned to an attendant or handled by an attendant message.
+		queryAttended := fmt.Sprintf(`
+			SELECT COUNT(*) FROM conversations c
+			WHERE %s
+			  AND (
+			    c.assigned_to IS NOT NULL
+			    OR EXISTS (
+			      SELECT 1 FROM messages m
+			      WHERE m.conversation_id = c.id
+			        AND m.company_id = c.company_id
+			        AND m.sender_type = 'user'
+			        AND COALESCE(m.is_private, false) = false
+			    )
+			  )
+		`, baseFilter)
 		svc.DB.QueryRow(queryAttended, args...).Scan(&attended)
 
 		// Resolved
-		queryResolved := fmt.Sprintf("SELECT COUNT(*) FROM conversations WHERE %s AND status = 'resolved'", baseFilter)
+		queryResolved := fmt.Sprintf("SELECT COUNT(*) FROM conversations c WHERE %s AND c.status = 'resolved'", baseFilter)
 		svc.DB.QueryRow(queryResolved, args...).Scan(&resolved)
 
 		// Average time of attendance (from created_at to updated_at when resolved)
 		queryAvg := fmt.Sprintf(`
-			SELECT COALESCE(EXTRACT(EPOCH FROM AVG(updated_at - created_at))/60, 0),
-			       COALESCE(EXTRACT(EPOCH FROM SUM(updated_at - created_at))/60, 0)
-			FROM conversations WHERE %s AND status = 'resolved' AND updated_at IS NOT NULL
+			SELECT COALESCE(EXTRACT(EPOCH FROM AVG(c.updated_at - c.created_at))/60, 0),
+			       COALESCE(EXTRACT(EPOCH FROM SUM(c.updated_at - c.created_at))/60, 0)
+			FROM conversations c WHERE %s AND c.status = 'resolved' AND c.updated_at IS NOT NULL
 		`, baseFilter)
 		svc.DB.QueryRow(queryAvg, args...).Scan(&avgTimeMinutes, &totalTimeMinutes)
 

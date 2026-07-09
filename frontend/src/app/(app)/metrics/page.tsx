@@ -38,17 +38,20 @@ export default function MetricsPage() {
   const [loadingAttendance, setLoadingAttendance] = useState(true)
 
   useEffect(() => {
-    fetchMetrics()
     fetchUsers()
   }, [])
 
   useEffect(() => {
+    fetchMetrics()
     fetchAttendanceMetrics()
   }, [selectedUser])
 
   const fetchMetrics = async () => {
+    setLoading(true)
     try {
-      const response = await api.get('/metrics')
+      const params: any = {}
+      if (selectedUser) params.assigned_to = selectedUser
+      const response = await api.get('/metrics', { params })
       setMetrics(response.data.metrics || {})
     } catch (error) {
       console.error('Error:', error)
