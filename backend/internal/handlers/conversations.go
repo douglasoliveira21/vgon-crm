@@ -35,8 +35,9 @@ func StartConversation(svc *services.Container) fiber.Handler {
 		userID := c.Locals("user_id").(string)
 
 		var body struct {
-			Phone   string `json:"phone"`
-			Message string `json:"message"`
+			Phone     string `json:"phone"`
+			Message   string `json:"message"`
+			ChannelID string `json:"channel_id"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
@@ -54,14 +55,54 @@ func StartConversation(svc *services.Container) fiber.Handler {
 			svc.DB.Exec("INSERT INTO contacts (id, company_id, name, phone, origin) VALUES ($1, $2, $3, $4, 'manual')", contactID, companyID, body.Phone, body.Phone)
 		}
 
+		channelID := body.ChannelID
+		if channelID != "" {
+			err = svc.DB.QueryRow(`
+				SELECT ch.id
+				FROM channels ch
+				JOIN whatsapp_instances wi ON wi.channel_id = ch.id AND wi.company_id = ch.company_id
+				WHERE ch.id = $1
+				  AND ch.company_id = $2
+				  AND ch.type = 'whatsapp'
+				  AND ch.status = 'connected'
+				  AND wi.status = 'connected'
+				  AND COALESCE(ch.is_active, true) = true
+				LIMIT 1
+			`, channelID, companyID).Scan(&channelID)
+			if err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Canal de WhatsApp invalido ou desconectado"})
+			}
+		} else {
+			err = svc.DB.QueryRow(`
+				SELECT ch.id
+				FROM channels ch
+				JOIN whatsapp_instances wi ON wi.channel_id = ch.id AND wi.company_id = ch.company_id
+				WHERE ch.company_id = $1
+				  AND ch.type = 'whatsapp'
+				  AND ch.status = 'connected'
+				  AND wi.status = 'connected'
+				  AND COALESCE(ch.is_active, true) = true
+				ORDER BY ch.created_at ASC
+				LIMIT 1
+			`, companyID).Scan(&channelID)
+			if err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Nenhum canal de WhatsApp conectado encontrado"})
+			}
+		}
+
 		// Find or create conversation
 		var conversationID string
-		err = svc.DB.QueryRow("SELECT id FROM conversations WHERE company_id = $1 AND contact_id = $2 AND status != 'resolved' ORDER BY created_at DESC LIMIT 1", companyID, contactID).Scan(&conversationID)
+		err = svc.DB.QueryRow(`
+			SELECT id
+			FROM conversations
+			WHERE company_id = $1
+			  AND contact_id = $2
+			  AND channel_id = $3
+			  AND status != 'resolved'
+			ORDER BY created_at DESC
+			LIMIT 1
+		`, companyID, contactID, channelID).Scan(&conversationID)
 		if err != nil {
-			// Get first active channel
-			var channelID string
-			svc.DB.QueryRow("SELECT id FROM channels WHERE company_id = $1 AND status = 'connected' LIMIT 1", companyID).Scan(&channelID)
-
 			conversationID = uuid.New().String()
 			svc.DB.Exec("INSERT INTO conversations (id, company_id, contact_id, channel_id, assigned_to, status, last_message_at, customer_company_id) VALUES ($1, $2, $3, $4, $5, 'in_progress', NOW(), (SELECT customer_company_id FROM contacts WHERE id = $3))",
 				conversationID, companyID, contactID, channelID, userID)

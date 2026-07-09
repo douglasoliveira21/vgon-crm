@@ -36,6 +36,8 @@ import {
   Timer,
   MailOpen,
   Trash2,
+  ArrowLeft,
+  Loader2,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import toast from 'react-hot-toast'
@@ -133,6 +135,15 @@ function renderTextWithLinks(text: string, isOwnMessage: boolean) {
   return parts.length > 0 ? parts : text
 }
 
+function LoadingState({ label }: { label: string }) {
+  return (
+    <div className="flex h-full min-h-[180px] flex-col items-center justify-center gap-3 text-sm text-gray-500">
+      <Loader2 size={28} className="animate-spin text-primary-600" />
+      <span>{label}</span>
+    </div>
+  )
+}
+
 interface UserItem {
   id: string
   name: string
@@ -173,6 +184,7 @@ export default function ConversationsPage() {
   const [filter, setFilter] = useState('mine')
   const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
+  const [messagesLoading, setMessagesLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -216,6 +228,7 @@ export default function ConversationsPage() {
   const [quickReplyFilter, setQuickReplyFilter] = useState('')
   const [selectedQuickReplyIndex, setSelectedQuickReplyIndex] = useState(0)
   const channelFilter = searchParams.get('channel') || ''
+  const conversationFilter = searchParams.get('conversation') || ''
   const teamFilter = searchParams.get('team_id') || ''
   const mentionsFilter = searchParams.get('mentions') === 'true'
   const viewFilter = searchParams.get('view') || ''
@@ -226,13 +239,10 @@ export default function ConversationsPage() {
   const tabCountsRequestRef = useRef(0)
   const messagesRequestRef = useRef(0)
   const conversationsDebounceRef = useRef<NodeJS.Timeout | null>(null)
-  const conversationsInFlightRef = useRef(false)
   const tabCountsInFlightRef = useRef(false)
   const messagesInFlightRef = useRef(false)
-  const lastConversationsFetchRef = useRef(0)
   const lastTabCountsFetchRef = useRef(0)
   const lastMessagesFetchRef = useRef(0)
-  const conversationsErrorUntilRef = useRef(0)
   const messagesErrorUntilRef = useRef(0)
 
   useEffect(() => {
@@ -250,7 +260,7 @@ export default function ConversationsPage() {
     }
     conversationsDebounceRef.current = setTimeout(() => {
       fetchConversations()
-    }, 250)
+    }, 100)
 
     return () => {
       if (conversationsDebounceRef.current) {
@@ -266,6 +276,14 @@ export default function ConversationsPage() {
     fetchQuickReplies()
     fetchCompanies()
   }, [channelFilter, teamFilter, mentionsFilter, user?.id])
+
+  useEffect(() => {
+    if (!conversationFilter || selectedConv?.id === conversationFilter) return
+    const conversation = conversations.find((item) => item.id === conversationFilter)
+    if (conversation) {
+      setSelectedConv(conversation)
+    }
+  }, [conversationFilter, conversations, selectedConv?.id])
 
   useEffect(() => {
     const handleNewMessage = (data: Message) => {
@@ -350,17 +368,12 @@ export default function ConversationsPage() {
     }
   }, [selectedConv])
 
-  const fetchConversations = async () => {
-    const now = Date.now()
-    if (now < conversationsErrorUntilRef.current) return
-    if (conversationsInFlightRef.current || now - lastConversationsFetchRef.current < 1200) return
-    conversationsInFlightRef.current = true
-    lastConversationsFetchRef.current = now
+  const fetchConversations = async (showLoader = true) => {
     conversationsAbortRef.current?.abort()
     const controller = new AbortController()
     conversationsAbortRef.current = controller
     const requestId = ++conversationsRequestRef.current
-    setLoading(true)
+    if (showLoader) setLoading(true)
 
     try {
       const params: any = {}
@@ -395,7 +408,6 @@ export default function ConversationsPage() {
 
       const response = await api.get('/conversations', { params, signal: controller.signal })
       if (requestId === conversationsRequestRef.current) {
-        conversationsErrorUntilRef.current = 0
         let nextConversations: Conversation[] = response.data.conversations || []
         if (mentionsFilter && user) {
           const tokens = [user.name, user.email?.split('@')[0]]
@@ -410,12 +422,8 @@ export default function ConversationsPage() {
       }
     } catch (error: any) {
       if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') return
-      if (error.response?.status >= 500) {
-        conversationsErrorUntilRef.current = Date.now() + 10000
-      }
       console.error('Error fetching conversations:', error)
     } finally {
-      conversationsInFlightRef.current = false
       if (requestId === conversationsRequestRef.current) {
         setLoading(false)
       }
@@ -548,7 +556,7 @@ export default function ConversationsPage() {
   // Auto-refresh conversation list
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchConversations()
+      fetchConversations(false)
       fetchTabUnreadCounts()
     }, 30000) // WebSocket is primary; polling is only a calm fallback.
 
@@ -577,6 +585,7 @@ export default function ConversationsPage() {
     messagesAbortRef.current = controller
     const requestId = ++messagesRequestRef.current
     messagesInFlightRef.current = true
+    setMessagesLoading(true)
     lastMessagesFetchRef.current = Date.now()
     try {
       const response = await api.get(`/conversations/${conv.id}/messages`, { params: { limit: 80 }, signal: controller.signal })
@@ -592,6 +601,9 @@ export default function ConversationsPage() {
       console.error('Error fetching messages:', error)
     } finally {
       messagesInFlightRef.current = false
+      if (requestId === messagesRequestRef.current) {
+        setMessagesLoading(false)
+      }
     }
   }
 
@@ -1102,9 +1114,12 @@ export default function ConversationsPage() {
   }
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen min-h-0 overflow-hidden">
       {/* Conversation List */}
-      <div className="w-96 border-r border-gray-200 bg-white flex flex-col">
+      <div className={clsx(
+        'min-h-0 w-full flex-shrink-0 border-r border-gray-200 bg-white flex-col md:flex md:w-96',
+        selectedConv ? 'hidden' : 'flex'
+      )}>
         <div className="p-4 border-b border-gray-100">
           <h2 className="text-lg font-semibold text-gray-900 mb-3">Conversas</h2>
           <div className="relative mb-3">
@@ -1159,57 +1174,63 @@ export default function ConversationsPage() {
           </select>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          {conversations.map((conv) => (
-            <button
-              key={conv.id}
-              onClick={() => {
-                setConversationContextMenu(null)
-                selectConversation(conv)
-              }}
-              onContextMenu={(e) => handleConversationContextMenu(e, conv)}
-              className={clsx(
-                'w-full p-4 flex items-start gap-3 border-b border-gray-50 hover:bg-gray-50 transition-colors text-left',
-                selectedConv?.id === conv.id && 'bg-primary-50 border-l-2 border-l-primary-500'
-              )}
-            >
-              <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden">
-                {conv.contact_avatar_url ? (
-                  <img
-                    src={conv.contact_avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${conv.contact_avatar_url}` : conv.contact_avatar_url}
-                    alt=""
-                    className="w-full h-full object-cover"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden') }}
-                  />
-                ) : (
-                  <span className="text-primary-700 font-medium text-sm">
-                    {conv.contact_name?.charAt(0)?.toUpperCase() || '?'}
-                  </span>
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-gray-900 truncate">
-                    {conv.contact_name || conv.contact_phone}
-                  </span>
-                  <span className="text-xs text-gray-400">{formatTime(conv.last_message_at)}</span>
-                </div>
-                <p className="text-xs text-gray-500 truncate mt-0.5">
-                  {conv.last_message_preview || 'Sem mensagens'}
-                </p>
-                <div className="flex items-center gap-2 mt-1">
-                  {conv.channel_name && <span className="text-xs text-gray-400">{conv.channel_name}</span>}
-                  {conv.unread_count > 0 && (
-                    <span className="inline-flex items-center justify-center w-5 h-5 bg-primary-600 text-white text-xs rounded-full">
-                      {conv.unread_count}
-                    </span>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {loading ? (
+            <LoadingState label="Carregando conversas..." />
+          ) : (
+            <>
+              {conversations.map((conv) => (
+                <button
+                  key={conv.id}
+                  onClick={() => {
+                    setConversationContextMenu(null)
+                    selectConversation(conv)
+                  }}
+                  onContextMenu={(e) => handleConversationContextMenu(e, conv)}
+                  className={clsx(
+                    'w-full p-4 flex items-start gap-3 border-b border-gray-50 hover:bg-gray-50 transition-colors text-left',
+                    selectedConv?.id === conv.id && 'bg-primary-50 border-l-2 border-l-primary-500'
                   )}
-                </div>
-              </div>
-            </button>
-          ))}
-          {conversations.length === 0 && !loading && (
-            <div className="p-8 text-center text-gray-400 text-sm">Nenhuma conversa encontrada</div>
+                >
+                  <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    {conv.contact_avatar_url ? (
+                      <img
+                        src={conv.contact_avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${conv.contact_avatar_url}` : conv.contact_avatar_url}
+                        alt=""
+                        className="w-full h-full object-cover"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden') }}
+                      />
+                    ) : (
+                      <span className="text-primary-700 font-medium text-sm">
+                        {conv.contact_name?.charAt(0)?.toUpperCase() || '?'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-gray-900 truncate">
+                        {conv.contact_name || conv.contact_phone}
+                      </span>
+                      <span className="text-xs text-gray-400">{formatTime(conv.last_message_at)}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 truncate mt-0.5">
+                      {conv.last_message_preview || 'Sem mensagens'}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      {conv.channel_name && <span className="text-xs text-gray-400">{conv.channel_name}</span>}
+                      {conv.unread_count > 0 && (
+                        <span className="inline-flex items-center justify-center w-5 h-5 bg-primary-600 text-white text-xs rounded-full">
+                          {conv.unread_count}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              ))}
+              {conversations.length === 0 && (
+                <div className="p-8 text-center text-gray-400 text-sm">Nenhuma conversa encontrada</div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -1217,7 +1238,7 @@ export default function ConversationsPage() {
       {/* Chat Area */}
       {selectedConv ? (
         <div
-          className={clsx('flex-1 flex flex-col bg-gray-50 relative', isDragging && 'ring-2 ring-primary-500 ring-inset')}
+          className={clsx('min-w-0 flex-1 flex flex-col bg-gray-50 relative', isDragging && 'ring-2 ring-primary-500 ring-inset')}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
@@ -1233,8 +1254,16 @@ export default function ConversationsPage() {
             </div>
           )}
           {/* Chat Header */}
-          <div className="bg-white border-b border-gray-200 px-6 py-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between dark:bg-gray-900 dark:border-gray-800">
-            <div className="flex items-center gap-3">
+          <div className="bg-white border-b border-gray-200 px-3 py-3 sm:px-6 sm:py-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between dark:bg-gray-900 dark:border-gray-800">
+            <div className="flex min-w-0 items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setSelectedConv(null)}
+                className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 md:hidden"
+                aria-label="Voltar para lista"
+              >
+                <ArrowLeft size={18} />
+              </button>
               <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center overflow-hidden">
                 {selectedConv.contact_avatar_url ? (
                   <img
@@ -1248,13 +1277,13 @@ export default function ConversationsPage() {
                   </span>
                 )}
               </div>
-              <div>
-                <h3 className="font-medium text-gray-900">
+              <div className="min-w-0">
+                <h3 className="truncate font-medium text-gray-900">
                   {selectedConv.contact_name || selectedConv.contact_phone}
                 </h3>
-                <p className="text-xs text-gray-500">{selectedConv.contact_phone}</p>
+                <p className="truncate text-xs text-gray-500">{selectedConv.contact_phone}</p>
                 {selectedConv.customer_company_name && (
-                  <p className="mt-0.5 flex items-center gap-1 text-xs text-primary-600 dark:text-primary-300">
+                  <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-primary-600 dark:text-primary-300">
                     <Building2 size={12} />
                     {selectedConv.customer_company_name}
                   </p>
@@ -1343,7 +1372,11 @@ export default function ConversationsPage() {
           <ConversationSLABar conversation={selectedConv} />
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 space-y-3 sm:px-6">
+            {messagesLoading ? (
+              <LoadingState label="Carregando conversa..." />
+            ) : (
+              <>
             {messages.map((msg) => (
               <div
                 key={msg.id}
@@ -1370,7 +1403,7 @@ export default function ConversationsPage() {
                 )}
                 <div
                   className={clsx(
-                    'max-w-[70%] rounded-2xl px-4 py-2.5 shadow-sm',
+                    'max-w-[85%] rounded-2xl px-4 py-2.5 shadow-sm sm:max-w-[70%]',
                     msg.sender_type === 'user'
                       ? 'bg-primary-600 text-white rounded-br-md'
                       : 'bg-white text-gray-900 rounded-bl-md border border-gray-100',
@@ -1533,6 +1566,8 @@ export default function ConversationsPage() {
                 </div>
               </div>
             )}
+              </>
+            )}
           </div>
 
           {/* Message Input */}
@@ -1551,7 +1586,7 @@ export default function ConversationsPage() {
                 </button>
               </div>
             )}
-            <div className="p-4">
+            <div className="p-3 sm:p-4">
             {isRecording ? (
               <div className="flex items-center gap-4">
                 <button onClick={cancelRecording} className="p-2 text-red-500 hover:bg-red-50 rounded-lg">
@@ -1570,7 +1605,7 @@ export default function ConversationsPage() {
                 </button>
               </div>
             ) : (
-              <form onSubmit={sendMessage} className="flex items-center gap-3">
+              <form onSubmit={sendMessage} className="flex items-end gap-2 sm:gap-3">
                 {/* Attach */}
                 <div className="relative">
                   <button
@@ -1746,7 +1781,7 @@ export default function ConversationsPage() {
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center bg-gray-50">
+        <div className="hidden flex-1 items-center justify-center bg-gray-50 md:flex">
           <div className="text-center">
             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <MessageSquare size={28} className="text-gray-400" />

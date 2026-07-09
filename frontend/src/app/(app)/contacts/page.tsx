@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { Search, Plus, Edit2, Trash2, Phone, Mail, MapPin, Building, Tag, MessageSquare } from 'lucide-react'
+import { Search, Plus, Edit2, Trash2, MapPin, MessageSquare, X } from 'lucide-react'
 
 const PAGE_SIZE = 25
 
@@ -30,6 +30,14 @@ interface CustomerCompany {
   cnpj?: string
 }
 
+interface Channel {
+  id: string
+  name: string
+  type: string
+  status: string
+  is_active: boolean
+}
+
 export default function ContactsPage() {
   const router = useRouter()
   const [contacts, setContacts] = useState<Contact[]>([])
@@ -39,6 +47,10 @@ export default function ContactsPage() {
   const [page, setPage] = useState(1)
   const [showForm, setShowForm] = useState(false)
   const [editingContact, setEditingContact] = useState<Contact | null>(null)
+  const [conversationContact, setConversationContact] = useState<Contact | null>(null)
+  const [channels, setChannels] = useState<Channel[]>([])
+  const [loadingChannels, setLoadingChannels] = useState(false)
+  const [startingConversation, setStartingConversation] = useState(false)
   const [companies, setCompanies] = useState<CustomerCompany[]>([])
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -48,6 +60,7 @@ export default function ContactsPage() {
 
   useEffect(() => {
     fetchCompanies()
+    fetchChannels()
   }, [])
 
   const fetchContacts = async () => {
@@ -77,6 +90,21 @@ export default function ContactsPage() {
     } catch {}
   }
 
+  const fetchChannels = async () => {
+    setLoadingChannels(true)
+    try {
+      const response = await api.get('/channels')
+      const availableChannels = (response.data.channels || []).filter((channel: Channel) =>
+        channel.type === 'whatsapp' && channel.status === 'connected' && channel.is_active
+      )
+      setChannels(availableChannels)
+    } catch {
+      setChannels([])
+    } finally {
+      setLoadingChannels(false)
+    }
+  }
+
   const deleteContact = async (id: string) => {
     if (!confirm('Remover este contato?')) return
     try {
@@ -93,14 +121,26 @@ export default function ContactsPage() {
       toast.error('Contato não tem telefone')
       return
     }
+    setConversationContact(contact)
+  }
+
+  const confirmStartConversation = async (channelId: string) => {
+    if (!conversationContact?.phone) return
+
+    setStartingConversation(true)
     try {
-      // Send initial message to create/reopen conversation
-      await api.post('/conversations/start', { phone: contact.phone })
+      const response = await api.post('/conversations/start', {
+        phone: conversationContact.phone,
+        channel_id: channelId,
+      })
+      const conversationID = response.data.conversation_id
       toast.success('Conversa iniciada')
-      router.push('/conversations')
-    } catch {
-      // If endpoint doesn't exist, just go to conversations
-      router.push('/conversations')
+      setConversationContact(null)
+      router.push(conversationID ? `/conversations?conversation=${conversationID}` : '/conversations')
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao iniciar conversa')
+    } finally {
+      setStartingConversation(false)
     }
   }
 
@@ -252,6 +292,125 @@ export default function ContactsPage() {
           onSaved={() => { setShowForm(false); setEditingContact(null); fetchContacts() }}
         />
       )}
+
+      {conversationContact && (
+        <StartConversationModal
+          contact={conversationContact}
+          channels={channels}
+          loadingChannels={loadingChannels}
+          starting={startingConversation}
+          onRefreshChannels={fetchChannels}
+          onClose={() => setConversationContact(null)}
+          onStart={confirmStartConversation}
+        />
+      )}
+    </div>
+  )
+}
+
+function StartConversationModal({
+  contact,
+  channels,
+  loadingChannels,
+  starting,
+  onRefreshChannels,
+  onClose,
+  onStart,
+}: {
+  contact: Contact
+  channels: Channel[]
+  loadingChannels: boolean
+  starting: boolean
+  onRefreshChannels: () => void
+  onClose: () => void
+  onStart: (channelId: string) => void
+}) {
+  const [selectedChannelId, setSelectedChannelId] = useState(channels[0]?.id || '')
+
+  useEffect(() => {
+    if (!selectedChannelId && channels[0]?.id) {
+      setSelectedChannelId(channels[0].id)
+    }
+  }, [channels, selectedChannelId])
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md">
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Iniciar conversa</h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Escolha por qual canal chamar {contact.name || contact.phone}.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"
+            aria-label="Fechar"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {loadingChannels ? (
+          <div className="py-8 text-center text-sm text-gray-500">Carregando canais...</div>
+        ) : channels.length === 0 ? (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
+              Nenhum canal de WhatsApp conectado foi encontrado.
+            </div>
+            <div className="flex gap-3">
+              <button type="button" onClick={onClose} className="btn-secondary flex-1">
+                Cancelar
+              </button>
+              <button type="button" onClick={onRefreshChannels} className="btn-primary flex-1">
+                Atualizar canais
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              {channels.map((channel) => (
+                <label
+                  key={channel.id}
+                  className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition-colors ${
+                    selectedChannelId === channel.id ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:bg-gray-50'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="channel"
+                    value={channel.id}
+                    checked={selectedChannelId === channel.id}
+                    onChange={() => setSelectedChannelId(channel.id)}
+                    className="h-4 w-4 text-primary-600"
+                  />
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{channel.name}</p>
+                    <p className="text-xs text-gray-500">WhatsApp conectado</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button type="button" onClick={onClose} className="btn-secondary flex-1">
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={!selectedChannelId || starting}
+                onClick={() => onStart(selectedChannelId)}
+                className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {starting ? 'Iniciando...' : 'Iniciar conversa'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
