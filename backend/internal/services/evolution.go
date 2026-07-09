@@ -284,14 +284,17 @@ func (s *EvolutionService) GetConnectionStatus(instanceName string) (string, err
 	if instance, ok := result["instance"].(map[string]interface{}); ok {
 		if state, ok := instance["state"].(string); ok {
 			// Update status in database
-			status := mapEvolutionStatus(state)
+			status := mapEvolutionStatus(state, instance)
+			if status == "" {
+				return s.getStoredInstanceStatus(instanceName), nil
+			}
 			s.db.Exec("UPDATE whatsapp_instances SET status = $1, updated_at = NOW() WHERE instance_name = $2", status, instanceName)
 			s.db.Exec("UPDATE channels SET status = $1, updated_at = NOW() WHERE id = (SELECT channel_id FROM whatsapp_instances WHERE instance_name = $2)", status, instanceName)
 			return status, nil
 		}
 	}
 
-	return "disconnected", nil
+	return s.getStoredInstanceStatus(instanceName), nil
 }
 
 // GetMediaBase64 fetches media content as base64 from Evolution API
@@ -617,6 +620,7 @@ func (s *EvolutionService) SendAudioBase64(instanceName, phone, audioBase64 stri
 // HandleWebhook processes incoming webhook events from Evolution API
 func (s *EvolutionService) HandleWebhook(instanceName string, event map[string]interface{}) {
 	eventType, _ := event["event"].(string)
+	eventType = normalizeEvolutionEventType(eventType)
 
 	// Evolution API v2.4.0 format detection
 	if eventType == "" {
@@ -652,8 +656,25 @@ func (s *EvolutionService) HandleWebhook(instanceName string, event map[string]i
 func (s *EvolutionService) handleConnectionUpdate(instanceName string, event map[string]interface{}) {
 	data, _ := event["data"].(map[string]interface{})
 	state, _ := data["state"].(string)
+	if state == "" {
+		state, _ = data["connection"].(string)
+	}
+	if state == "" {
+		state, _ = data["status"].(string)
+	}
+	if state == "" {
+		state, _ = event["state"].(string)
+	}
 
-	status := mapEvolutionStatus(state)
+	statusPayload := data
+	if statusPayload == nil {
+		statusPayload = event
+	}
+	status := mapEvolutionStatus(state, statusPayload)
+	if status == "" {
+		log.Printf("[WEBHOOK] Ignoring connection update with unknown state for instance %s: state=%q payload=%v", instanceName, state, event)
+		return
+	}
 
 	s.db.Exec("UPDATE whatsapp_instances SET status = $1, updated_at = NOW() WHERE instance_name = $2", status, instanceName)
 	s.db.Exec("UPDATE channels SET status = $1, updated_at = NOW() WHERE id = (SELECT channel_id FROM whatsapp_instances WHERE instance_name = $2)", status, instanceName)
@@ -955,6 +976,13 @@ func (s *EvolutionService) handleQRCodeUpdate(instanceName string, event map[str
 	data, _ := event["data"].(map[string]interface{})
 	qrcode, _ := data["qrcode"].(map[string]interface{})
 	base64, _ := qrcode["base64"].(string)
+	if base64 == "" {
+		base64, _ = data["base64"].(string)
+	}
+	if base64 == "" {
+		log.Printf("[WEBHOOK] Ignoring QR update without base64 for instance %s", instanceName)
+		return
+	}
 
 	s.db.Exec("UPDATE whatsapp_instances SET qrcode = $1, status = 'qr_code', updated_at = NOW() WHERE instance_name = $2", base64, instanceName)
 
@@ -1140,17 +1168,47 @@ func (s *EvolutionService) GetInstances(companyID string) ([]models.WhatsAppInst
 }
 
 // Helper functions
-func mapEvolutionStatus(state string) string {
+func normalizeEvolutionEventType(eventType string) string {
+	eventType = strings.ToLower(strings.TrimSpace(eventType))
+	eventType = strings.ReplaceAll(eventType, "_", ".")
+	return eventType
+}
+
+func (s *EvolutionService) getStoredInstanceStatus(instanceName string) string {
+	var status string
+	if err := s.db.QueryRow("SELECT COALESCE(status, 'disconnected') FROM whatsapp_instances WHERE instance_name = $1", instanceName).Scan(&status); err == nil && status != "" {
+		return status
+	}
+	return "disconnected"
+}
+
+func mapEvolutionStatus(state string, payload map[string]interface{}) string {
+	state = strings.ToLower(strings.TrimSpace(state))
 	switch state {
-	case "open":
+	case "open", "connected":
 		return "connected"
-	case "connecting":
+	case "connecting", "pending", "qr", "qrcode", "qr_code":
 		return "connecting"
-	case "close":
+	case "close", "closed":
+		if isEvolutionLogout(payload) {
+			return "disconnected"
+		}
+		return ""
+	case "disconnected", "logout", "loggedout", "logged_out":
 		return "disconnected"
 	default:
-		return "disconnected"
+		return ""
 	}
+}
+
+func isEvolutionLogout(payload map[string]interface{}) bool {
+	raw, _ := json.Marshal(payload)
+	text := strings.ToLower(string(raw))
+	return strings.Contains(text, "loggedout") ||
+		strings.Contains(text, "logged_out") ||
+		strings.Contains(text, "logout") ||
+		strings.Contains(text, `"statuscode":401`) ||
+		strings.Contains(text, `"code":401`)
 }
 
 func extractPhoneFromJid(jid string) string {
