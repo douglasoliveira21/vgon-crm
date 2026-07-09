@@ -3,7 +3,6 @@ package handlers
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 
 	"github.com/evocrm/backend/internal/models"
 	"github.com/evocrm/backend/internal/services"
@@ -109,6 +108,27 @@ func dashboardConversationFilter(companyID, teamID, channelID, period string) (s
 	return where, args
 }
 
+func dashboardConversationFilterForAlias(companyID, teamID, channelID, period, alias string) (string, []interface{}) {
+	args := []interface{}{companyID}
+	prefix := alias + "."
+	where := prefix + "company_id = $1"
+	next := 2
+	if teamID != "" {
+		where += fmt.Sprintf(" AND %steam_id = $%d", prefix, next)
+		args = append(args, teamID)
+		next++
+	}
+	if channelID != "" {
+		where += fmt.Sprintf(" AND %schannel_id = $%d", prefix, next)
+		args = append(args, channelID)
+		next++
+	}
+	if period != "" {
+		where += " AND " + prefix + "created_at >= " + periodSQL(period)
+	}
+	return where, args
+}
+
 func queryInt(db *sql.DB, target fiber.Map, key, query string, args ...interface{}) {
 	var value int
 	_ = db.QueryRow(query, args...).Scan(&value)
@@ -168,7 +188,7 @@ func queryDeltaPercent(db *sql.DB, currentQuery string, currentArgs []interface{
 }
 
 func fetchQueueByChannel(db *sql.DB, companyID, teamID, channelID string) []fiber.Map {
-	where, args := dashboardConversationFilter(companyID, teamID, channelID, "")
+	where, args := dashboardConversationFilterForAlias(companyID, teamID, channelID, "", "c")
 	rows, err := db.Query(`
 		SELECT COALESCE(ch.name, 'Sem canal'), COALESCE(ch.type, 'desconhecido'),
 		       COUNT(*) FILTER (WHERE c.status IN ('open', 'pending') AND c.assigned_to IS NULL) AS queue_size,
@@ -176,7 +196,7 @@ func fetchQueueByChannel(db *sql.DB, companyID, teamID, channelID string) []fibe
 		       COALESCE(AVG(EXTRACT(EPOCH FROM (COALESCE(c.first_response_at, NOW()) - c.created_at))) FILTER (WHERE c.status IN ('open', 'pending', 'in_progress')), 0) AS avg_wait_seconds
 		FROM conversations c
 		LEFT JOIN channels ch ON ch.id = c.channel_id
-		WHERE `+strings.ReplaceAll(where, "company_id", "c.company_id")+`
+		WHERE `+where+`
 		GROUP BY ch.name, ch.type
 		ORDER BY queue_size DESC, active_count DESC
 	`, args...)
@@ -219,14 +239,14 @@ func fetchPeakHours(db *sql.DB, companyID, teamID, channelID string) []fiber.Map
 }
 
 func fetchResolutionByChannel(db *sql.DB, companyID, teamID, channelID, period string) []fiber.Map {
-	where, args := dashboardConversationFilter(companyID, teamID, channelID, period)
+	where, args := dashboardConversationFilterForAlias(companyID, teamID, channelID, period, "c")
 	rows, err := db.Query(`
 		SELECT COALESCE(ch.name, 'Sem canal'), COALESCE(ch.type, 'desconhecido'),
 		       COALESCE(AVG(EXTRACT(EPOCH FROM (c.resolved_at - c.created_at))), 0) AS avg_resolution_seconds,
 		       COUNT(*) FILTER (WHERE c.resolved_at IS NOT NULL) AS resolved_count
 		FROM conversations c
 		LEFT JOIN channels ch ON ch.id = c.channel_id
-		WHERE `+strings.ReplaceAll(where, "company_id", "c.company_id")+`
+		WHERE `+where+`
 		GROUP BY ch.name, ch.type
 		ORDER BY resolved_count DESC
 	`, args...)
@@ -280,12 +300,12 @@ func fetchAgentDashboard(db *sql.DB, companyID string) fiber.Map {
 }
 
 func fetchChannelDistribution(db *sql.DB, companyID, teamID, channelID, period string) []fiber.Map {
-	where, args := dashboardConversationFilter(companyID, teamID, channelID, period)
+	where, args := dashboardConversationFilterForAlias(companyID, teamID, channelID, period, "c")
 	rows, err := db.Query(`
 		SELECT COALESCE(ch.name, 'Sem canal'), COALESCE(ch.type, 'desconhecido'), COUNT(*)
 		FROM conversations c
 		LEFT JOIN channels ch ON ch.id = c.channel_id
-		WHERE `+strings.ReplaceAll(where, "company_id", "c.company_id")+`
+		WHERE `+where+`
 		GROUP BY ch.name, ch.type
 		ORDER BY COUNT(*) DESC
 	`, args...)
@@ -304,14 +324,14 @@ func fetchChannelDistribution(db *sql.DB, companyID, teamID, channelID, period s
 }
 
 func fetchSLAByChannel(db *sql.DB, companyID, teamID, channelID, period string) []fiber.Map {
-	where, args := dashboardConversationFilter(companyID, teamID, channelID, period)
+	where, args := dashboardConversationFilterForAlias(companyID, teamID, channelID, period, "c")
 	rows, err := db.Query(`
 		SELECT COALESCE(ch.name, 'Sem canal'), COALESCE(ch.type, 'desconhecido'),
 		       COALESCE(100.0 * SUM(CASE WHEN c.first_response_due_at IS NOT NULL AND COALESCE(c.first_response_at, NOW()) <= c.first_response_due_at THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN c.first_response_due_at IS NOT NULL THEN 1 ELSE 0 END), 0), 0) AS first_sla,
 		       COALESCE(100.0 * SUM(CASE WHEN c.resolution_due_at IS NOT NULL AND COALESCE(c.resolved_at, NOW()) <= c.resolution_due_at THEN 1 ELSE 0 END) / NULLIF(SUM(CASE WHEN c.resolution_due_at IS NOT NULL THEN 1 ELSE 0 END), 0), 0) AS resolution_sla
 		FROM conversations c
 		LEFT JOIN channels ch ON ch.id = c.channel_id
-		WHERE `+strings.ReplaceAll(where, "company_id", "c.company_id")+`
+		WHERE `+where+`
 		  AND (c.first_response_due_at IS NOT NULL OR c.resolution_due_at IS NOT NULL)
 		GROUP BY ch.name, ch.type
 		ORDER BY first_sla ASC
@@ -331,7 +351,7 @@ func fetchSLAByChannel(db *sql.DB, companyID, teamID, channelID, period string) 
 }
 
 func fetchSLAAlerts(db *sql.DB, companyID, teamID, channelID string) []fiber.Map {
-	where, args := dashboardConversationFilter(companyID, teamID, channelID, "")
+	where, args := dashboardConversationFilterForAlias(companyID, teamID, channelID, "", "c")
 	rows, err := db.Query(`
 		WITH pending_sla AS (
 			SELECT c.id, c.contact_id, c.channel_id, c.status,
@@ -341,7 +361,7 @@ func fetchSLAAlerts(db *sql.DB, companyID, teamID, channelID string) []fiber.Map
 			         ELSE NULL
 			       END AS due_at
 			FROM conversations c
-			WHERE `+strings.ReplaceAll(where, "company_id", "c.company_id")+`
+			WHERE `+where+`
 			  AND c.status IN ('open', 'pending', 'in_progress')
 		)
 		SELECT pending_sla.id, COALESCE(co.name, co.phone, 'Contato'), COALESCE(ch.name, 'Sem canal'), pending_sla.status,
