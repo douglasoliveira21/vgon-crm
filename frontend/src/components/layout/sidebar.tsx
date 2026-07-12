@@ -199,7 +199,7 @@ export default function Sidebar() {
           src="/assets/images/logo-vgon-negativo.png"
           alt="VGON"
           className={clsx(
-            'h-10 w-auto max-w-[180px] object-contain transition-all duration-200',
+            'h-14 w-auto max-w-[220px] object-contain transition-all duration-200',
             sidebarPinned ? 'block' : 'hidden group-hover/sidebar:block'
           )}
         />
