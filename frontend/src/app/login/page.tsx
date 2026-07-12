@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import toast from 'react-hot-toast'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, Mail, MessageCircle, Globe, Phone, Lock, Shield, HeadphonesIcon } from 'lucide-react'
 import api from '@/lib/api'
 
 export default function LoginPage() {
@@ -43,432 +43,94 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="login-page">
-      <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+    <div className="min-h-screen w-full bg-[#050505] text-white flex flex-col overflow-x-hidden">
+      {/* Main Content */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[55%_45%]">
 
-        .login-page {
-          font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-          min-height: 100vh;
-          width: 100vw;
-          display: grid;
-          grid-template-columns: 55% 45%;
-          background: #050505;
-          color: #fff;
-          overflow: hidden;
-        }
-
-        @media (max-width: 1024px) {
-          .login-page { grid-template-columns: 1fr; }
-          .login-left { display: none; }
-        }
-
-        .login-left {
-          position: relative;
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          padding: 4rem 5rem;
-          overflow: hidden;
-        }
-
-        .login-left::before {
-          content: '';
-          position: absolute;
-          inset: 0;
-          background: radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.03) 0%, transparent 70%);
-          pointer-events: none;
-        }
-
-        .login-left::after {
-          content: '';
-          position: absolute;
-          inset: 0;
-          background-image: url('/assets/images/bg-world-map.svg');
-          background-size: 90%;
-          background-position: center;
-          background-repeat: no-repeat;
-          opacity: 0.06;
-          pointer-events: none;
-        }
-
-        .login-glow {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          width: 600px;
-          height: 600px;
-          background: radial-gradient(circle, rgba(255,255,255,0.04) 0%, transparent 70%);
-          border-radius: 50%;
-          pointer-events: none;
-        }
-
-        .login-particles {
-          position: absolute;
-          inset: 0;
-          background-image: url("data:image/svg+xml,%3Csvg width='400' height='400' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3C/defs%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.015'/%3E%3C/svg%3E");
-          pointer-events: none;
-        }
-
-        .login-left-content {
-          position: relative;
-          z-index: 1;
-        }
-
-        .login-logo {
-          height: 44px;
-          width: auto;
-          margin-bottom: 3rem;
-          opacity: 0.95;
-        }
-
-        .login-headline {
-          font-size: 2.8rem;
-          font-weight: 300;
-          line-height: 1.2;
-          letter-spacing: -0.03em;
-          margin-bottom: 1.5rem;
-        }
-
-        .login-headline strong {
-          font-weight: 700;
-        }
-
-        .login-subtitle {
-          font-size: 1rem;
-          line-height: 1.7;
-          color: rgba(255,255,255,0.5);
-          max-width: 480px;
-          margin-bottom: 3rem;
-        }
-
-        .login-cards {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 12px;
-        }
-
-        @media (max-width: 1280px) {
-          .login-cards { grid-template-columns: repeat(2, 1fr); }
-        }
-
-        .login-card {
-          background: rgba(255,255,255,0.03);
-          border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 12px;
-          padding: 20px 16px;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 10px;
-          backdrop-filter: blur(8px);
-          transition: all 300ms ease;
-        }
-
-        .login-card:hover {
-          background: rgba(255,255,255,0.06);
-          border-color: rgba(255,255,255,0.12);
-          transform: translateY(-2px);
-        }
-
-        .login-card img {
-          width: 22px;
-          height: 22px;
-          opacity: 0.7;
-          filter: invert(1);
-        }
-
-        .login-card span {
-          font-size: 12px;
-          font-weight: 500;
-          color: rgba(255,255,255,0.6);
-          text-align: center;
-        }
-
-        .login-right {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 3rem 2.5rem;
-          background: #0a0a0a;
-          border-left: 1px solid rgba(255,255,255,0.04);
-          position: relative;
-        }
-
-        .login-right::before {
-          content: '';
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          height: 1px;
-          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
-        }
-
-        .login-form-container {
-          width: 100%;
-          max-width: 380px;
-        }
-
-        .login-form-title {
-          font-size: 1.5rem;
-          font-weight: 600;
-          letter-spacing: -0.02em;
-          margin-bottom: 0.5rem;
-          color: #fff;
-        }
-
-        .login-form-subtitle {
-          font-size: 0.875rem;
-          color: rgba(255,255,255,0.4);
-          margin-bottom: 2rem;
-          line-height: 1.5;
-        }
-
-        .login-field {
-          margin-bottom: 1.25rem;
-        }
-
-        .login-label {
-          display: block;
-          font-size: 0.8125rem;
-          font-weight: 500;
-          color: rgba(255,255,255,0.6);
-          margin-bottom: 0.5rem;
-        }
-
-        .login-input {
-          width: 100%;
-          padding: 12px 16px;
-          background: rgba(255,255,255,0.04);
-          border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 10px;
-          color: #fff;
-          font-size: 0.9375rem;
-          outline: none;
-          transition: all 300ms ease;
-          box-sizing: border-box;
-        }
-
-        .login-input::placeholder {
-          color: rgba(255,255,255,0.25);
-        }
-
-        .login-input:focus {
-          border-color: rgba(255,255,255,0.2);
-          background: rgba(255,255,255,0.06);
-          box-shadow: 0 0 0 3px rgba(255,255,255,0.03);
-        }
-
-        .login-password-wrapper {
-          position: relative;
-        }
-
-        .login-password-wrapper input {
-          padding-right: 48px;
-        }
-
-        .login-password-toggle {
-          position: absolute;
-          right: 14px;
-          top: 50%;
-          transform: translateY(-50%);
-          background: none;
-          border: none;
-          color: rgba(255,255,255,0.35);
-          cursor: pointer;
-          padding: 4px;
-          transition: color 300ms;
-        }
-
-        .login-password-toggle:hover {
-          color: rgba(255,255,255,0.7);
-        }
-
-        .login-forgot {
-          display: block;
-          text-align: right;
-          font-size: 0.8125rem;
-          color: rgba(255,255,255,0.4);
-          margin-top: -0.5rem;
-          margin-bottom: 1.5rem;
-          cursor: pointer;
-          transition: color 300ms;
-          background: none;
-          border: none;
-          margin-left: auto;
-        }
-
-        .login-forgot:hover {
-          color: rgba(255,255,255,0.8);
-        }
-
-        .login-submit {
-          width: 100%;
-          padding: 13px;
-          background: #fff;
-          color: #000;
-          border: none;
-          border-radius: 10px;
-          font-size: 0.9375rem;
-          font-weight: 600;
-          cursor: pointer;
-          transition: all 300ms ease;
-          letter-spacing: -0.01em;
-        }
-
-        .login-submit:hover:not(:disabled) {
-          background: #e5e5e5;
-          transform: translateY(-1px);
-          box-shadow: 0 4px 20px rgba(255,255,255,0.1);
-        }
-
-        .login-submit:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-
-        .login-back-btn {
-          width: 100%;
-          padding: 13px;
-          background: transparent;
-          color: rgba(255,255,255,0.6);
-          border: 1px solid rgba(255,255,255,0.1);
-          border-radius: 10px;
-          font-size: 0.9375rem;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 300ms ease;
-          margin-top: 12px;
-        }
-
-        .login-back-btn:hover {
-          background: rgba(255,255,255,0.04);
-          border-color: rgba(255,255,255,0.2);
-        }
-
-        .login-links {
-          margin-top: 1.5rem;
-          text-align: center;
-          font-size: 0.75rem;
-          color: rgba(255,255,255,0.3);
-          line-height: 1.8;
-        }
-
-        .login-links a {
-          color: rgba(255,255,255,0.5);
-          text-decoration: none;
-          transition: color 300ms;
-        }
-
-        .login-links a:hover {
-          color: #fff;
-        }
-
-        .login-footer {
-          margin-top: 3rem;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 1.5rem;
-          flex-wrap: wrap;
-        }
-
-        .login-footer-item {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 0.6875rem;
-          color: rgba(255,255,255,0.3);
-          letter-spacing: 0.02em;
-        }
-
-        .login-footer-item img {
-          width: 14px;
-          height: 14px;
-          opacity: 0.4;
-          filter: invert(1);
-        }
-      `}</style>
-
-      {/* Left Panel */}
-      <section className="login-left">
-        <div className="login-glow" />
-        <div className="login-particles" />
-        <div className="login-left-content">
-          <img
-            src="/assets/images/logo-vgon-negativo.png"
-            alt="VGON"
-            className="login-logo"
+        {/* Left Panel - Brand */}
+        <section className="relative hidden lg:flex flex-col justify-center px-12 xl:px-20 py-16 overflow-hidden">
+          {/* Background Layers */}
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.03)_0%,transparent_70%)]" />
+          <div className="absolute inset-[8%_0_auto_15%] w-4/5 max-w-[900px] opacity-[0.06] pointer-events-none">
+            <img src="/assets/images/bg-world-map.svg" alt="" className="w-full h-auto" />
+          </div>
+          <div className="absolute inset-0 opacity-[0.015] pointer-events-none"
+            style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='200' height='200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.4'/%3E%3C/svg%3E\")" }}
           />
 
-          <h1 className="login-headline">
-            Conecte tudo.<br />
-            <strong>Atenda melhor.</strong><br />
-            <strong>Transforme experiências.</strong>
-          </h1>
+          {/* Content */}
+          <div className="relative z-10">
+            <img
+              src="/assets/images/logo-vgon-negativo.png"
+              alt="VGON"
+              className="h-auto w-[clamp(180px,18vw,310px)] object-contain mb-12 opacity-95"
+            />
 
-          <p className="login-subtitle">
-            Plataforma Omnichannel completa para integrar WhatsApp, E-mail, Website e chamadas em um único lugar.
-          </p>
+            <h1 className="text-[clamp(2rem,4vw,3.2rem)] font-light leading-[1.15] tracking-[-0.03em] mb-6">
+              Conecte tudo.<br />
+              <span className="font-bold">Atenda melhor.</span><br />
+              <span className="font-bold">Transforme experiências.</span>
+            </h1>
 
-          <div className="login-cards">
-            <div className="login-card">
-              <img src="/assets/icons/email.svg" alt="E-mail" />
-              <span>E-mail</span>
-            </div>
-            <div className="login-card">
-              <img src="/assets/icons/whatsapp.svg" alt="WhatsApp" />
-              <span>WhatsApp</span>
-            </div>
-            <div className="login-card">
-              <img src="/assets/icons/website.svg" alt="Website" />
-              <span>Website</span>
-            </div>
-            <div className="login-card">
-              <img src="/assets/icons/phone.svg" alt="Ligações" />
-              <span>Ligações</span>
+            <p className="text-base leading-7 text-white/50 max-w-[480px] mb-12">
+              Plataforma Omnichannel completa para integrar WhatsApp, E-mail, Website e chamadas em um único lugar.
+            </p>
+
+            {/* Channel Cards */}
+            <div className="grid grid-cols-4 gap-3">
+              <ChannelCard icon={<Mail size={20} />} label="E-mail" />
+              <ChannelCard icon={<MessageCircle size={20} />} label="WhatsApp" />
+              <ChannelCard icon={<Globe size={20} />} label="Website" />
+              <ChannelCard icon={<Phone size={20} />} label="Ligações" />
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* Right Panel - Login Form */}
-      <section className="login-right">
-        <div className="login-form-container">
-          <h2 className="login-form-title">
-            {showForgotPassword ? 'Recuperar senha' : 'Bem-vindo de volta'}
-          </h2>
-          <p className="login-form-subtitle">
-            {showForgotPassword
-              ? 'Informe seu e-mail para receber um link seguro de redefinição.'
-              : 'Faça login para acessar sua plataforma.'}
-          </p>
-
-          <form onSubmit={showForgotPassword ? handleForgotPassword : handleSubmit}>
-            <div className="login-field">
-              <label className="login-label">E-mail</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="login-input"
-                placeholder="seu@email.com"
-                required
+        {/* Right Panel - Form */}
+        <section className="flex items-center justify-center px-6 sm:px-12 lg:px-16 py-12 bg-[#0a0a0a] lg:border-l lg:border-white/[0.04]">
+          <div className="w-full max-w-[400px]">
+            {/* Mobile Logo */}
+            <div className="lg:hidden mb-10">
+              <img
+                src="/assets/images/logo-vgon-negativo.png"
+                alt="VGON"
+                className="h-auto w-[180px] object-contain opacity-95"
               />
             </div>
 
-            {!showForgotPassword && (
-              <>
-                <div className="login-field">
-                  <label className="login-label">Senha</label>
-                  <div className="login-password-wrapper">
+            <h2 className="text-2xl font-semibold tracking-[-0.02em] text-white mb-2">
+              {showForgotPassword ? 'Recuperar senha' : 'Bem-vindo de volta'}
+            </h2>
+            <p className="text-sm text-white/40 mb-8 leading-relaxed">
+              {showForgotPassword
+                ? 'Informe seu e-mail para receber um link seguro de redefinição.'
+                : 'Faça login para acessar sua plataforma.'}
+            </p>
+
+            <form onSubmit={showForgotPassword ? handleForgotPassword : handleSubmit} className="space-y-5">
+              {/* Email Field */}
+              <div>
+                <label className="block text-[13px] font-medium text-white/60 mb-2">E-mail</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full h-[52px] px-4 bg-white/[0.04] border border-white/[0.08] rounded-[10px] text-white text-[15px] placeholder:text-white/25 outline-none transition-all duration-300 focus:border-white/20 focus:bg-white/[0.06] focus:shadow-[0_0_0_3px_rgba(255,255,255,0.03)]"
+                  placeholder="seu@email.com"
+                  required
+                />
+              </div>
+
+              {/* Password Field */}
+              {!showForgotPassword && (
+                <div>
+                  <label className="block text-[13px] font-medium text-white/60 mb-2">Senha</label>
+                  <div className="relative">
                     <input
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="login-input"
+                      className="w-full h-[52px] px-4 pr-12 bg-white/[0.04] border border-white/[0.08] rounded-[10px] text-white text-[15px] placeholder:text-white/25 outline-none transition-all duration-300 focus:border-white/20 focus:bg-white/[0.06] focus:shadow-[0_0_0_3px_rgba(255,255,255,0.03)]"
                       placeholder="Digite sua senha"
                       required
                       minLength={8}
@@ -476,66 +138,89 @@ export default function LoginPage() {
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="login-password-toggle"
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/70 transition-colors duration-300"
                       aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
                     >
                       {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
                   </div>
                 </div>
+              )}
+
+              {/* Forgot Password Link */}
+              {!showForgotPassword && (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotPassword(true)}
+                    className="text-[13px] text-white/40 hover:text-white/80 transition-colors duration-300"
+                  >
+                    Esqueceu sua senha?
+                  </button>
+                </div>
+              )}
+
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={isLoading || isSendingReset}
+                className="w-full h-[52px] bg-white text-[#050505] rounded-[10px] text-[15px] font-semibold tracking-[-0.01em] transition-all duration-300 hover:bg-[#e5e5e5] hover:-translate-y-[1px] hover:shadow-[0_4px_20px_rgba(255,255,255,0.1)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none"
+              >
+                {showForgotPassword
+                  ? (isSendingReset ? 'Enviando...' : 'Enviar link de recuperação')
+                  : (isLoading ? 'Entrando...' : 'Entrar')}
+              </button>
+
+              {/* Back Button (Forgot Password mode) */}
+              {showForgotPassword && (
                 <button
                   type="button"
-                  onClick={() => setShowForgotPassword(true)}
-                  className="login-forgot"
+                  onClick={() => setShowForgotPassword(false)}
+                  className="w-full h-[52px] bg-transparent border border-white/10 text-white/60 rounded-[10px] text-[15px] font-medium transition-all duration-300 hover:bg-white/[0.04] hover:border-white/20"
                 >
-                  Esqueceu sua senha?
+                  Voltar para o login
                 </button>
-              </>
-            )}
+              )}
+            </form>
 
-            <button
-              type="submit"
-              disabled={isLoading || isSendingReset}
-              className="login-submit"
-            >
-              {showForgotPassword
-                ? (isSendingReset ? 'Enviando...' : 'Enviar link de recuperação')
-                : (isLoading ? 'Entrando...' : 'Entrar')}
-            </button>
-
-            {showForgotPassword && (
-              <button
-                type="button"
-                onClick={() => setShowForgotPassword(false)}
-                className="login-back-btn"
-              >
-                Voltar para o login
-              </button>
-            )}
-          </form>
-
-          <div className="login-links">
-            <Link href="/termos-de-servico">Termos de Uso</Link>
-            {' · '}
-            <Link href="/politica-de-privacidade">Política de Privacidade</Link>
-          </div>
-
-          <div className="login-footer">
-            <div className="login-footer-item">
-              <img src="/assets/icons/security.svg" alt="" />
-              <span>Ambiente Seguro</span>
+            {/* Legal Links */}
+            <div className="mt-6 text-center text-xs text-white/30 space-x-3">
+              <Link href="/termos-de-servico" className="hover:text-white/70 transition-colors duration-300">
+                Termos de Uso
+              </Link>
+              <span className="text-white/15">·</span>
+              <Link href="/politica-de-privacidade" className="hover:text-white/70 transition-colors duration-300">
+                Política de Privacidade
+              </Link>
             </div>
-            <div className="login-footer-item">
-              <img src="/assets/icons/shield.svg" alt="" />
-              <span>Infraestrutura Estável</span>
-            </div>
-            <div className="login-footer-item">
-              <img src="/assets/icons/support.svg" alt="" />
-              <span>Suporte Humanizado</span>
+
+            {/* Footer Badges */}
+            <div className="mt-10 flex items-center justify-center gap-5 flex-wrap">
+              <FooterBadge icon={<Lock size={13} />} text="Ambiente Seguro" />
+              <FooterBadge icon={<Shield size={13} />} text="Infraestrutura Estável" />
+              <FooterBadge icon={<HeadphonesIcon size={13} />} text="Suporte Humanizado" />
             </div>
           </div>
-        </div>
-      </section>
-    </main>
+        </section>
+      </div>
+    </div>
+  )
+}
+
+function ChannelCard({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div className="flex flex-col items-center gap-2.5 py-5 px-3 bg-white/[0.03] border border-white/[0.06] rounded-xl backdrop-blur-sm transition-all duration-300 hover:bg-white/[0.06] hover:border-white/[0.12] hover:-translate-y-0.5">
+      <span className="text-white/60">{icon}</span>
+      <span className="text-[11px] font-medium text-white/50">{label}</span>
+    </div>
+  )
+}
+
+function FooterBadge({ icon, text }: { icon: React.ReactNode; text: string }) {
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] text-white/30">
+      <span className="text-white/40">{icon}</span>
+      <span>{text}</span>
+    </div>
   )
 }
