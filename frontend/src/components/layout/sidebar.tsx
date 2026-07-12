@@ -189,17 +189,17 @@ export default function Sidebar() {
       <div className="flex h-[92px] items-center justify-center border-b border-dark-700 px-4 dark:border-gray-800">
         <img
           src="/favicon.png"
-          alt="VGON Chat"
+          alt="VGON"
           className={clsx(
             'object-contain transition-all duration-200',
             sidebarPinned ? 'hidden' : 'h-10 w-10 rounded-xl group-hover/sidebar:hidden'
           )}
         />
         <img
-          src="/logo-white.png"
-          alt="VGON Chat"
+          src="/assets/images/logo-vgon-negativo.png"
+          alt="VGON"
           className={clsx(
-            'h-14 w-auto max-w-[210px] object-contain transition-all duration-200',
+            'h-10 w-auto max-w-[180px] object-contain transition-all duration-200',
             sidebarPinned ? 'block' : 'hidden group-hover/sidebar:block'
           )}
         />
