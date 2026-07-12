@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import toast from 'react-hot-toast'
-import { Eye, EyeOff, Mail, MessageCircle, Globe, Phone, Lock, Shield, HeadphonesIcon } from 'lucide-react'
+import { Eye, EyeOff, Mail, MessageCircle, Globe, Lock, Shield, HeadphonesIcon } from 'lucide-react'
 import api from '@/lib/api'
 
 export default function LoginPage() {
@@ -55,12 +55,12 @@ export default function LoginPage() {
             loop
             muted
             playsInline
-            className="absolute inset-0 w-full h-full object-cover opacity-30 pointer-events-none"
+            className="absolute inset-0 w-full h-full object-cover opacity-50 pointer-events-none"
           >
             <source src="https://vgon.com.br/wp-content/uploads/2026/07/5925-187109675_medium.mp4" type="video/mp4" />
           </video>
           {/* Dark overlay on top of video */}
-          <div className="absolute inset-0 bg-[#050505]/60 pointer-events-none" />
+          <div className="absolute inset-0 bg-[#050505]/40 pointer-events-none" />
 
           {/* Content */}
           <div className="relative z-10">
@@ -77,15 +77,14 @@ export default function LoginPage() {
             </h1>
 
             <p className="text-base leading-7 text-white/50 max-w-[480px] mb-12">
-              Plataforma Omnichannel completa para integrar WhatsApp, E-mail, Website e chamadas em um único lugar.
+              Plataforma Omnichannel completa para integrar WhatsApp, E-mail e Website em um único lugar.
             </p>
 
             {/* Channel Cards */}
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <ChannelCard icon={<Mail size={20} />} label="E-mail" />
               <ChannelCard icon={<MessageCircle size={20} />} label="WhatsApp" />
               <ChannelCard icon={<Globe size={20} />} label="Website" />
-              <ChannelCard icon={<Phone size={20} />} label="Ligações" />
             </div>
           </div>
         </section>
