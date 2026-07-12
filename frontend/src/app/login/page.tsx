@@ -49,14 +49,18 @@ export default function LoginPage() {
 
         {/* Left Panel - Brand */}
         <section className="relative hidden lg:flex flex-col justify-center px-12 xl:px-20 py-16 overflow-hidden">
-          {/* Background Layers */}
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.03)_0%,transparent_70%)]" />
-          <div className="absolute inset-[8%_0_auto_15%] w-4/5 max-w-[900px] opacity-[0.06] pointer-events-none">
-            <img src="/assets/images/bg-world-map.svg" alt="" className="w-full h-auto" />
-          </div>
-          <div className="absolute inset-0 opacity-[0.015] pointer-events-none"
-            style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg width='200' height='200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.4'/%3E%3C/svg%3E\")" }}
-          />
+          {/* Video Background */}
+          <video
+            autoPlay
+            loop
+            muted
+            playsInline
+            className="absolute inset-0 w-full h-full object-cover opacity-30 pointer-events-none"
+          >
+            <source src="https://vgon.com.br/wp-content/uploads/2026/07/5925-187109675_medium.mp4" type="video/mp4" />
+          </video>
+          {/* Dark overlay on top of video */}
+          <div className="absolute inset-0 bg-[#050505]/60 pointer-events-none" />
 
           {/* Content */}
           <div className="relative z-10">
