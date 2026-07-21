@@ -53,7 +53,7 @@ type UpdateContactRequest struct {
 }
 
 // GetContacts returns contacts for a company
-func (s *ContactService) GetContacts(companyID string, search string, limit, offset int) ([]models.Contact, int, error) {
+func (s *ContactService) GetContacts(companyID string, search string, limit, offset int, blocked bool) ([]models.Contact, int, error) {
 	if limit == 0 {
 		limit = 50
 	}
@@ -63,10 +63,10 @@ func (s *ContactService) GetContacts(companyID string, search string, limit, off
 		SELECT COUNT(*)
 		FROM contacts c
 		LEFT JOIN customer_companies cc ON c.customer_company_id = cc.id
-		WHERE c.company_id = $1
+		WHERE c.company_id = $1 AND c.is_blocked = $2
 	`
-	args := []interface{}{companyID}
-	argIdx := 2
+	args := []interface{}{companyID, blocked}
+	argIdx := 3
 
 	if search != "" {
 		countQuery += fmt.Sprintf(" AND (c.name ILIKE $%d OR c.phone ILIKE $%d OR c.email ILIKE $%d OR c.company_name ILIKE $%d OR cc.name ILIKE $%d)", argIdx, argIdx, argIdx, argIdx, argIdx)
@@ -81,15 +81,15 @@ func (s *ContactService) GetContacts(companyID string, search string, limit, off
 	query := `
 		SELECT c.id, c.company_id, c.name, c.phone, c.email, c.customer_company_id, cc.name,
 			   c.company_name, c.position, c.city, c.state, c.origin, c.avatar_url, c.notes,
-			   c.assigned_to, c.is_opted_out, c.opted_out_at, c.opt_out_reason, c.opt_out_source,
+			   c.assigned_to, c.is_opted_out, c.is_blocked, c.blocked_at, c.blocked_by, c.opted_out_at, c.opt_out_reason, c.opt_out_source,
 			   c.consent_status, c.consent_source, c.consent_text, c.consent_given_at, c.consent_revoked_at,
 			   c.created_at, c.updated_at
 		FROM contacts c
 		LEFT JOIN customer_companies cc ON c.customer_company_id = cc.id
-		WHERE c.company_id = $1
+		WHERE c.company_id = $1 AND c.is_blocked = $2
 	`
-	dataArgs := []interface{}{companyID}
-	dataArgIdx := 2
+	dataArgs := []interface{}{companyID, blocked}
+	dataArgIdx := 3
 
 	if search != "" {
 		query += fmt.Sprintf(" AND (c.name ILIKE $%d OR c.phone ILIKE $%d OR c.email ILIKE $%d OR c.company_name ILIKE $%d OR cc.name ILIKE $%d)", dataArgIdx, dataArgIdx, dataArgIdx, dataArgIdx, dataArgIdx)
@@ -113,7 +113,7 @@ func (s *ContactService) GetContacts(companyID string, search string, limit, off
 		err := rows.Scan(
 			&c.ID, &c.CompanyID, &c.Name, &c.Phone, &c.Email, &c.CustomerCompanyID, &c.CustomerCompanyName, &c.CompanyName,
 			&c.Position, &c.City, &c.State, &c.Origin, &c.AvatarURL, &c.Notes,
-			&c.AssignedTo, &c.IsOptedOut, &c.OptedOutAt, &c.OptOutReason, &c.OptOutSource,
+			&c.AssignedTo, &c.IsOptedOut, &c.IsBlocked, &c.BlockedAt, &c.BlockedBy, &c.OptedOutAt, &c.OptOutReason, &c.OptOutSource,
 			&c.ConsentStatus, &c.ConsentSource, &c.ConsentText, &c.ConsentGivenAt, &c.ConsentRevokedAt,
 			&c.CreatedAt, &c.UpdatedAt,
 		)
@@ -132,7 +132,7 @@ func (s *ContactService) GetContactByID(contactID, companyID string) (*models.Co
 	err := s.db.QueryRow(`
 		SELECT c.id, c.company_id, c.name, c.phone, c.email, c.customer_company_id, cc.name,
 			   c.company_name, c.position, c.city, c.state, c.origin,
-			   c.avatar_url, c.notes, c.assigned_to, c.is_opted_out, c.opted_out_at, c.opt_out_reason, c.opt_out_source,
+			   c.avatar_url, c.notes, c.assigned_to, c.is_opted_out, c.is_blocked, c.blocked_at, c.blocked_by, c.opted_out_at, c.opt_out_reason, c.opt_out_source,
 			   c.consent_status, c.consent_source, c.consent_text, c.consent_given_at, c.consent_revoked_at,
 			   c.created_at, c.updated_at
 		FROM contacts c
@@ -141,7 +141,7 @@ func (s *ContactService) GetContactByID(contactID, companyID string) (*models.Co
 	`, contactID, companyID).Scan(
 		&c.ID, &c.CompanyID, &c.Name, &c.Phone, &c.Email, &c.CustomerCompanyID, &c.CustomerCompanyName, &c.CompanyName,
 		&c.Position, &c.City, &c.State, &c.Origin, &c.AvatarURL, &c.Notes,
-		&c.AssignedTo, &c.IsOptedOut, &c.OptedOutAt, &c.OptOutReason, &c.OptOutSource,
+		&c.AssignedTo, &c.IsOptedOut, &c.IsBlocked, &c.BlockedAt, &c.BlockedBy, &c.OptedOutAt, &c.OptOutReason, &c.OptOutSource,
 		&c.ConsentStatus, &c.ConsentSource, &c.ConsentText, &c.ConsentGivenAt, &c.ConsentRevokedAt,
 		&c.CreatedAt, &c.UpdatedAt,
 	)

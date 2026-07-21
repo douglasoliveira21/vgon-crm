@@ -38,6 +38,7 @@ import {
   Trash2,
   ArrowLeft,
   Loader2,
+  Ban,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import toast from 'react-hot-toast'
@@ -217,6 +218,7 @@ export default function ConversationsPage() {
   // Context menu & reply
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; message: Message } | null>(null)
   const [conversationContextMenu, setConversationContextMenu] = useState<{ x: number; y: number; conversation: Conversation } | null>(null)
+  const [showConversationMenu, setShowConversationMenu] = useState(false)
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
@@ -1363,9 +1365,18 @@ export default function ConversationsPage() {
                 </button>
               )}
               {/* More */}
-              <button className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg">
-                <MoreVertical size={18} />
-              </button>
+              <div className="relative">
+                <button type="button" onClick={() => setShowConversationMenu((open) => !open)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" aria-label="Mais opções">
+                  <MoreVertical size={18} />
+                </button>
+                {showConversationMenu && (
+                  <div className="absolute right-0 top-full z-30 mt-2 w-52 rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                    <button type="button" onClick={blockSelectedContact} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40">
+                      <Ban size={16} /> Bloquear contato
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -2183,6 +2194,18 @@ function ContactPanel({
     setContactTags(contactRes?.data?.tags || [])
     setContactDeals((dealsRes?.data?.deals || []).filter((deal: ContactDeal) => deal.status === 'open'))
     setContactConversations(conversationsRes?.data?.conversations || [])
+  }
+
+  const blockSelectedContact = async () => {
+    if (!selectedConv?.contact_id) return
+    if (!confirm(`Bloquear ${selectedConv.contact_name || selectedConv.contact_phone}? Novas mensagens deste contato serão ignoradas.`)) return
+    try {
+      await api.post(`/contacts/${selectedConv.contact_id}/block`)
+      setShowConversationMenu(false)
+      toast.success('Contato bloqueado')
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao bloquear contato')
+    }
   }
 
   useEffect(() => {

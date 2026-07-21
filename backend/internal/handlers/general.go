@@ -1078,6 +1078,7 @@ func createCampaignRecipients(tx *sql.Tx, campaignID, companyID, filterTag strin
 			WHERE c.company_id = $2
 			  AND c.phone IS NOT NULL
 			  AND COALESCE(c.is_opted_out, false) = false
+			  AND COALESCE(c.is_blocked, false) = false
 			  AND c.id = ANY($3::uuid[])
 		`, campaignID, companyID, "{"+strings.Join(contactIDs, ",")+"}")
 	} else if strings.TrimSpace(filterTag) != "" {
@@ -1089,6 +1090,7 @@ func createCampaignRecipients(tx *sql.Tx, campaignID, companyID, filterTag strin
 			WHERE c.company_id = $2
 			  AND c.phone IS NOT NULL
 			  AND COALESCE(c.is_opted_out, false) = false
+			  AND COALESCE(c.is_blocked, false) = false
 			  AND ct.tag_id = $3::uuid
 		`, campaignID, companyID, filterTag)
 	} else {
@@ -1199,6 +1201,7 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 			  AND COALESCE(cc.next_attempt_at, NOW()) <= NOW()
 			  AND c.phone IS NOT NULL
 			  AND COALESCE(c.is_opted_out, false) = false
+			  AND COALESCE(c.is_blocked, false) = false
 			ORDER BY cc.id
 			LIMIT 1
 		`, campaignID, companyID).Scan(&campaignContactID, &contactID, &name, &phone, &email, &companyName)
@@ -1470,6 +1473,7 @@ func loadEmailCampaignRecipients(db *sql.DB, companyID string, sendToAll bool, c
 		WHERE c.company_id = $1
 		  AND NULLIF(TRIM(c.email), '') IS NOT NULL
 		  AND COALESCE(c.is_opted_out, false) = false
+		  AND COALESCE(c.is_blocked, false) = false
 		  %s
 		ORDER BY LOWER(COALESCE(NULLIF(c.name, ''), c.email)), c.email
 	`, filter), args...)

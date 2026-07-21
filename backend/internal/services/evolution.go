@@ -738,6 +738,11 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 
 	// Get or create contact
 	contactID := s.getOrCreateContact(instance.CompanyID, phone, data, instanceName)
+	var isBlocked bool
+	if err := s.db.QueryRow("SELECT is_blocked FROM contacts WHERE id = $1 AND company_id = $2", contactID, instance.CompanyID).Scan(&isBlocked); err == nil && isBlocked {
+		log.Printf("[WEBHOOK] Ignoring message from blocked contact %s", contactID)
+		return
+	}
 
 	// Get or create conversation
 	conversationID := s.getOrCreateConversation(instance.CompanyID, contactID, instance.ChannelID)

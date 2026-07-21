@@ -35,6 +35,7 @@ import {
   AtSign,
   SlidersHorizontal,
   Search,
+  Ban,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 
@@ -43,7 +44,7 @@ const menuItems = [
   { label: 'Busca Global', href: '/search', icon: Search },
   { label: 'Caixa de Entrada', href: '/inbox', icon: Inbox },
   { label: 'Conversas', href: '/conversations', icon: MessageSquare, expandable: 'conversations' },
-  { label: 'Contatos', href: '/contacts', icon: Users },
+  { label: 'Contatos', href: '/contacts', icon: Users, expandable: 'contacts' },
   { label: 'Empresas', href: '/companies', icon: Building2 },
   { label: 'Times', href: '/teams', icon: UsersRound, expandable: 'teams' },
   { label: 'Canais', href: '/channels', icon: Radio },
@@ -97,7 +98,7 @@ export default function Sidebar() {
   const { user, logout, updateStatus } = useAuthStore()
   const { sidebarPinned, setSidebarPinned, setSidebarHovered, theme, toggleTheme } = useAppearanceStore()
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
-  const [expandedSections, setExpandedSections] = useState<{ conversations: boolean; teams: boolean }>({ conversations: true, teams: false })
+  const [expandedSections, setExpandedSections] = useState<{ conversations: boolean; contacts: boolean; teams: boolean }>({ conversations: true, contacts: false, teams: false })
   const [conversationCounts, setConversationCounts] = useState({ mine: 0, unassigned: 0, all: 0, mentions: 0 })
   const [teams, setTeams] = useState<SidebarTeam[]>([])
   const profileMenuRef = useRef<HTMLDivElement>(null)
@@ -232,7 +233,7 @@ export default function Sidebar() {
         {menuItems.map((item) => {
           const isActive = pathname === item.href || pathname?.startsWith(item.href + '/')
           const Icon = item.icon
-          const sectionKey = item.expandable as 'conversations' | 'teams' | undefined
+          const sectionKey = item.expandable as 'conversations' | 'contacts' | 'teams' | undefined
           const sectionOpen = sectionKey ? expandedSections[sectionKey] : false
           const mainBadge = sectionKey === 'conversations'
             ? conversationCounts.unassigned
@@ -278,6 +279,13 @@ export default function Sidebar() {
                   <SubMenuLink href="/conversations?view=unassigned" label="Nao atribuidas" count={conversationCounts.unassigned} />
                   <SubMenuLink href="/conversations?view=all" label="Todas" count={conversationCounts.all} />
                   <SubMenuLink href="/conversations?mentions=true" label="Mencoes" count={conversationCounts.mentions} icon={<AtSign size={13} />} />
+                </div>
+              )}
+
+              {sectionKey === 'contacts' && sectionOpen && (
+                <div className={clsx('mt-1 space-y-1 pl-9 pr-2 transition-opacity duration-200', showTextClass)}>
+                  <SubMenuLink href="/contacts" label="Todos os contatos" />
+                  <SubMenuLink href="/contacts/blocked" label="Contatos bloqueados" icon={<Ban size={13} />} />
                 </div>
               )}
 

@@ -421,6 +421,13 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 		if body.Content == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Content is required"})
 		}
+		if !body.IsPrivate {
+			var blocked bool
+			_ = svc.DB.QueryRow(`SELECT co.is_blocked FROM conversations c JOIN contacts co ON co.id = c.contact_id WHERE c.id = $1 AND c.company_id = $2`, conversationID, companyID).Scan(&blocked)
+			if blocked {
+				return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Este contato está bloqueado"})
+			}
+		}
 
 		req := &services.SendTextMessageRequest{
 			ConversationID: conversationID,
@@ -551,6 +558,11 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
 		}
+		var blocked bool
+		_ = svc.DB.QueryRow(`SELECT co.is_blocked FROM conversations c JOIN contacts co ON co.id = c.contact_id WHERE c.id = $1 AND c.company_id = $2`, conversationID, companyID).Scan(&blocked)
+		if blocked {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Este contato está bloqueado"})
+		}
 		if err := svc.Message.PauseAutomationForConversation(conversationID); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -636,6 +648,11 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
+		}
+		var blocked bool
+		_ = svc.DB.QueryRow(`SELECT co.is_blocked FROM conversations c JOIN contacts co ON co.id = c.contact_id WHERE c.id = $1 AND c.company_id = $2`, conversationID, companyID).Scan(&blocked)
+		if blocked {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Este contato está bloqueado"})
 		}
 		if err := svc.Message.PauseAutomationForConversation(conversationID); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})

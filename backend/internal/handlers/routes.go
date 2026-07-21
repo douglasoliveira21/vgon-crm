@@ -118,6 +118,8 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	contacts.Post("/", CreateContact(svc))
 	contacts.Put("/:id", UpdateContact(svc))
 	contacts.Delete("/:id", DeleteContact(svc))
+	contacts.Post("/:id/block", BlockContact(svc))
+	contacts.Post("/:id/unblock", UnblockContact(svc))
 	contacts.Post("/:id/tags", AddContactTag(svc))
 	contacts.Delete("/:id/tags/:tagId", RemoveContactTag(svc))
 

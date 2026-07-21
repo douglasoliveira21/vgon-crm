@@ -16,8 +16,9 @@ func GetContacts(svc *services.Container) fiber.Handler {
 		search := c.Query("search")
 		limit := c.QueryInt("limit", 50)
 		offset := c.QueryInt("offset", 0)
+		blocked := c.QueryBool("blocked", false)
 
-		contacts, total, err := svc.Contact.GetContacts(companyID, search, limit, offset)
+		contacts, total, err := svc.Contact.GetContacts(companyID, search, limit, offset, blocked)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -28,6 +29,47 @@ func GetContacts(svc *services.Container) fiber.Handler {
 			"limit":    limit,
 			"offset":   offset,
 		})
+	}
+}
+
+func BlockContact(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
+		contactID := c.Params("id")
+		result, err := svc.DB.Exec(`
+			UPDATE contacts SET is_blocked = true, blocked_at = NOW(), blocked_by = $1, updated_at = NOW()
+			WHERE id = $2 AND company_id = $3
+		`, userID, contactID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Erro ao bloquear contato"})
+		}
+		rows, _ := result.RowsAffected()
+		if rows == 0 {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Contato não encontrado"})
+		}
+		logAuditEvent(svc.DB, c, "contact.block", "contact", contactID, nil)
+		return c.JSON(fiber.Map{"message": "Contato bloqueado"})
+	}
+}
+
+func UnblockContact(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		contactID := c.Params("id")
+		result, err := svc.DB.Exec(`
+			UPDATE contacts SET is_blocked = false, blocked_at = NULL, blocked_by = NULL, updated_at = NOW()
+			WHERE id = $1 AND company_id = $2
+		`, contactID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Erro ao desbloquear contato"})
+		}
+		rows, _ := result.RowsAffected()
+		if rows == 0 {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Contato não encontrado"})
+		}
+		logAuditEvent(svc.DB, c, "contact.unblock", "contact", contactID, nil)
+		return c.JSON(fiber.Map{"message": "Contato desbloqueado"})
 	}
 }
 

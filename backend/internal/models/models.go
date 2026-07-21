@@ -124,6 +124,9 @@ type Contact struct {
 	Notes               *string   `json:"notes,omitempty"`
 	AssignedTo          *string   `json:"assigned_to,omitempty"`
 	IsOptedOut          bool      `json:"is_opted_out"`
+	IsBlocked           bool      `json:"is_blocked"`
+	BlockedAt           *time.Time `json:"blocked_at,omitempty"`
+	BlockedBy           *string   `json:"blocked_by,omitempty"`
 	OptedOutAt          *time.Time `json:"opted_out_at,omitempty"`
 	OptOutReason        *string   `json:"opt_out_reason,omitempty"`
 	OptOutSource        *string   `json:"opt_out_source,omitempty"`
