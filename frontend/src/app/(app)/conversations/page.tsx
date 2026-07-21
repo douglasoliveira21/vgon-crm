@@ -840,6 +840,18 @@ export default function ConversationsPage() {
     }
   }
 
+  const blockSelectedContact = async () => {
+    if (!selectedConv?.contact_id) return
+    if (!confirm(`Bloquear ${selectedConv.contact_name || selectedConv.contact_phone}? Novas mensagens deste contato serão ignoradas.`)) return
+    try {
+      await api.post(`/contacts/${selectedConv.contact_id}/block`)
+      setShowConversationMenu(false)
+      toast.success('Contato bloqueado')
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao bloquear contato')
+    }
+  }
+
   // Mention user
   const mentionUser = (userName: string) => {
     setNewMessage((prev) => prev + `@${userName} `)
@@ -2194,18 +2206,6 @@ function ContactPanel({
     setContactTags(contactRes?.data?.tags || [])
     setContactDeals((dealsRes?.data?.deals || []).filter((deal: ContactDeal) => deal.status === 'open'))
     setContactConversations(conversationsRes?.data?.conversations || [])
-  }
-
-  const blockSelectedContact = async () => {
-    if (!selectedConv?.contact_id) return
-    if (!confirm(`Bloquear ${selectedConv.contact_name || selectedConv.contact_phone}? Novas mensagens deste contato serão ignoradas.`)) return
-    try {
-      await api.post(`/contacts/${selectedConv.contact_id}/block`)
-      setShowConversationMenu(false)
-      toast.success('Contato bloqueado')
-    } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Erro ao bloquear contato')
-    }
   }
 
   useEffect(() => {
