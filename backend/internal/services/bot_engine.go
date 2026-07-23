@@ -318,6 +318,16 @@ func nodeWaitsForResponse(node BotNode) bool {
 	}
 }
 
+func shouldExecuteFlowNode(alreadyCompleted, resumedFromResponse bool, step int) bool {
+	if !alreadyCompleted {
+		return true
+	}
+	// The first node of a resumed job may already be complete when a durable
+	// job is retried. Nodes reached afterwards are intentional graph traversal
+	// and must run again when a validation branch loops back to the prompt.
+	return resumedFromResponse && step > 1
+}
+
 func nodeWaitsForExternalCompletion(node BotNode) bool {
 	switch getNodeType(node) {
 	case "glpi_open_ticket", "glpi_check_status":
@@ -1006,7 +1016,8 @@ func (e *BotEngine) executeFlowFrom(flowID, triggerType, companyID, conversation
 
 		conditionResult := e.evaluateCondition(node, companyID, conversationID, contactID, triggerMessage)
 
-		if !e.executionNodeCompleted(execID, node.ID) {
+		alreadyCompleted := e.executionNodeCompleted(execID, node.ID)
+		if shouldExecuteFlowNode(alreadyCompleted, startNodeID != "", steps) {
 			e.recordExecutionEvent(execID, node.ID, "node_started", "running", nil)
 			err := e.executeNode(node, companyID, conversationID, contactID, instanceName, phone)
 			if err != nil {
