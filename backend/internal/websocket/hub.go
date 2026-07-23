@@ -105,6 +105,19 @@ func (h *Hub) Unregister(client *Client) {
 	h.unregister <- client
 }
 
+// HasOtherUserConnection reports whether a user still has another active tab or device.
+func (h *Hub) HasOtherUserConnection(userID, excludedClientID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for clientID, client := range h.clients {
+		if clientID != excludedClientID && client.UserID == userID {
+			return true
+		}
+	}
+	return false
+}
+
 // JoinRoom adds a client to a room
 func (h *Hub) JoinRoom(clientID, room string) {
 	h.mu.Lock()

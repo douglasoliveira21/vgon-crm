@@ -48,7 +48,15 @@ func WebSocketHandler(hub *ws.Hub, cfg *config.Config, svc *services.Container) 
 		}
 
 		hub.Register(client)
-		defer hub.Unregister(client)
+		if svc != nil && svc.DB != nil {
+			svc.DB.Exec("UPDATE users SET is_online = true, last_seen_at = NOW(), updated_at = NOW() WHERE id = $1", claims.UserID)
+		}
+		defer func() {
+			hub.Unregister(client)
+			if svc != nil && svc.DB != nil && !hub.HasOtherUserConnection(claims.UserID, clientID) {
+				svc.DB.Exec("UPDATE users SET is_online = false, last_seen_at = NOW(), updated_at = NOW() WHERE id = $1", claims.UserID)
+			}
+		}()
 
 		// Write pump
 		go func() {

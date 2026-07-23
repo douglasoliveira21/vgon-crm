@@ -172,12 +172,10 @@ func UpdateCurrentUserStatus(svc *services.Container) fiber.Handler {
 		if status != "online" && status != "offline" && status != "busy" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid status"})
 		}
-		isOnline := status != "offline"
-
 		_, err := svc.DB.Exec(`
-			UPDATE users SET availability_status = $1, is_online = $2, last_seen_at = NOW(), updated_at = NOW()
-			WHERE id = $3 AND company_id = $4
-		`, status, isOnline, userID, companyID)
+			UPDATE users SET availability_status = $1, last_seen_at = NOW(), updated_at = NOW()
+			WHERE id = $2 AND company_id = $3
+		`, status, userID, companyID)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}

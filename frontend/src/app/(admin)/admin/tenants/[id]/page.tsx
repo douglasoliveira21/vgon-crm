@@ -262,7 +262,7 @@ export default function TenantUsersPage() {
                     <span className={`px-2 py-0.5 rounded-full text-xs ${
                       user.is_active ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'
                     }`}>
-                      {user.is_active ? (user.is_online ? '🟢 Online' : 'Ativo') : 'Inativo'}
+                      {user.is_active ? (user.is_online ? 'Online' : 'Offline') : 'Inativo'}
                     </span>
                   </td>
                   <td className="px-6 py-3">

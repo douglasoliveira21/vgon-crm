@@ -42,6 +42,9 @@ func main() {
 	if err := database.RunMigrations(db); err != nil {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
+	if _, err := db.Exec("UPDATE users SET is_online = false WHERE is_online = true"); err != nil {
+		log.Printf("Failed to reset stale user presence: %v", err)
+	}
 
 	// Initialize Redis
 	rdb, err := redis.Connect(cfg.RedisURL)

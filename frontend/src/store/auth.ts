@@ -101,7 +101,6 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: () => {
-    api.put('/me/status', { status: 'offline' }).catch(() => {})
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
     wsService.disconnect()

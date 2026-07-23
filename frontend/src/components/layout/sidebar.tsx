@@ -109,7 +109,7 @@ export default function Sidebar() {
 	const sidebarExpanded = sidebarPinned || sidebarHovered
 	const expandedClass = sidebarExpanded ? 'w-64' : 'w-20'
 	const showTextClass = sidebarExpanded ? 'opacity-100' : 'pointer-events-none w-0 overflow-hidden opacity-0'
-  const currentStatus = user?.availability_status || (user?.is_online ? 'online' : 'offline')
+  const currentStatus = user?.is_online ? (user.availability_status || 'online') : 'offline'
   const currentStatusMeta = statusMeta[currentStatus] || statusMeta.offline
   const profileMenuItems = [
     { label: 'Perfil', href: '/profile', icon: UserCircle, show: true },

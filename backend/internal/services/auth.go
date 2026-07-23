@@ -107,11 +107,6 @@ func (s *AuthService) Login(req *LoginRequest) (*AuthResponse, error) {
 		return nil, fmt.Errorf("failed to save refresh token: %w", err)
 	}
 
-	// Update presence
-	user.IsOnline = true
-	user.AvailabilityStatus = "online"
-	s.db.Exec("UPDATE users SET is_online = true, availability_status = 'online', last_seen_at = NOW() WHERE id = $1", user.ID)
-
 	return &AuthResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,

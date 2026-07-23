@@ -164,7 +164,7 @@ func fetchSupervisorDashboardFilters(db *sql.DB, companyID, userID string) fiber
 func fetchTeamAgentDashboard(db *sql.DB, companyID, teamID string) fiber.Map {
 	availability := fiber.Map{"online": 0, "busy": 0, "pause": 0, "offline": 0}
 	workload := []fiber.Map{}
-	rows, _ := db.Query(`SELECT u.id, COALESCE(u.name, 'Agente'), COALESCE(u.availability_status, CASE WHEN u.is_online THEN 'online' ELSE 'offline' END), EXTRACT(EPOCH FROM (NOW() - COALESCE(u.last_seen_at, u.updated_at, u.created_at))), COUNT(c.id) FILTER (WHERE c.status IN ('open', 'in_progress', 'pending')) FROM team_users tu JOIN users u ON u.id = tu.user_id LEFT JOIN conversations c ON c.assigned_to = u.id AND c.company_id = u.company_id AND c.team_id = tu.team_id WHERE tu.team_id = $1 AND u.company_id = $2 AND u.is_active = true GROUP BY u.id, u.name, u.availability_status, u.is_online, u.last_seen_at, u.updated_at, u.created_at ORDER BY u.name`, teamID, companyID)
+	rows, _ := db.Query(`SELECT u.id, COALESCE(u.name, 'Agente'), CASE WHEN u.is_online THEN COALESCE(u.availability_status, 'online') ELSE 'offline' END, EXTRACT(EPOCH FROM (NOW() - COALESCE(u.last_seen_at, u.updated_at, u.created_at))), COUNT(c.id) FILTER (WHERE c.status IN ('open', 'in_progress', 'pending')) FROM team_users tu JOIN users u ON u.id = tu.user_id LEFT JOIN conversations c ON c.assigned_to = u.id AND c.company_id = u.company_id AND c.team_id = tu.team_id WHERE tu.team_id = $1 AND u.company_id = $2 AND u.is_active = true GROUP BY u.id, u.name, u.availability_status, u.is_online, u.last_seen_at, u.updated_at, u.created_at ORDER BY u.name`, teamID, companyID)
 	if rows == nil { return fiber.Map{"availability": availability, "workload": workload} }
 	defer rows.Close()
 	for rows.Next() {
@@ -267,7 +267,7 @@ func fetchPersonalAgentDashboard(db *sql.DB, companyID, userID string) fiber.Map
 	var id, name, status string
 	var idleSeconds float64
 	var activeChats int
-	err := db.QueryRow(`SELECT u.id, COALESCE(u.name, 'Agente'), COALESCE(u.availability_status, CASE WHEN u.is_online THEN 'online' ELSE 'offline' END), EXTRACT(EPOCH FROM (NOW() - COALESCE(u.last_seen_at, u.updated_at, u.created_at))), COUNT(c.id) FILTER (WHERE c.status IN ('open', 'in_progress', 'pending')) FROM users u LEFT JOIN conversations c ON c.assigned_to = u.id AND c.company_id = u.company_id WHERE u.id = $1 AND u.company_id = $2 GROUP BY u.id, u.name, u.availability_status, u.is_online, u.last_seen_at, u.updated_at, u.created_at`, userID, companyID).Scan(&id, &name, &status, &idleSeconds, &activeChats)
+	err := db.QueryRow(`SELECT u.id, COALESCE(u.name, 'Agente'), CASE WHEN u.is_online THEN COALESCE(u.availability_status, 'online') ELSE 'offline' END, EXTRACT(EPOCH FROM (NOW() - COALESCE(u.last_seen_at, u.updated_at, u.created_at))), COUNT(c.id) FILTER (WHERE c.status IN ('open', 'in_progress', 'pending')) FROM users u LEFT JOIN conversations c ON c.assigned_to = u.id AND c.company_id = u.company_id WHERE u.id = $1 AND u.company_id = $2 GROUP BY u.id, u.name, u.availability_status, u.is_online, u.last_seen_at, u.updated_at, u.created_at`, userID, companyID).Scan(&id, &name, &status, &idleSeconds, &activeChats)
 	workload := []fiber.Map{}
 	if err == nil {
 		if status == "paused" { status = "pause" }
@@ -451,7 +451,7 @@ func fetchResolutionByChannel(db *sql.DB, companyID, teamID, channelID, period s
 func fetchAgentDashboard(db *sql.DB, companyID string) fiber.Map {
 	availability := fiber.Map{"online": 0, "busy": 0, "pause": 0, "offline": 0}
 	rows, err := db.Query(`
-		SELECT u.id, COALESCE(u.name, 'Agente'), COALESCE(u.availability_status, CASE WHEN u.is_online THEN 'online' ELSE 'offline' END),
+		SELECT u.id, COALESCE(u.name, 'Agente'), CASE WHEN u.is_online THEN COALESCE(u.availability_status, 'online') ELSE 'offline' END,
 		       EXTRACT(EPOCH FROM (NOW() - COALESCE(u.last_seen_at, u.updated_at, u.created_at))),
 		       COUNT(c.id) FILTER (WHERE c.status IN ('open', 'in_progress', 'pending')) AS active_chats
 		FROM users u

@@ -58,7 +58,7 @@ export default function ProfilePage() {
     }
   }
 
-  const currentStatus = user?.availability_status || (user?.is_online ? 'online' : 'offline')
+  const currentStatus = user?.is_online ? (user.availability_status || 'online') : 'offline'
 
   const changePassword = async () => {
     if (!currentPassword || !newPassword) {
