@@ -10,6 +10,9 @@ import {
   Search,
   Edit,
   Trash2,
+  Download,
+  LogIn,
+  RotateCcw,
   Users,
   MessageSquare,
   X,
@@ -26,6 +29,7 @@ interface Tenant {
   created_at: string
   user_count: number
   conversation_count: number
+  deletion_scheduled_at?: string
 }
 
 interface CreateTenantForm {
@@ -143,14 +147,56 @@ export default function TenantsPage() {
   }
 
   const handleDelete = async (tenant: Tenant) => {
-    if (!confirm(`Excluir permanentemente a empresa "${tenant.name}"? Isso remove usuários, conversas, mensagens, canais e históricos. Esta ação não pode ser desfeita.`)) return
-
+    const reason = prompt(`Informe o motivo para suspender e agendar a exclusão de "${tenant.name}". O tenant poderá ser recuperado por 7 dias.`)
+    if (!reason) return
     try {
-      await api.delete(`/admin/tenants/${tenant.id}`)
-      toast.success('Empresa excluída permanentemente!')
+      await api.post(`/admin/tenants/${tenant.id}/schedule-deletion`, { reason })
+      toast.success('Tenant suspenso. Exclusão agendada para 7 dias.')
       fetchTenants()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Erro ao excluir empresa')
+    }
+  }
+
+  const restoreTenant = async (tenant: Tenant) => {
+    try {
+      await api.post(`/admin/tenants/${tenant.id}/restore`)
+      toast.success('Tenant restaurado')
+      fetchTenants()
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao restaurar tenant')
+    }
+  }
+
+  const exportTenant = async (tenant: Tenant) => {
+    try {
+      const response = await api.get(`/admin/tenants/${tenant.id}/export`, { responseType: 'blob' })
+      const url = URL.createObjectURL(response.data)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `tenant-${tenant.slug}.json`
+      anchor.click()
+      URL.revokeObjectURL(url)
+      toast.success('Exportação gerada')
+    } catch {
+      toast.error('Erro ao exportar tenant')
+    }
+  }
+
+  const impersonateTenant = async (tenant: Tenant) => {
+    const reason = prompt(`Justificativa para acessar o tenant "${tenant.name}":`)
+    if (!reason) return
+    try {
+      const response = await api.post(`/admin/tenants/${tenant.id}/impersonate`, { reason })
+      const currentAccess = localStorage.getItem('access_token')
+      const currentRefresh = localStorage.getItem('refresh_token')
+      if (currentAccess) localStorage.setItem('super_admin_original_access_token', currentAccess)
+      if (currentRefresh) localStorage.setItem('super_admin_original_refresh_token', currentRefresh)
+      localStorage.setItem('access_token', response.data.access_token)
+      localStorage.removeItem('refresh_token')
+      window.location.href = '/dashboard'
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao acessar tenant')
     }
   }
 
@@ -286,7 +332,7 @@ export default function TenantsPage() {
                           : 'bg-red-500/20 text-red-300'
                       }`}
                     >
-                      {tenant.is_active ? 'Ativa' : 'Inativa'}
+                      {tenant.deletion_scheduled_at ? 'Exclusão agendada' : tenant.is_active ? 'Ativa' : 'Inativa'}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-gray-400 text-sm">
@@ -308,13 +354,27 @@ export default function TenantsPage() {
                       >
                         <Edit className="w-4 h-4" />
                       </button>
+                      <button onClick={() => exportTenant(tenant)} className="p-2 text-gray-400 hover:text-emerald-400 hover:bg-gray-700 rounded-lg" title="Exportar dados">
+                        <Download className="w-4 h-4" />
+                      </button>
+                      {!tenant.deletion_scheduled_at && (
+                        <button onClick={() => impersonateTenant(tenant)} className="p-2 text-gray-400 hover:text-indigo-400 hover:bg-gray-700 rounded-lg" title="Acesso assistido">
+                          <LogIn className="w-4 h-4" />
+                        </button>
+                      )}
+                      {tenant.deletion_scheduled_at ? (
+                        <button onClick={() => restoreTenant(tenant)} className="p-2 text-gray-400 hover:text-green-400 hover:bg-gray-700 rounded-lg" title="Restaurar tenant">
+                          <RotateCcw className="w-4 h-4" />
+                        </button>
+                      ) : (
                       <button
                         onClick={() => handleDelete(tenant)}
                         className="p-2 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded-lg transition-colors"
-                        title="Excluir permanentemente"
+                        title="Suspender e agendar exclusão"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
+                      )}
                     </div>
                   </td>
                 </tr>

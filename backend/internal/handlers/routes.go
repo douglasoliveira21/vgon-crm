@@ -64,7 +64,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	// ============================================
 	// Protected Routes
 	// ============================================
-	protected := api.Group("", middleware.AuthMiddleware(svc.Config))
+	protected := api.Group("", middleware.AuthMiddleware(svc.Config), middleware.ActiveTenantMiddleware(svc.DB))
 
 	// Dashboard
 	protected.Get("/dashboard", GetDashboard(svc))
@@ -237,6 +237,17 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	admin.Put("/tenants/:id", UpdateTenant(svc))
 	admin.Delete("/tenants/:id", DeleteTenant(svc))
 	admin.Get("/stats", GetAdminStats(svc))
+	admin.Get("/health", GetPlatformHealth(svc))
+	admin.Get("/audit-logs", GetGlobalAuditLogs(svc))
+	admin.Get("/incidents", GetPlatformIncidents(svc))
+	admin.Post("/incidents/:id/retry", RetryPlatformIncident(svc))
+	admin.Get("/sessions", GetAdminSessions(svc))
+	admin.Delete("/sessions/:id", RevokeAdminSession(svc))
+	admin.Get("/security", GetAdminSecuritySummary(svc))
+	admin.Post("/tenants/:id/impersonate", ImpersonateTenant(svc))
+	admin.Get("/tenants/:id/export", ExportTenantData(svc))
+	admin.Post("/tenants/:id/schedule-deletion", ScheduleTenantDeletion(svc))
+	admin.Post("/tenants/:id/restore", RestoreTenant(svc))
 
 	// Admin user management
 	admin.Get("/tenants/:id/users", AdminGetTenantUsers(svc))

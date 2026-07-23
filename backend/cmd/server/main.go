@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 	_ "time/tzdata"
 
 	"github.com/evocrm/backend/internal/config"
@@ -65,6 +66,18 @@ func main() {
 	svc.Evolution.StartWhatsAppInstanceMonitor()
 	svc.Email.StartPeriodicSync()
 	svc.Bot.StartClientInactivityMonitor()
+	go func() {
+		if err := handlers.PurgeExpiredTenants(db); err != nil {
+			log.Printf("Failed to purge expired tenants: %v", err)
+		}
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := handlers.PurgeExpiredTenants(db); err != nil {
+				log.Printf("Failed to purge expired tenants: %v", err)
+			}
+		}
+	}()
 
 	// Initialize Fiber app
 	app := fiber.New(fiber.Config{

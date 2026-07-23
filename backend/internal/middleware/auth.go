@@ -125,6 +125,26 @@ func SuperAdminMiddleware(db *sql.DB) fiber.Handler {
 	}
 }
 
+// ActiveTenantMiddleware blocks active access tokens after a tenant or user is suspended.
+func ActiveTenantMiddleware(db *sql.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userID, _ := c.Locals("user_id").(string)
+		companyID, _ := c.Locals("company_id").(string)
+		var allowed bool
+		err := db.QueryRow(`
+			SELECT EXISTS (
+				SELECT 1 FROM users u
+				JOIN companies co ON co.id = u.company_id
+				WHERE u.id = $1 AND u.company_id = $2 AND u.is_active = true AND co.is_active = true
+			)
+		`, userID, companyID).Scan(&allowed)
+		if err != nil || !allowed {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Tenant ou usuário suspenso"})
+		}
+		return c.Next()
+	}
+}
+
 // RBACMiddleware checks if user has required permission
 func RBACMiddleware(requiredPermissions ...string) fiber.Handler {
 	return func(c *fiber.Ctx) error {

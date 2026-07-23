@@ -101,6 +101,7 @@ export default function Sidebar() {
   const { user, logout, updateStatus } = useAuthStore()
   const { sidebarPinned, sidebarHovered, setSidebarPinned, setSidebarHovered, theme, toggleTheme } = useAppearanceStore()
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
+  const [hasImpersonationSession, setHasImpersonationSession] = useState(false)
   const [expandedSections, setExpandedSections] = useState<{ conversations: boolean; contacts: boolean; teams: boolean }>({ conversations: true, contacts: false, teams: false })
   const [conversationCounts, setConversationCounts] = useState({ mine: 0, unassigned: 0, all: 0, mentions: 0 })
   const [teams, setTeams] = useState<SidebarTeam[]>([])
@@ -116,6 +117,20 @@ export default function Sidebar() {
     { label: 'Configurações', href: '/settings', icon: Settings, show: true },
     { label: 'Super Admin', href: '/admin', icon: ShieldCheck, show: !!user?.is_super_admin },
   ]
+  const returnToSuperAdmin = () => {
+    const accessToken = localStorage.getItem('super_admin_original_access_token')
+    const refreshToken = localStorage.getItem('super_admin_original_refresh_token')
+    if (!accessToken) return
+    localStorage.setItem('access_token', accessToken)
+    if (refreshToken) localStorage.setItem('refresh_token', refreshToken)
+    localStorage.removeItem('super_admin_original_access_token')
+    localStorage.removeItem('super_admin_original_refresh_token')
+    window.location.href = '/admin'
+  }
+
+  useEffect(() => {
+    setHasImpersonationSession(!!localStorage.getItem('super_admin_original_access_token'))
+  }, [])
 
   const countUnread = (items: SidebarConversation[]) => items.reduce((sum, item) => sum + (item.unread_count || 0), 0)
 
@@ -342,6 +357,16 @@ export default function Sidebar() {
                 </Link>
               )
             })}
+            {hasImpersonationSession && (
+              <button
+                type="button"
+                onClick={returnToSuperAdmin}
+                className="flex w-full items-center gap-3 border-t border-white/10 px-3 py-2.5 text-left text-sm text-amber-300 transition-colors hover:bg-white/10"
+              >
+                <ShieldCheck size={17} className="shrink-0" />
+                <span>Voltar ao Super Admin</span>
+              </button>
+            )}
           </div>
         )}
 

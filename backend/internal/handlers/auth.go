@@ -9,6 +9,7 @@ import (
 
 	"github.com/evocrm/backend/internal/services"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -25,11 +26,32 @@ func AuthLogin(svc *services.Container) fiber.Handler {
 
 		resp, err := svc.Auth.Login(&req)
 		if err != nil {
+			recordLoginEvent(svc, c, req.Email, false, err.Error(), "", "")
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
 		}
+		recordLoginEvent(svc, c, req.Email, true, "", resp.User.ID, resp.User.CompanyID)
+		_, _ = svc.DB.Exec(`
+			UPDATE refresh_tokens SET ip_address = $1, user_agent = $2, last_used_at = NOW()
+			WHERE id = (
+				SELECT id FROM refresh_tokens WHERE user_id = $3 ORDER BY created_at DESC LIMIT 1
+			)
+		`, c.IP(), c.Get("User-Agent"), resp.User.ID)
 
 		return c.JSON(resp)
 	}
+}
+
+func recordLoginEvent(svc *services.Container, c *fiber.Ctx, email string, success bool, reason, userID, companyID string) {
+	if userID == "" {
+		_ = svc.DB.QueryRow(`
+			SELECT COALESCE(id::text, ''), COALESCE(company_id::text, '')
+			FROM users WHERE LOWER(email) = LOWER($1) ORDER BY created_at DESC LIMIT 1
+		`, email).Scan(&userID, &companyID)
+	}
+	_, _ = svc.DB.Exec(`
+		INSERT INTO login_events (id, company_id, user_id, email, success, failure_reason, ip_address, user_agent)
+		VALUES ($1, NULLIF($2, '')::uuid, NULLIF($3, '')::uuid, LOWER($4), $5, NULLIF($6, ''), $7, $8)
+	`, uuid.New().String(), companyID, userID, email, success, reason, c.IP(), c.Get("User-Agent"))
 }
 
 func AuthRegister(svc *services.Container) fiber.Handler {

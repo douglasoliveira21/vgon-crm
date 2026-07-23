@@ -66,6 +66,7 @@ func (s *AuthService) Login(req *LoginRequest) (*AuthResponse, error) {
 			   COALESCE(u.is_super_admin, false), r.slug, r.name
 		FROM users u
 		LEFT JOIN roles r ON u.role_id = r.id
+		JOIN companies co ON co.id = u.company_id AND co.is_active = true
 		WHERE u.email = $1 AND u.is_active = true
 	`, strings.ToLower(req.Email)).Scan(
 		&user.ID, &user.CompanyID, &user.Name, &user.Email, &user.PasswordHash,
@@ -202,7 +203,11 @@ func (s *AuthService) RefreshToken(refreshTokenStr string) (*AuthResponse, error
 	hashedRefresh := hashToken(refreshTokenStr)
 	var tokenID string
 	err = s.db.QueryRow(`
-		SELECT id FROM refresh_tokens WHERE token = $1 AND user_id = $2 AND expires_at > NOW()
+		SELECT rt.id
+		FROM refresh_tokens rt
+		JOIN users u ON u.id = rt.user_id AND u.is_active = true
+		JOIN companies co ON co.id = u.company_id AND co.is_active = true
+		WHERE rt.token = $1 AND rt.user_id = $2 AND rt.expires_at > NOW()
 	`, hashedRefresh, claims.UserID).Scan(&tokenID)
 	if err != nil {
 		return nil, fmt.Errorf("refresh token not found or expired")

@@ -7,6 +7,8 @@ import Link from 'next/link'
 import {
   LayoutDashboard,
   Building2,
+  Activity,
+  ScrollText,
   ArrowLeft,
   Shield,
   LogOut,
@@ -15,6 +17,8 @@ import {
 const adminNavItems = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/admin/tenants', label: 'Empresas (Tenants)', icon: Building2 },
+  { href: '/admin/operations', label: 'Operações', icon: Activity },
+  { href: '/admin/audit', label: 'Auditoria Global', icon: ScrollText },
 ]
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

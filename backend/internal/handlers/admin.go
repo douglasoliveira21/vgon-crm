@@ -20,7 +20,7 @@ func GetTenants(svc *services.Container) fiber.Handler {
 
 		query := `
 			SELECT 
-				c.id, c.name, c.slug, c.plan, c.max_users, c.max_channels, c.is_active, c.created_at,
+				c.id, c.name, c.slug, c.plan, c.max_users, c.max_channels, c.is_active, c.created_at, COALESCE(c.deletion_scheduled_at::text, ''),
 				COALESCE(uc.user_count, 0) as user_count,
 				COALESCE(cc.conversation_count, 0) as conversation_count
 			FROM companies c
@@ -67,6 +67,7 @@ func GetTenants(svc *services.Container) fiber.Handler {
 			MaxChannels       int    `json:"max_channels"`
 			IsActive          bool   `json:"is_active"`
 			CreatedAt         string `json:"created_at"`
+			DeletionScheduled string `json:"deletion_scheduled_at"`
 			UserCount         int    `json:"user_count"`
 			ConversationCount int    `json:"conversation_count"`
 		}
@@ -76,7 +77,7 @@ func GetTenants(svc *services.Container) fiber.Handler {
 			var t TenantRow
 			err := rows.Scan(
 				&t.ID, &t.Name, &t.Slug, &t.Plan, &t.MaxUsers, &t.MaxChannels,
-				&t.IsActive, &t.CreatedAt, &t.UserCount, &t.ConversationCount,
+				&t.IsActive, &t.CreatedAt, &t.DeletionScheduled, &t.UserCount, &t.ConversationCount,
 			)
 			if err != nil {
 				continue
@@ -377,6 +378,7 @@ func GetAdminStats(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		var totalTenants, activeTenants, totalUsers, activeUsers int
 		var totalConversations, openConversations, totalMessages int
+		var onlineUsers, whatsappIssues, incidents24h int
 
 		svc.DB.QueryRow("SELECT COUNT(*) FROM companies").Scan(&totalTenants)
 		svc.DB.QueryRow("SELECT COUNT(*) FROM companies WHERE is_active = true").Scan(&activeTenants)
@@ -385,6 +387,9 @@ func GetAdminStats(svc *services.Container) fiber.Handler {
 		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations").Scan(&totalConversations)
 		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE status = 'open'").Scan(&openConversations)
 		svc.DB.QueryRow("SELECT COUNT(*) FROM messages").Scan(&totalMessages)
+		svc.DB.QueryRow("SELECT COUNT(*) FROM users WHERE is_online = true").Scan(&onlineUsers)
+		svc.DB.QueryRow("SELECT COUNT(*) FROM whatsapp_instances WHERE status IN ('error', 'disconnected')").Scan(&whatsappIssues)
+		svc.DB.QueryRow("SELECT COUNT(*) FROM audit_logs WHERE created_at >= NOW() - INTERVAL '24 hours' AND (action ILIKE '%down%' OR action ILIKE '%fail%' OR action ILIKE '%error%')").Scan(&incidents24h)
 
 		// Tenants created in last 30 days
 		var newTenantsMonth int
@@ -413,6 +418,9 @@ func GetAdminStats(svc *services.Container) fiber.Handler {
 			"total_messages":      totalMessages,
 			"new_tenants_month":   newTenantsMonth,
 			"plan_distribution":   planDistribution,
+			"online_users":        onlineUsers,
+			"whatsapp_issues":     whatsappIssues,
+			"incidents_24h":       incidents24h,
 		})
 	}
 }
@@ -517,6 +525,49 @@ func cleanupForeignKeyReferences(tx *sql.Tx, referencedTable string, referencedI
 func cleanupTenantReferences(tx *sql.Tx, tenantID string) error {
 	visited := make(map[string]bool)
 	return cleanupOwnedForeignKeyReferences(tx, "companies", tenantID, true, visited)
+}
+
+// PurgeExpiredTenants permanently removes tenants whose recovery window has ended.
+func PurgeExpiredTenants(db *sql.DB) error {
+	rows, err := db.Query("SELECT id FROM companies WHERE deletion_scheduled_at IS NOT NULL AND deletion_scheduled_at <= NOW()")
+	if err != nil {
+		return err
+	}
+	var tenantIDs []string
+	for rows.Next() {
+		var tenantID string
+		if err := rows.Scan(&tenantID); err != nil {
+			rows.Close()
+			return err
+		}
+		tenantIDs = append(tenantIDs, tenantID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	for _, tenantID := range tenantIDs {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		if err = cleanupTenantReferences(tx, tenantID); err == nil {
+			_, err = tx.Exec("DELETE FROM companies WHERE id = $1 AND deletion_scheduled_at <= NOW()", tenantID)
+		}
+		if err != nil {
+			tx.Rollback()
+			log.Printf("[ADMIN] failed to purge scheduled tenant %s: %v", tenantID, err)
+			continue
+		}
+		if err = tx.Commit(); err != nil {
+			log.Printf("[ADMIN] failed to commit scheduled tenant purge %s: %v", tenantID, err)
+		}
+	}
+	return nil
 }
 
 func cleanupOwnedForeignKeyReferences(tx *sql.Tx, referencedTable, referencedID string, deleteNullable bool, visited map[string]bool) error {

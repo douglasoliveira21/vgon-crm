@@ -9,7 +9,8 @@ import {
   MessageSquare,
   MessagesSquare,
   TrendingUp,
-  Activity,
+  AlertTriangle,
+  Wifi,
 } from 'lucide-react'
 
 interface AdminStats {
@@ -22,6 +23,9 @@ interface AdminStats {
   total_messages: number
   new_tenants_month: number
   plan_distribution: Record<string, number>
+  online_users: number
+  whatsapp_issues: number
+  incidents_24h: number
 }
 
 export default function AdminDashboardPage() {
@@ -60,11 +64,25 @@ export default function AdminDashboardPage() {
       color: 'bg-blue-500',
     },
     {
-      title: 'Total de Usuários',
-      value: stats?.total_users || 0,
-      subtitle: `${stats?.active_users || 0} ativos`,
+      title: 'Usuários Online',
+      value: stats?.online_users || 0,
+      subtitle: `${stats?.total_users || 0} cadastrados`,
       icon: Users,
       color: 'bg-green-500',
+    },
+    {
+      title: 'WhatsApp com falha',
+      value: stats?.whatsapp_issues || 0,
+      subtitle: 'instâncias exigindo atenção',
+      icon: Wifi,
+      color: 'bg-red-500',
+    },
+    {
+      title: 'Incidentes (24h)',
+      value: stats?.incidents_24h || 0,
+      subtitle: 'falhas operacionais recentes',
+      icon: AlertTriangle,
+      color: 'bg-amber-500',
     },
     {
       title: 'Conversas',
@@ -121,31 +139,9 @@ export default function AdminDashboardPage() {
         })}
       </div>
 
-      {/* Plan Distribution */}
-      {stats?.plan_distribution && Object.keys(stats.plan_distribution).length > 0 && (
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
-          <div className="flex items-center gap-3 mb-6">
-            <Activity className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-lg font-semibold text-white">Distribuição por Plano</h2>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {Object.entries(stats.plan_distribution).map(([plan, count]) => (
-              <div
-                key={plan}
-                className="bg-gray-900 rounded-lg p-4 border border-gray-700"
-              >
-                <p className="text-sm text-gray-400 capitalize">{plan}</p>
-                <p className="text-xl font-bold text-white mt-1">{count}</p>
-                <p className="text-xs text-gray-500 mt-1">
-                  {stats.total_tenants > 0
-                    ? `${((count / stats.total_tenants) * 100).toFixed(1)}%`
-                    : '0%'}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <div className="rounded-lg border border-gray-700 bg-gray-800 p-6 text-sm text-gray-300">
+        Use <strong className="text-white">Operações</strong> para acompanhar saúde, incidentes e sessões; e <strong className="text-white">Auditoria Global</strong> para investigar ações em todos os tenants.
+      </div>
     </div>
   )
 }
