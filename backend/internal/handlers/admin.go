@@ -497,7 +497,8 @@ func AdminGetTenantUsers(svc *services.Container) fiber.Handler {
 		tenantID := c.Params("id")
 
 		rows, err := svc.DB.Query(`
-			SELECT u.id, u.name, u.email, u.is_active, u.is_online, COALESCE(u.is_super_admin, false), COALESCE(r.name, '') as role_name, u.created_at
+			SELECT u.id, u.name, u.email, u.is_active, u.is_online, COALESCE(u.is_super_admin, false),
+			       COALESCE(r.name, '') as role_name, COALESCE(r.slug, '') as role_slug, u.created_at
 			FROM users u
 			LEFT JOIN roles r ON u.role_id = r.id
 			WHERE u.company_id = $1
@@ -516,13 +517,14 @@ func AdminGetTenantUsers(svc *services.Container) fiber.Handler {
 			IsOnline     bool   `json:"is_online"`
 			IsSuperAdmin bool   `json:"is_super_admin"`
 			RoleName     string `json:"role_name"`
+			RoleSlug     string `json:"role_slug"`
 			CreatedAt    string `json:"created_at"`
 		}
 
 		users := []UserRow{}
 		for rows.Next() {
 			var u UserRow
-			rows.Scan(&u.ID, &u.Name, &u.Email, &u.IsActive, &u.IsOnline, &u.IsSuperAdmin, &u.RoleName, &u.CreatedAt)
+			rows.Scan(&u.ID, &u.Name, &u.Email, &u.IsActive, &u.IsOnline, &u.IsSuperAdmin, &u.RoleName, &u.RoleSlug, &u.CreatedAt)
 			users = append(users, u)
 		}
 
@@ -539,7 +541,7 @@ func AdminCreateTenantUser(svc *services.Container) fiber.Handler {
 			Name         string `json:"name"`
 			Email        string `json:"email"`
 			Password     string `json:"password"`
-			Role         string `json:"role"` // admin, agent, supervisor
+			Role         string `json:"role"` // super-admin, admin, agent, supervisor
 			IsSuperAdmin bool   `json:"is_super_admin"`
 		}
 		if err := c.BodyParser(&req); err != nil {
@@ -576,6 +578,10 @@ func AdminCreateTenantUser(svc *services.Container) fiber.Handler {
 		if roleSlug == "" {
 			roleSlug = "agent"
 		}
+		isSuperAdmin := roleSlug == "super-admin" || req.IsSuperAdmin
+		if isSuperAdmin {
+			roleSlug = "super-admin"
+		}
 		var roleID string
 		err = svc.DB.QueryRow("SELECT id FROM roles WHERE slug = $1 AND (company_id = $2 OR is_system = true) LIMIT 1", roleSlug, tenantID).Scan(&roleID)
 		if err != nil {
@@ -587,7 +593,7 @@ func AdminCreateTenantUser(svc *services.Container) fiber.Handler {
 		_, err = svc.DB.Exec(`
 			INSERT INTO users (id, company_id, role_id, name, email, password_hash, is_super_admin)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, userID, tenantID, roleID, req.Name, strings.ToLower(req.Email), string(hashedPassword), req.IsSuperAdmin)
+		`, userID, tenantID, roleID, req.Name, strings.ToLower(req.Email), string(hashedPassword), isSuperAdmin)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create user: " + err.Error()})
 		}
@@ -597,7 +603,7 @@ func AdminCreateTenantUser(svc *services.Container) fiber.Handler {
 			"name":  req.Name,
 			"email": req.Email,
 			"role":  roleSlug,
-			"is_super_admin": req.IsSuperAdmin,
+			"is_super_admin": isSuperAdmin,
 		})
 	}
 }
@@ -645,6 +651,7 @@ func AdminUpdateUser(svc *services.Container) fiber.Handler {
 		var req struct {
 			Name         string `json:"name"`
 			Email        string `json:"email"`
+			Role         *string `json:"role"`
 			IsActive     *bool  `json:"is_active"`
 			IsSuperAdmin *bool  `json:"is_super_admin"`
 		}
@@ -671,7 +678,25 @@ func AdminUpdateUser(svc *services.Container) fiber.Handler {
 			args = append(args, *req.IsActive)
 			argIdx++
 		}
-		if req.IsSuperAdmin != nil {
+		if req.Role != nil {
+			roleSlug := *req.Role
+			isSuperAdmin := roleSlug == "super-admin"
+			var roleID string
+			err := svc.DB.QueryRow(
+				"SELECT id FROM roles WHERE slug = $1 AND is_system = true LIMIT 1",
+				roleSlug,
+			).Scan(&roleID)
+			if err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid role"})
+			}
+			updates = append(updates, "role_id = $"+itoa(argIdx))
+			args = append(args, roleID)
+			argIdx++
+			updates = append(updates, "is_super_admin = $"+itoa(argIdx))
+			args = append(args, isSuperAdmin)
+			argIdx++
+		}
+		if req.Role == nil && req.IsSuperAdmin != nil {
 			updates = append(updates, "is_super_admin = $"+itoa(argIdx))
 			args = append(args, *req.IsSuperAdmin)
 			argIdx++

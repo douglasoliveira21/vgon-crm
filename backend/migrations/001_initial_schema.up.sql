@@ -496,7 +496,7 @@ CREATE TABLE refresh_tokens (
 -- SEED: Default Roles
 -- ============================================
 INSERT INTO roles (id, name, slug, description, permissions, is_system) VALUES
-    (uuid_generate_v4(), 'Administrador Geral', 'super-admin', 'Acesso total ao sistema', '["*"]', true),
+    (uuid_generate_v4(), 'Super administrador', 'super-admin', 'Acesso total ao sistema e ao painel global', '["*"]', true),
     (uuid_generate_v4(), 'Administrador', 'admin', 'Administrador da empresa', '["company.*", "users.*", "teams.*", "channels.*", "conversations.*", "contacts.*", "funnels.*", "bots.*", "campaigns.*", "metrics.*", "widget.*", "announcements.*"]', true),
     (uuid_generate_v4(), 'Supervisor', 'supervisor', 'Supervisor de time', '["conversations.*", "contacts.*", "teams.view", "metrics.view", "funnels.*"]', true),
     (uuid_generate_v4(), 'Atendente', 'agent', 'Atendente de conversas', '["conversations.own", "contacts.view", "contacts.edit", "funnels.view"]', true),

@@ -24,6 +24,7 @@ interface TenantUser {
   is_active: boolean
   is_online: boolean
   role_name: string
+  role_slug: string
   is_super_admin: boolean
   created_at: string
 }
@@ -62,9 +63,9 @@ export default function TenantUsersPage() {
   const [selectedUser, setSelectedUser] = useState<TenantUser | null>(null)
 
   // Forms
-  const [createForm, setCreateForm] = useState({ name: '', email: '', password: '', role: 'agent', is_super_admin: false })
+  const [createForm, setCreateForm] = useState({ name: '', email: '', password: '', role: 'agent' })
   const [newPassword, setNewPassword] = useState('')
-  const [editForm, setEditForm] = useState({ name: '', email: '', is_super_admin: false })
+  const [editForm, setEditForm] = useState({ name: '', email: '', role: 'agent' })
 
   useEffect(() => {
     fetchTenantDetails()
@@ -102,7 +103,7 @@ export default function TenantUsersPage() {
       await api.post(`/admin/tenants/${tenantId}/users`, createForm)
       toast.success('Usuário criado com sucesso!')
       setShowCreateUser(false)
-      setCreateForm({ name: '', email: '', password: '', role: 'agent', is_super_admin: false })
+      setCreateForm({ name: '', email: '', password: '', role: 'agent' })
       fetchUsers()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Erro ao criar usuário')
@@ -154,7 +155,11 @@ export default function TenantUsersPage() {
 
   const openEditUser = (user: TenantUser) => {
     setSelectedUser(user)
-    setEditForm({ name: user.name, email: user.email, is_super_admin: !!user.is_super_admin })
+    setEditForm({
+      name: user.name,
+      email: user.email,
+      role: user.is_super_admin ? 'super-admin' : (user.role_slug || 'agent'),
+    })
     setShowEditUser(true)
   }
 
@@ -250,13 +255,8 @@ export default function TenantUsersPage() {
                   <td className="px-6 py-3 text-gray-300 text-sm">{user.email}</td>
                   <td className="px-6 py-3 text-center">
                     <span className="px-2 py-0.5 rounded-full text-xs bg-gray-700 text-gray-300">
-                      {user.role_name || 'Agente'}
+                      {user.is_super_admin ? 'Super administrador' : (user.role_name || 'Agente')}
                     </span>
-                    {user.is_super_admin && (
-                      <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-purple-500/20 text-purple-300">
-                        Super Admin
-                      </span>
-                    )}
                   </td>
                   <td className="px-6 py-3 text-center">
                     <span className={`px-2 py-0.5 rounded-full text-xs ${
@@ -350,20 +350,9 @@ export default function TenantUsersPage() {
                   <option value="agent">Agente</option>
                   <option value="supervisor">Supervisor</option>
                   <option value="admin">Administrador</option>
+                  <option value="super-admin">Super administrador</option>
                 </select>
               </div>
-              <label className="flex items-center justify-between rounded-lg border border-purple-500/20 bg-purple-500/10 px-4 py-3">
-                <div>
-                  <span className="text-sm font-medium text-purple-200">Super admin</span>
-                  <p className="text-xs text-purple-200/70">Permite acessar o painel /admin e gerenciar todos os tenants.</p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={createForm.is_super_admin}
-                  onChange={(e) => setCreateForm({ ...createForm, is_super_admin: e.target.checked })}
-                  className="h-5 w-5 rounded border-gray-600 bg-gray-900 text-purple-600"
-                />
-              </label>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowCreateUser(false)} className="flex-1 px-4 py-2.5 border border-gray-600 text-gray-400 rounded-lg hover:text-white">
                   Cancelar
@@ -439,18 +428,22 @@ export default function TenantUsersPage() {
                   className="w-full px-4 py-2.5 bg-gray-900 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
                 />
               </div>
-              <label className="flex items-center justify-between rounded-lg border border-purple-500/20 bg-purple-500/10 px-4 py-3">
-                <div>
-                  <span className="text-sm font-medium text-purple-200">Super admin</span>
-                  <p className="text-xs text-purple-200/70">Permite acessar o painel /admin e gerenciar todos os tenants.</p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={editForm.is_super_admin}
-                  onChange={(e) => setEditForm({ ...editForm, is_super_admin: e.target.checked })}
-                  className="h-5 w-5 rounded border-gray-600 bg-gray-900 text-purple-600"
-                />
-              </label>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Cargo</label>
+                <select
+                  value={editForm.role}
+                  onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="agent">Agente</option>
+                  <option value="supervisor">Supervisor</option>
+                  <option value="admin">Administrador</option>
+                  <option value="super-admin">Super administrador</option>
+                </select>
+                <p className="mt-1 text-xs text-gray-400">
+                  Somente o Super administrador acessa o painel global.
+                </p>
+              </div>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowEditUser(false)} className="flex-1 px-4 py-2.5 border border-gray-600 text-gray-400 rounded-lg hover:text-white">
                   Cancelar
