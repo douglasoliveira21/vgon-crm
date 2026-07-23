@@ -57,6 +57,9 @@ const menuItems = [
   { label: 'Respostas Rápidas', href: '/quick-replies', icon: Zap },
 ]
 
+const agentHiddenMenuPaths = new Set(['/inbox', '/channels', '/automations', '/campaigns', '/metrics', '/audit-logs', '/widget'])
+const supervisorHiddenMenuPaths = new Set(['/inbox', '/channels', '/automations', '/campaigns', '/audit-logs', '/widget'])
+
 const statusMeta = {
   online: { label: 'Online', dot: 'bg-green-500' },
   busy: { label: 'Ocupado', dot: 'bg-amber-500' },
@@ -96,15 +99,16 @@ const resolveImage = (url?: string) => {
 export default function Sidebar() {
   const pathname = usePathname()
   const { user, logout, updateStatus } = useAuthStore()
-  const { sidebarPinned, setSidebarPinned, setSidebarHovered, theme, toggleTheme } = useAppearanceStore()
+  const { sidebarPinned, sidebarHovered, setSidebarPinned, setSidebarHovered, theme, toggleTheme } = useAppearanceStore()
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [expandedSections, setExpandedSections] = useState<{ conversations: boolean; contacts: boolean; teams: boolean }>({ conversations: true, contacts: false, teams: false })
   const [conversationCounts, setConversationCounts] = useState({ mine: 0, unassigned: 0, all: 0, mentions: 0 })
   const [teams, setTeams] = useState<SidebarTeam[]>([])
   const profileMenuRef = useRef<HTMLDivElement>(null)
   const refreshTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const expandedClass = sidebarPinned ? 'w-64' : 'w-20 hover:w-64'
-  const showTextClass = sidebarPinned ? 'opacity-100' : 'opacity-0 group-hover/sidebar:opacity-100'
+	const sidebarExpanded = sidebarPinned || sidebarHovered
+	const expandedClass = sidebarExpanded ? 'w-64' : 'w-20'
+	const showTextClass = sidebarExpanded ? 'opacity-100' : 'pointer-events-none w-0 overflow-hidden opacity-0'
   const currentStatus = user?.availability_status || (user?.is_online ? 'online' : 'offline')
   const currentStatusMeta = statusMeta[currentStatus] || statusMeta.offline
   const profileMenuItems = [
@@ -193,7 +197,7 @@ export default function Sidebar() {
           alt="VGON"
           className={clsx(
             'object-contain transition-all duration-200',
-            sidebarPinned ? 'hidden' : 'h-10 w-10 rounded-xl group-hover/sidebar:hidden'
+			sidebarExpanded ? 'hidden' : 'h-10 w-10 rounded-xl'
           )}
         />
         <img
@@ -201,7 +205,7 @@ export default function Sidebar() {
           alt="VGON"
           className={clsx(
             'h-20 w-auto max-w-[250px] object-contain transition-all duration-200',
-            sidebarPinned ? 'block' : 'hidden group-hover/sidebar:block'
+			sidebarExpanded ? 'block' : 'hidden'
           )}
         />
       </div>
@@ -220,7 +224,7 @@ export default function Sidebar() {
           onClick={toggleTheme}
           className={clsx(
             'h-9 items-center gap-2 rounded-lg px-3 text-sm text-gray-300 transition-colors hover:bg-white/10 hover:text-white',
-            sidebarPinned ? 'flex' : 'hidden group-hover/sidebar:flex'
+			sidebarExpanded ? 'flex' : 'hidden'
           )}
           title={theme === 'dark' ? 'Usar tema claro' : 'Usar tema escuro'}
         >
@@ -230,7 +234,11 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
-        {menuItems.map((item) => {
+		{menuItems.filter((item) => {
+			if (user?.role_slug === 'agent') return !agentHiddenMenuPaths.has(item.href)
+			if (user?.role_slug === 'supervisor') return !supervisorHiddenMenuPaths.has(item.href)
+			return true
+		}).map((item) => {
           const isActive = pathname === item.href || pathname?.startsWith(item.href + '/')
           const Icon = item.icon
           const sectionKey = item.expandable as 'conversations' | 'contacts' | 'teams' | undefined
@@ -264,7 +272,7 @@ export default function Sidebar() {
                     onClick={() => setExpandedSections((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }))}
                     className={clsx(
                       'mr-2 rounded-md p-1.5 transition-colors hover:bg-white/10',
-                      sidebarPinned ? 'block' : 'hidden group-hover/sidebar:block'
+					  sidebarExpanded ? 'block' : 'hidden'
                     )}
                     title={sectionOpen ? 'Recolher menu' : 'Expandir menu'}
                   >
@@ -273,7 +281,7 @@ export default function Sidebar() {
                 )}
               </div>
 
-              {sectionKey === 'conversations' && sectionOpen && (
+			  {sectionKey === 'conversations' && sectionOpen && sidebarExpanded && (
                 <div className={clsx('mt-1 space-y-1 pl-9 pr-2 transition-opacity duration-200', showTextClass)}>
                   <SubMenuLink href="/conversations?view=mine" label="Minhas" count={conversationCounts.mine} />
                   <SubMenuLink href="/conversations?view=unassigned" label="Nao atribuidas" count={conversationCounts.unassigned} />
@@ -282,16 +290,17 @@ export default function Sidebar() {
                 </div>
               )}
 
-              {sectionKey === 'contacts' && sectionOpen && (
+			  {sectionKey === 'contacts' && sectionOpen && sidebarExpanded && (
                 <div className={clsx('mt-1 space-y-1 pl-9 pr-2 transition-opacity duration-200', showTextClass)}>
                   <SubMenuLink href="/contacts" label="Todos os contatos" />
                   <SubMenuLink href="/contacts/blocked" label="Contatos bloqueados" icon={<Ban size={13} />} />
                 </div>
               )}
 
-              {sectionKey === 'teams' && sectionOpen && (
+			  {sectionKey === 'teams' && sectionOpen && sidebarExpanded && (
                 <div className={clsx('mt-1 space-y-1 pl-9 pr-2 transition-opacity duration-200', showTextClass)}>
-                  <SubMenuLink href="/teams" label="Configurar times" icon={<SlidersHorizontal size={13} />} />
+				  {user?.role_slug !== 'agent' && user?.role_slug !== 'supervisor' && <SubMenuLink href="/teams" label="Configurar times" icon={<SlidersHorizontal size={13} />} />}
+				  {user?.role_slug === 'supervisor' && <SubMenuLink href="/teams" label="Meus times" icon={<SlidersHorizontal size={13} />} />}
                   {teams.map((team) => (
                     <SubMenuLink
                       key={team.id}
@@ -315,7 +324,7 @@ export default function Sidebar() {
           <div
             className={clsx(
               'absolute bottom-full left-3 right-3 mb-2 overflow-hidden rounded-lg border border-white/10 bg-dark-800 py-1 shadow-xl',
-              sidebarPinned ? 'block' : 'hidden group-hover/sidebar:block'
+			  sidebarExpanded ? 'block' : 'hidden'
             )}
           >
             {profileMenuItems.filter((item) => item.show).map((item) => {
@@ -378,7 +387,7 @@ export default function Sidebar() {
           <button
             type="button"
             onClick={() => setProfileMenuOpen((open) => !open)}
-            className={clsx('text-gray-400 transition-colors hover:text-white', sidebarPinned ? 'block' : 'hidden group-hover/sidebar:block')}
+			className={clsx('text-gray-400 transition-colors hover:text-white', sidebarExpanded ? 'block' : 'hidden')}
             title={profileMenuOpen ? 'Fechar menu do usuário' : 'Abrir menu do usuário'}
           >
             <ChevronUp size={18} className={clsx('transition-transform', profileMenuOpen && 'rotate-180')} />
@@ -386,7 +395,7 @@ export default function Sidebar() {
 
           <button
             onClick={logout}
-            className={clsx('text-gray-400 transition-colors hover:text-red-400', sidebarPinned ? 'block' : 'hidden group-hover/sidebar:block')}
+			className={clsx('text-gray-400 transition-colors hover:text-red-400', sidebarExpanded ? 'block' : 'hidden')}
             title="Sair"
           >
             <LogOut size={18} />

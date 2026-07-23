@@ -11,6 +11,8 @@ import (
 func GlobalSearch(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
+		roleSlug, _ := c.Locals("role_slug").(string)
 		query := strings.TrimSpace(c.Query("q"))
 		if len(query) < 2 {
 			return c.JSON(fiber.Map{
@@ -25,7 +27,11 @@ func GlobalSearch(svc *services.Container) fiber.Handler {
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		conversations, err := searchConversations(svc, companyID, like)
+		visibilityUserID := ""
+		if roleSlug == "agent" || roleSlug == "supervisor" {
+			visibilityUserID = userID
+		}
+		conversations, err := searchConversations(svc, companyID, like, visibilityUserID, roleSlug)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -73,7 +79,25 @@ func searchContacts(svc *services.Container, companyID, like string) ([]fiber.Ma
 	return items, rows.Err()
 }
 
-func searchConversations(svc *services.Container, companyID, like string) ([]fiber.Map, error) {
+func searchConversations(svc *services.Container, companyID, like, visibilityUserID, visibilityRole string) ([]fiber.Map, error) {
+	visibility := ""
+	args := []interface{}{companyID, like}
+	if visibilityUserID != "" {
+		if visibilityRole == "supervisor" {
+			visibility = ` AND conv.team_id IS NOT NULL AND EXISTS (
+				SELECT 1 FROM team_users visible_tu WHERE visible_tu.team_id = conv.team_id AND visible_tu.user_id = $3 AND COALESCE(visible_tu.is_supervisor, false) = true
+			)`
+		} else {
+			visibility = ` AND (
+			conv.assigned_to = $3
+			OR (conv.assigned_to IS NULL AND conv.team_id IS NOT NULL AND EXISTS (
+				SELECT 1 FROM team_users visible_tu WHERE visible_tu.team_id = conv.team_id AND visible_tu.user_id = $3
+			))
+			OR (conv.assigned_to IS NULL AND conv.team_id IS NULL)
+		)`
+		}
+		args = append(args, visibilityUserID)
+	}
 	rows, err := svc.DB.Query(`
 		SELECT conv.id, COALESCE(ct.name, ct.phone, ct.email, 'Contato'),
 		       COALESCE(ct.phone, ''), COALESCE(ct.email, ''),
@@ -85,6 +109,7 @@ func searchConversations(svc *services.Container, companyID, like string) ([]fib
 		LEFT JOIN channels ch ON ch.id = conv.channel_id
 		LEFT JOIN customer_companies cc ON cc.id = COALESCE(conv.customer_company_id, ct.customer_company_id)
 		WHERE conv.company_id = $1
+		  `+visibility+`
 		  AND (
 			ct.name ILIKE $2 OR ct.phone ILIKE $2 OR ct.email ILIKE $2 OR
 			conv.subject ILIKE $2 OR conv.last_message_preview ILIKE $2 OR
@@ -92,7 +117,7 @@ func searchConversations(svc *services.Container, companyID, like string) ([]fib
 		  )
 		ORDER BY COALESCE(conv.last_message_at, conv.created_at) DESC
 		LIMIT 10
-	`, companyID, like)
+	`, args...)
 	if err != nil {
 		return nil, err
 	}

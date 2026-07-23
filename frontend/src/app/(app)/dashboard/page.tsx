@@ -20,6 +20,8 @@ import {
 import { clsx } from 'clsx'
 
 type DashboardData = {
+	personal?: boolean
+	supervisor?: boolean
   stats: {
     open_conversations: number
     pending_conversations: number
@@ -118,12 +120,14 @@ export default function DashboardPage() {
   const operations = data?.operations
   const comparison = operations?.comparison
   const availability = data?.agents?.availability || { online: 0, busy: 0, pause: 0, offline: 0 }
+	const personal = user?.role_slug === 'agent' || data?.personal
+	const supervisor = user?.role_slug === 'supervisor' || data?.supervisor
 
   return (
     <div className="p-6 max-w-[1500px] mx-auto space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard total</h1>
+		  <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{personal ? 'Meu desempenho' : supervisor ? 'Desempenho do meu time' : 'Dashboard total'}</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             Ola, {user?.name?.split(' ')[0] || 'gestor'}. Atualiza automaticamente a cada 1 minuto.
           </p>
@@ -135,10 +139,10 @@ export default function DashboardPage() {
             <option value="7d">Ultimos 7 dias</option>
             <option value="30d">Ultimos 30 dias</option>
           </select>
-          <select value={teamId} onChange={(e) => setTeamId(e.target.value)} className="input w-auto">
-            <option value="">Todas as equipes</option>
+		  {!personal && <select value={teamId} onChange={(e) => setTeamId(e.target.value)} className="input w-auto">
+			<option value="">{supervisor ? 'Time supervisionado' : 'Todas as equipes'}</option>
             {data?.filters?.teams?.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
-          </select>
+		  </select>}
           <select value={channelId} onChange={(e) => setChannelId(e.target.value)} className="input w-auto">
             <option value="">Todos os canais</option>
             {data?.channels?.map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}
@@ -156,15 +160,15 @@ export default function DashboardPage() {
           <span className="text-xs text-gray-400">Ultima atualizacao: {lastUpdated ? lastUpdated.toLocaleTimeString('pt-BR') : '-'}</span>
         </div>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MetricCard title="Conversas ativas" value={operations?.active_conversations || 0} icon={<MessageSquare size={20} />} tone="blue" delta={comparisonLabel(comparison?.active_conversations)} />
-          <MetricCard title="Tamanho da fila" value={operations?.queue_size || 0} icon={<Clock size={20} />} tone={(operations?.queue_size || 0) > 5 ? 'red' : 'yellow'} delta={comparisonLabel(comparison?.queue_size)} />
-          <MetricCard title="Tempo medio de espera" value={formatDuration(operations?.average_wait_seconds || 0)} icon={<Timer size={20} />} tone={(operations?.average_wait_seconds || 0) > 300 ? 'red' : 'green'} delta={comparisonLabel(comparison?.average_wait_seconds, true)} />
-          <MetricCard title="FRT medio" value={formatDuration(operations?.first_response_seconds || 0)} icon={<Gauge size={20} />} tone="purple" delta={comparisonLabel(comparison?.first_response_seconds, true)} />
+		  <MetricCard title="Conversas ativas" value={operations?.active_conversations || 0} icon={<MessageSquare size={20} />} tone="blue" delta={personal ? undefined : comparisonLabel(comparison?.active_conversations)} />
+		  <MetricCard title={personal ? 'Minhas conversas pendentes' : 'Tamanho da fila'} value={operations?.queue_size || 0} icon={<Clock size={20} />} tone={(operations?.queue_size || 0) > 5 ? 'red' : 'yellow'} delta={personal ? undefined : comparisonLabel(comparison?.queue_size)} />
+		  <MetricCard title="Tempo medio de espera" value={formatDuration(operations?.average_wait_seconds || 0)} icon={<Timer size={20} />} tone={(operations?.average_wait_seconds || 0) > 300 ? 'red' : 'green'} delta={personal ? undefined : comparisonLabel(comparison?.average_wait_seconds, true)} />
+		  <MetricCard title="FRT medio" value={formatDuration(operations?.first_response_seconds || 0)} icon={<Gauge size={20} />} tone="purple" delta={personal ? undefined : comparisonLabel(comparison?.first_response_seconds, true)} />
         </div>
       </section>
 
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <Panel title="Volume e fila por canal" className="xl:col-span-2">
+		<Panel title={supervisor ? 'Volume e fila do time por canal' : 'Volume e fila por canal'} className="xl:col-span-2">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {(data?.queue_by_channel || []).map((channel) => (
               <div key={channel.name} className="rounded-lg border border-gray-100 p-4 dark:border-gray-800">
@@ -185,7 +189,7 @@ export default function DashboardPage() {
           </div>
         </Panel>
 
-        <Panel title="Disponibilidade dos agentes">
+		<Panel title={personal ? 'Minha disponibilidade' : supervisor ? 'Disponibilidade do time' : 'Disponibilidade dos agentes'}>
           <div className="grid grid-cols-2 gap-3">
             <SmallStat label="Online" value={availability.online} tone="green" />
             <SmallStat label="Ocupados" value={availability.busy} tone="yellow" />
@@ -219,7 +223,7 @@ export default function DashboardPage() {
       </section>
 
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <Panel title="Carga de trabalho por agente">
+		<Panel title={personal ? 'Minha carga de trabalho' : supervisor ? 'Carga de trabalho do time' : 'Carga de trabalho por agente'}>
           <div className="space-y-3">
             {(data?.agents?.workload || []).map((agent) => (
               <div key={agent.id} className="flex items-center gap-3">

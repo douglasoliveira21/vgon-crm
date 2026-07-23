@@ -141,6 +141,80 @@ func RBACMiddleware(requiredPermissions ...string) fiber.Handler {
 	}
 }
 
+// DenyRoles blocks authenticated users whose role is explicitly denied.
+func DenyRoles(deniedRoles ...string) fiber.Handler {
+	denied := make(map[string]struct{}, len(deniedRoles))
+	for _, role := range deniedRoles {
+		denied[role] = struct{}{}
+	}
+	return func(c *fiber.Ctx) error {
+		roleSlug, _ := c.Locals("role_slug").(string)
+		if _, blocked := denied[roleSlug]; blocked {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Você não tem permissão para acessar este recurso"})
+		}
+		return c.Next()
+	}
+}
+
+// ConversationAccess limits agents and supervisors to their allowed conversations.
+func ConversationAccess(db *sql.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		roleSlug, _ := c.Locals("role_slug").(string)
+		if roleSlug != "agent" && roleSlug != "supervisor" {
+			return c.Next()
+		}
+		companyID, _ := c.Locals("company_id").(string)
+		userID, _ := c.Locals("user_id").(string)
+		conversationID := c.Params("id")
+		var allowed bool
+		query := `
+			SELECT EXISTS (
+				SELECT 1 FROM conversations conv
+				WHERE conv.id = $1 AND conv.company_id = $2
+				  AND `
+		if roleSlug == "supervisor" {
+			query += `(
+				conv.team_id IS NOT NULL AND EXISTS (
+					SELECT 1 FROM team_users tu WHERE tu.team_id = conv.team_id AND tu.user_id = $3 AND COALESCE(tu.is_supervisor, false) = true
+				)
+			)`
+		} else {
+			query += `(
+					conv.assigned_to = $3
+					OR (conv.assigned_to IS NULL AND conv.team_id IS NOT NULL AND EXISTS (
+						SELECT 1 FROM team_users tu WHERE tu.team_id = conv.team_id AND tu.user_id = $3
+					))
+					OR (conv.assigned_to IS NULL AND conv.team_id IS NULL)
+				  )`
+		}
+		query += `)`
+		err := db.QueryRow(query, conversationID, companyID, userID).Scan(&allowed)
+		if err != nil || !allowed {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Você não tem acesso a esta conversa"})
+		}
+		return c.Next()
+	}
+}
+
+// SupervisorTeamAccess allows supervisors to add members only to teams they supervise.
+func SupervisorTeamAccess(db *sql.DB) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		roleSlug, _ := c.Locals("role_slug").(string)
+		if roleSlug != "supervisor" {
+			return c.Next()
+		}
+		userID, _ := c.Locals("user_id").(string)
+		companyID, _ := c.Locals("company_id").(string)
+		teamID := c.Params("id")
+		var allowed bool
+		_ = db.QueryRow(`SELECT EXISTS (SELECT 1 FROM team_users tu JOIN teams t ON t.id = tu.team_id WHERE tu.team_id = $1 AND tu.user_id = $2 AND t.company_id = $3 AND COALESCE(tu.is_supervisor, false) = true)`, teamID, userID, companyID).Scan(&allowed)
+		if !allowed {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Você não supervisiona este time"})
+		}
+		return c.Next()
+	}
+}
+
 // RateLimiter creates a rate limiting middleware using Redis
 func RateLimiter(rdb *redis.Client, maxRequests int, window time.Duration) fiber.Handler {
 	return func(c *fiber.Ctx) error {

@@ -168,6 +168,8 @@ func applyConversationSLA(db *sql.DB, companyID, conversationID string) {
 func GetConversations(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
+		roleSlug, _ := c.Locals("role_slug").(string)
 		status := c.Query("status")
 		teamID := c.Query("team_id")
 		channelID := c.Query("channel")
@@ -177,7 +179,13 @@ func GetConversations(svc *services.Container) fiber.Handler {
 		limit := c.QueryInt("limit", 50)
 		offset := c.QueryInt("offset", 0)
 
-		conversations, err := svc.Message.GetConversations(companyID, status, assignedTo, teamID, channelID, unassigned == "true", limit, offset, "", contactID)
+		visibilityUserID := ""
+		visibilityRole := ""
+		if roleSlug == "agent" || roleSlug == "supervisor" {
+			visibilityUserID = userID
+			visibilityRole = roleSlug
+		}
+		conversations, err := svc.Message.GetConversations(companyID, status, assignedTo, teamID, channelID, unassigned == "true", limit, offset, "", contactID, visibilityUserID, visibilityRole)
 		if err != nil {
 			log.Printf("[CONVERSATIONS] failed to list conversations for company %s: %v", companyID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -194,7 +202,12 @@ func GetMyConversations(svc *services.Container) fiber.Handler {
 		limit := c.QueryInt("limit", 50)
 		offset := c.QueryInt("offset", 0)
 
-		conversations, err := svc.Message.GetConversations(companyID, "", userID, "", "", false, limit, offset)
+		roleSlug, _ := c.Locals("role_slug").(string)
+		visibilityUserID := ""
+		if roleSlug == "agent" || roleSlug == "supervisor" {
+			visibilityUserID = userID
+		}
+		conversations, err := svc.Message.GetConversations(companyID, "", userID, "", "", false, limit, offset, "", "", visibilityUserID, roleSlug)
 		if err != nil {
 			log.Printf("[CONVERSATIONS] failed to list user conversations for company %s user %s: %v", companyID, userID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})

@@ -13,21 +13,42 @@ func GetDashboard(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
 		userID := c.Locals("user_id").(string)
+		roleSlug, _ := c.Locals("role_slug").(string)
 		teamID := c.Query("team_id")
 		channelID := c.Query("channel_id")
 		period := normalizeDashboardPeriod(c.Query("period", "today"))
+		if roleSlug == "agent" {
+			return c.JSON(fetchPersonalDashboard(svc.DB, companyID, userID, channelID, period))
+		}
+		isSupervisor := roleSlug == "supervisor"
+		if isSupervisor {
+			teamID = resolveSupervisedTeamID(svc.DB, companyID, userID, teamID)
+			if teamID == "" {
+				return c.JSON(emptySupervisorDashboard(svc.DB, companyID, userID))
+			}
+		}
 
 		stats := models.DashboardStats{}
 		filterWhere, filterArgs := dashboardConversationFilter(companyID, teamID, channelID, period)
 		liveWhere, liveArgs := dashboardConversationFilter(companyID, teamID, channelID, "")
 
-		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1 AND status = 'open'", companyID).Scan(&stats.OpenConversations)
-		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1 AND status = 'pending'", companyID).Scan(&stats.PendingConversations)
-		svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1 AND assigned_to = $2 AND status IN ('open', 'in_progress')", companyID, userID).Scan(&stats.MyConversations)
-		svc.DB.QueryRow("SELECT COUNT(*) FROM deals WHERE company_id = $1 AND status = 'open'", companyID).Scan(&stats.ActiveDeals)
-		svc.DB.QueryRow("SELECT COALESCE(SUM(value), 0) FROM deals WHERE company_id = $1 AND status = 'open'", companyID).Scan(&stats.TotalDealsValue)
-		svc.DB.QueryRow("SELECT COUNT(*) FROM channels WHERE company_id = $1 AND status = 'connected'", companyID).Scan(&stats.ConnectedChannels)
-		svc.DB.QueryRow("SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (first_response_at - created_at))), 0) FROM conversations WHERE company_id = $1 AND first_response_at IS NOT NULL", companyID).Scan(&stats.AvgResponseTime)
+		if isSupervisor {
+			svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1 AND team_id = $2 AND status = 'open'", companyID, teamID).Scan(&stats.OpenConversations)
+			svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1 AND team_id = $2 AND status = 'pending'", companyID, teamID).Scan(&stats.PendingConversations)
+		} else {
+			svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1 AND status = 'open'", companyID).Scan(&stats.OpenConversations)
+			svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1 AND status = 'pending'", companyID).Scan(&stats.PendingConversations)
+		}
+		if isSupervisor {
+			svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1 AND team_id = $2 AND status IN ('open', 'in_progress', 'pending')", companyID, teamID).Scan(&stats.MyConversations)
+			svc.DB.QueryRow("SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (first_response_at - created_at))), 0) FROM conversations WHERE company_id = $1 AND team_id = $2 AND first_response_at IS NOT NULL", companyID, teamID).Scan(&stats.AvgResponseTime)
+		} else {
+			svc.DB.QueryRow("SELECT COUNT(*) FROM conversations WHERE company_id = $1 AND assigned_to = $2 AND status IN ('open', 'in_progress')", companyID, userID).Scan(&stats.MyConversations)
+			svc.DB.QueryRow("SELECT COUNT(*) FROM deals WHERE company_id = $1 AND status = 'open'", companyID).Scan(&stats.ActiveDeals)
+			svc.DB.QueryRow("SELECT COALESCE(SUM(value), 0) FROM deals WHERE company_id = $1 AND status = 'open'", companyID).Scan(&stats.TotalDealsValue)
+			svc.DB.QueryRow("SELECT COUNT(*) FROM channels WHERE company_id = $1 AND status = 'connected'", companyID).Scan(&stats.ConnectedChannels)
+			svc.DB.QueryRow("SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (first_response_at - created_at))), 0) FROM conversations WHERE company_id = $1 AND first_response_at IS NOT NULL", companyID).Scan(&stats.AvgResponseTime)
+		}
 
 		operations := fiber.Map{}
 		queryInt(svc.DB, operations, "active_conversations", "SELECT COUNT(*) FROM conversations WHERE "+liveWhere+" AND status IN ('open', 'in_progress', 'pending')", liveArgs...)
@@ -39,18 +60,26 @@ func GetDashboard(svc *services.Container) fiber.Handler {
 		queryFloat(svc.DB, operations, "first_contact_resolution_rate", "SELECT COALESCE(100.0 * SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 0) FROM conversations WHERE "+filterWhere, filterArgs...)
 		queryInt(svc.DB, operations, "transfers", "SELECT COUNT(*) FROM audit_logs WHERE company_id = $1 AND action ILIKE '%transfer%' AND created_at >= "+periodSQL(period), companyID)
 		operations["comparison"] = fetchDashboardComparison(svc.DB, companyID, teamID, channelID, period)
+		agents := fetchAgentDashboard(svc.DB, companyID)
+		filters := fetchDashboardFilters(svc.DB, companyID)
+		if isSupervisor {
+			agents = fetchTeamAgentDashboard(svc.DB, companyID, teamID)
+			filters = fetchSupervisorDashboardFilters(svc.DB, companyID, userID)
+			queryInt(svc.DB, operations, "transfers", "SELECT COUNT(*) FROM audit_logs a WHERE a.company_id = $1 AND a.action ILIKE '%transfer%' AND a.created_at >= "+periodSQL(period)+" AND a.metadata->>'conversation_id' IN (SELECT id::text FROM conversations WHERE company_id = $1 AND team_id = $2)", companyID, teamID)
+		}
 
 		return c.JSON(fiber.Map{
+			"supervisor":            isSupervisor,
 			"stats":                 stats,
 			"operations":            operations,
 			"queue_by_channel":      fetchQueueByChannel(svc.DB, companyID, teamID, channelID),
 			"peak_hours":            fetchPeakHours(svc.DB, companyID, teamID, channelID),
 			"resolution_by_channel": fetchResolutionByChannel(svc.DB, companyID, teamID, channelID, period),
-			"agents":                fetchAgentDashboard(svc.DB, companyID),
+			"agents":                agents,
 			"channel_distribution":  fetchChannelDistribution(svc.DB, companyID, teamID, channelID, period),
 			"sla_by_channel":        fetchSLAByChannel(svc.DB, companyID, teamID, channelID, period),
 			"sla_alerts":            fetchSLAAlerts(svc.DB, companyID, teamID, channelID),
-			"filters":               fetchDashboardFilters(svc.DB, companyID),
+			"filters":               filters,
 			"announcements":         fetchDashboardAnnouncements(svc.DB, companyID, userID),
 			"channels":              fetchDashboardChannels(svc.DB, companyID),
 		})
@@ -106,6 +135,160 @@ func dashboardConversationFilter(companyID, teamID, channelID, period string) (s
 		where += " AND created_at >= " + periodSQL(period)
 	}
 	return where, args
+}
+
+func resolveSupervisedTeamID(db *sql.DB, companyID, userID, requestedTeamID string) string {
+	var teamID string
+	if requestedTeamID != "" {
+		_ = db.QueryRow(`SELECT t.id FROM teams t JOIN team_users tu ON tu.team_id = t.id WHERE t.id = $1 AND t.company_id = $2 AND tu.user_id = $3 AND COALESCE(tu.is_supervisor, false) = true`, requestedTeamID, companyID, userID).Scan(&teamID)
+	}
+	if teamID == "" {
+		_ = db.QueryRow(`SELECT t.id FROM teams t JOIN team_users tu ON tu.team_id = t.id WHERE t.company_id = $1 AND tu.user_id = $2 AND COALESCE(tu.is_supervisor, false) = true ORDER BY t.name LIMIT 1`, companyID, userID).Scan(&teamID)
+	}
+	return teamID
+}
+
+func fetchSupervisorDashboardFilters(db *sql.DB, companyID, userID string) fiber.Map {
+	teams := []fiber.Map{}
+	rows, _ := db.Query(`SELECT t.id, COALESCE(t.name, 'Time') FROM teams t JOIN team_users tu ON tu.team_id = t.id WHERE t.company_id = $1 AND tu.user_id = $2 AND COALESCE(tu.is_supervisor, false) = true ORDER BY t.name`, companyID, userID)
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id, name string
+			if rows.Scan(&id, &name) == nil { teams = append(teams, fiber.Map{"id": id, "name": name}) }
+		}
+	}
+	return fiber.Map{"teams": teams, "periods": []string{"today", "7d", "30d"}}
+}
+
+func fetchTeamAgentDashboard(db *sql.DB, companyID, teamID string) fiber.Map {
+	availability := fiber.Map{"online": 0, "busy": 0, "pause": 0, "offline": 0}
+	workload := []fiber.Map{}
+	rows, _ := db.Query(`SELECT u.id, COALESCE(u.name, 'Agente'), COALESCE(u.availability_status, CASE WHEN u.is_online THEN 'online' ELSE 'offline' END), EXTRACT(EPOCH FROM (NOW() - COALESCE(u.last_seen_at, u.updated_at, u.created_at))), COUNT(c.id) FILTER (WHERE c.status IN ('open', 'in_progress', 'pending')) FROM team_users tu JOIN users u ON u.id = tu.user_id LEFT JOIN conversations c ON c.assigned_to = u.id AND c.company_id = u.company_id AND c.team_id = tu.team_id WHERE tu.team_id = $1 AND u.company_id = $2 AND u.is_active = true GROUP BY u.id, u.name, u.availability_status, u.is_online, u.last_seen_at, u.updated_at, u.created_at ORDER BY u.name`, teamID, companyID)
+	if rows == nil { return fiber.Map{"availability": availability, "workload": workload} }
+	defer rows.Close()
+	for rows.Next() {
+		var id, name, status string
+		var idle float64
+		var active int
+		if rows.Scan(&id, &name, &status, &idle, &active) != nil { continue }
+		if status == "paused" { status = "pause" }
+		if _, ok := availability[status]; !ok { status = "offline" }
+		availability[status] = availability[status].(int) + 1
+		workload = append(workload, fiber.Map{"id": id, "name": name, "status": status, "active_chats": active, "idle_seconds": idle})
+	}
+	return fiber.Map{"availability": availability, "workload": workload}
+}
+
+func emptySupervisorDashboard(db *sql.DB, companyID, userID string) fiber.Map {
+	return fiber.Map{"supervisor": true, "stats": fiber.Map{}, "operations": fiber.Map{}, "queue_by_channel": []fiber.Map{}, "peak_hours": []fiber.Map{}, "resolution_by_channel": []fiber.Map{}, "agents": fiber.Map{"availability": fiber.Map{"online": 0, "busy": 0, "pause": 0, "offline": 0}, "workload": []fiber.Map{}}, "channel_distribution": []fiber.Map{}, "sla_by_channel": []fiber.Map{}, "sla_alerts": []fiber.Map{}, "filters": fetchSupervisorDashboardFilters(db, companyID, userID), "channels": []fiber.Map{}}
+}
+
+func fetchPersonalDashboard(db *sql.DB, companyID, userID, channelID, period string) fiber.Map {
+	args := []interface{}{companyID, userID}
+	where := "company_id = $1 AND assigned_to = $2"
+	aliasWhere := "c.company_id = $1 AND c.assigned_to = $2"
+	if channelID != "" {
+		args = append(args, channelID)
+		where += " AND channel_id = $3"
+		aliasWhere += " AND c.channel_id = $3"
+	}
+	periodWhere := where + " AND created_at >= " + periodSQL(period)
+	periodAliasWhere := aliasWhere + " AND c.created_at >= " + periodSQL(period)
+
+	stats := fiber.Map{}
+	queryInt(db, stats, "open_conversations", "SELECT COUNT(*) FROM conversations WHERE "+where+" AND status IN ('open', 'in_progress')", args...)
+	queryInt(db, stats, "pending_conversations", "SELECT COUNT(*) FROM conversations WHERE "+where+" AND status = 'pending'", args...)
+	stats["my_conversations"] = stats["open_conversations"]
+	stats["active_deals"] = 0
+	stats["total_deals_value"] = 0
+	stats["connected_channels"] = 0
+	queryFloat(db, stats, "avg_response_time", "SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (first_response_at - created_at))), 0) FROM conversations WHERE "+periodWhere+" AND first_response_at IS NOT NULL", args...)
+
+	operations := fiber.Map{}
+	queryInt(db, operations, "active_conversations", "SELECT COUNT(*) FROM conversations WHERE "+where+" AND status IN ('open', 'in_progress', 'pending')", args...)
+	queryInt(db, operations, "queue_size", "SELECT COUNT(*) FROM conversations WHERE "+where+" AND status = 'pending'", args...)
+	queryFloat(db, operations, "average_wait_seconds", "SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (COALESCE(first_response_at, NOW()) - created_at))), 0) FROM conversations WHERE "+periodWhere, args...)
+	queryFloat(db, operations, "first_response_seconds", "SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (first_response_at - created_at))), 0) FROM conversations WHERE "+periodWhere+" AND first_response_at IS NOT NULL", args...)
+	queryFloat(db, operations, "average_handle_seconds", "SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (resolved_at - created_at))), 0) FROM conversations WHERE "+periodWhere+" AND resolved_at IS NOT NULL", args...)
+	queryFloat(db, operations, "abandonment_rate", "SELECT COALESCE(100.0 * SUM(CASE WHEN first_response_at IS NULL AND status = 'resolved' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 0) FROM conversations WHERE "+periodWhere, args...)
+	queryFloat(db, operations, "first_contact_resolution_rate", "SELECT COALESCE(100.0 * SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0), 0) FROM conversations WHERE "+periodWhere, args...)
+	queryInt(db, operations, "transfers", "SELECT COUNT(*) FROM audit_logs WHERE company_id = $1 AND user_id = $2 AND action ILIKE '%transfer%' AND created_at >= "+periodSQL(period), companyID, userID)
+
+	byChannel := []fiber.Map{}
+	rows, _ := db.Query(`
+		SELECT COALESCE(ch.name, 'Sem canal'), COALESCE(ch.type, 'desconhecido'),
+		       COUNT(*) FILTER (WHERE c.status = 'pending'),
+		       COUNT(*) FILTER (WHERE c.status IN ('open', 'in_progress', 'pending')),
+		       COALESCE(AVG(EXTRACT(EPOCH FROM (COALESCE(c.first_response_at, NOW()) - c.created_at))), 0),
+		       COUNT(*), COALESCE(AVG(EXTRACT(EPOCH FROM (c.resolved_at - c.created_at))) FILTER (WHERE c.resolved_at IS NOT NULL), 0),
+		       COUNT(*) FILTER (WHERE c.resolved_at IS NOT NULL)
+		FROM conversations c LEFT JOIN channels ch ON ch.id = c.channel_id
+		WHERE `+periodAliasWhere+` GROUP BY ch.name, ch.type ORDER BY COUNT(*) DESC`, args...)
+	resolution := []fiber.Map{}
+	distribution := []fiber.Map{}
+	if rows != nil {
+		defer rows.Close()
+		for rows.Next() {
+			var name, channelType string
+			var pending, active, total, resolved int
+			var wait, resolutionSeconds float64
+			if rows.Scan(&name, &channelType, &pending, &active, &wait, &total, &resolutionSeconds, &resolved) == nil {
+				byChannel = append(byChannel, fiber.Map{"name": name, "type": channelType, "queue_size": pending, "active_count": active, "avg_wait_seconds": wait})
+				distribution = append(distribution, fiber.Map{"name": name, "type": channelType, "total": total})
+				resolution = append(resolution, fiber.Map{"name": name, "type": channelType, "avg_resolution_seconds": resolutionSeconds, "resolved_count": resolved})
+			}
+		}
+	}
+
+	peakHours := []fiber.Map{}
+	peakRows, _ := db.Query("SELECT to_char(date_trunc('hour', created_at), 'HH24:00'), COUNT(*) FROM conversations WHERE "+where+" AND created_at >= NOW() - INTERVAL '12 hours' GROUP BY date_trunc('hour', created_at) ORDER BY date_trunc('hour', created_at)", args...)
+	if peakRows != nil {
+		defer peakRows.Close()
+		for peakRows.Next() {
+			var label string
+			var total int
+			if peakRows.Scan(&label, &total) == nil { peakHours = append(peakHours, fiber.Map{"label": label, "total": total}) }
+		}
+	}
+
+	return fiber.Map{
+		"personal": true, "stats": stats, "operations": operations,
+		"queue_by_channel": byChannel, "peak_hours": peakHours, "resolution_by_channel": resolution,
+		"agents": fetchPersonalAgentDashboard(db, companyID, userID), "channel_distribution": distribution,
+		"sla_by_channel": []fiber.Map{}, "sla_alerts": fetchPersonalSLAAlerts(db, companyID, userID),
+		"filters": fiber.Map{"teams": []fiber.Map{}}, "announcements": fetchDashboardAnnouncements(db, companyID, userID),
+		"channels": fetchDashboardChannels(db, companyID),
+	}
+}
+
+func fetchPersonalAgentDashboard(db *sql.DB, companyID, userID string) fiber.Map {
+	availability := fiber.Map{"online": 0, "busy": 0, "pause": 0, "offline": 0}
+	var id, name, status string
+	var idleSeconds float64
+	var activeChats int
+	err := db.QueryRow(`SELECT u.id, COALESCE(u.name, 'Agente'), COALESCE(u.availability_status, CASE WHEN u.is_online THEN 'online' ELSE 'offline' END), EXTRACT(EPOCH FROM (NOW() - COALESCE(u.last_seen_at, u.updated_at, u.created_at))), COUNT(c.id) FILTER (WHERE c.status IN ('open', 'in_progress', 'pending')) FROM users u LEFT JOIN conversations c ON c.assigned_to = u.id AND c.company_id = u.company_id WHERE u.id = $1 AND u.company_id = $2 GROUP BY u.id, u.name, u.availability_status, u.is_online, u.last_seen_at, u.updated_at, u.created_at`, userID, companyID).Scan(&id, &name, &status, &idleSeconds, &activeChats)
+	workload := []fiber.Map{}
+	if err == nil {
+		if status == "paused" { status = "pause" }
+		if _, ok := availability[status]; !ok { status = "offline" }
+		availability[status] = 1
+		workload = append(workload, fiber.Map{"id": id, "name": name, "status": status, "active_chats": activeChats, "idle_seconds": idleSeconds})
+	}
+	return fiber.Map{"availability": availability, "workload": workload}
+}
+
+func fetchPersonalSLAAlerts(db *sql.DB, companyID, userID string) []fiber.Map {
+	rows, _ := db.Query(`SELECT c.id, COALESCE(co.name, co.phone, 'Contato'), COALESCE(ch.name, 'Sem canal'), c.status, EXTRACT(EPOCH FROM (COALESCE(c.first_response_due_at, c.resolution_due_at) - NOW())) FROM conversations c LEFT JOIN contacts co ON co.id = c.contact_id LEFT JOIN channels ch ON ch.id = c.channel_id WHERE c.company_id = $1 AND c.assigned_to = $2 AND c.status IN ('open', 'in_progress', 'pending') AND COALESCE(c.first_response_due_at, c.resolution_due_at) <= NOW() + INTERVAL '30 minutes' ORDER BY 5 LIMIT 8`, companyID, userID)
+	items := []fiber.Map{}
+	if rows == nil { return items }
+	defer rows.Close()
+	for rows.Next() {
+		var id, contact, channel, status string
+		var seconds float64
+		if rows.Scan(&id, &contact, &channel, &status, &seconds) == nil { items = append(items, fiber.Map{"id": id, "contact_name": contact, "channel_name": channel, "status": status, "seconds_remaining": seconds}) }
+	}
+	return items
 }
 
 func dashboardConversationFilterForAlias(companyID, teamID, channelID, period, alias string) (string, []interface{}) {

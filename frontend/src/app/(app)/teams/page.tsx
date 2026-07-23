@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { Plus, Users, Edit2, Trash2, UserPlus, UserMinus, X, Shield, Settings } from 'lucide-react'
+import { useAuthStore } from '@/store/auth'
 
 interface Team {
   id: string
@@ -32,6 +33,11 @@ interface TeamMember {
 }
 
 export default function TeamsPage() {
+	const { user } = useAuthStore()
+	const canManage = !!user && user.role_slug !== 'agent'
+	const isSupervisor = user?.role_slug === 'supervisor'
+	const canConfigureTeams = canManage && !isSupervisor
+	const canAddMembers = canManage
   const [teams, setTeams] = useState<Team[]>([])
   const [users, setUsers] = useState<UserItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -42,8 +48,8 @@ export default function TeamsPage() {
 
   useEffect(() => {
     fetchTeams()
-    fetchUsers()
-  }, [])
+	if (canManage) fetchUsers()
+  }, [canManage])
 
   const fetchTeams = async () => {
     try {
@@ -142,10 +148,10 @@ export default function TeamsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Times</h1>
           <p className="text-gray-500 mt-1">Organize seus atendentes em equipes com regras de distribuição</p>
         </div>
-        <button onClick={() => { setEditingTeam(null); setShowForm(true) }} className="btn-primary">
+		{canConfigureTeams && <button onClick={() => { setEditingTeam(null); setShowForm(true) }} className="btn-primary">
           <Plus size={18} />
           Novo time
-        </button>
+		</button>}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -155,7 +161,8 @@ export default function TeamsPage() {
               <div className="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
                 <Users size={20} className="text-primary-600" />
               </div>
-              <div className="flex gap-1">
+			  {canManage && <div className="flex gap-1">
+				{canConfigureTeams && <>
                 <button
                   onClick={() => { setEditingTeam(team); setShowForm(true) }}
                   className="p-1.5 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded"
@@ -163,13 +170,15 @@ export default function TeamsPage() {
                 >
                   <Edit2 size={14} />
                 </button>
+				</>}
                 <button
                   onClick={() => setShowMembers(team.id)}
                   className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded"
-                  title="Gerenciar membros"
+				  title={isSupervisor ? 'Adicionar membro' : 'Gerenciar membros'}
                 >
                   <UserPlus size={14} />
                 </button>
+				{canConfigureTeams && <>
                 <button
                   onClick={() => deleteTeam(team.id)}
                   className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
@@ -177,7 +186,8 @@ export default function TeamsPage() {
                 >
                   <Trash2 size={14} />
                 </button>
-              </div>
+				</>}
+			  </div>}
             </div>
 
             <h3 className="font-semibold text-gray-900">{team.name}</h3>
@@ -203,17 +213,17 @@ export default function TeamsPage() {
         <div className="card p-12 text-center">
           <Users size={40} className="text-gray-300 mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">Nenhum time criado</h3>
-          <p className="text-gray-500 mb-6 max-w-sm mx-auto">
-            Crie times para organizar seu atendimento. Cada time pode ter regras de distribuição diferentes.
-          </p>
-          <button onClick={() => setShowForm(true)} className="btn-primary inline-flex">
+		  <p className="text-gray-500 mb-6 max-w-sm mx-auto">
+			{canConfigureTeams ? 'Crie times para organizar seu atendimento. Cada time pode ter regras de distribuição diferentes.' : isSupervisor ? 'Você não supervisiona nenhum time.' : 'Você ainda não foi adicionado a nenhum time.'}
+		  </p>
+		  {canConfigureTeams && <button onClick={() => setShowForm(true)} className="btn-primary inline-flex">
             <Plus size={18} /> Criar primeiro time
-          </button>
+		  </button>}
         </div>
       )}
 
       {/* Create/Edit Team Modal */}
-      {showForm && (
+	  {canConfigureTeams && showForm && (
         <TeamFormModal
           team={editingTeam}
           onClose={() => { setShowForm(false); setEditingTeam(null) }}
@@ -230,7 +240,7 @@ export default function TeamsPage() {
       )}
 
       {/* Members Modal */}
-      {showMembers && (
+	  {canAddMembers && showMembers && (
         <MembersModal
           teamId={showMembers}
           teamName={teams.find(t => t.id === showMembers)?.name || ''}
@@ -238,6 +248,7 @@ export default function TeamsPage() {
           onClose={() => setShowMembers(null)}
           onAddMember={addMember}
           onRemoveMember={removeMember}
+		  canSetSupervisor={!isSupervisor}
         />
       )}
     </div>
@@ -348,6 +359,7 @@ function MembersModal({
   onClose,
   onAddMember,
   onRemoveMember,
+	canSetSupervisor,
 }: {
   teamId: string
   teamName: string
@@ -355,6 +367,7 @@ function MembersModal({
   onClose: () => void
   onAddMember: (teamId: string, userId: string, isSupervisor: boolean) => void
   onRemoveMember: (teamId: string, userId: string) => void
+	canSetSupervisor: boolean
 }) {
   const [teamMembers, setTeamMembers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -386,7 +399,7 @@ function MembersModal({
           </button>
         </div>
 
-        <p className="text-xs text-gray-400 mb-4">Clique para adicionar ao time. Clique em ⭐ para tornar supervisor.</p>
+		<p className="text-xs text-gray-400 mb-4">{canSetSupervisor ? 'Adicione membros ou defina outro supervisor.' : 'Adicione atendentes ao seu time.'}</p>
 
         <div className="space-y-2">
           {users.map((user) => (
@@ -402,20 +415,20 @@ function MembersModal({
                 {user.is_online && <div className="w-2 h-2 bg-green-500 rounded-full" />}
               </div>
               <div className="flex gap-1">
-                <button
+				<button
                   onClick={() => onAddMember(teamId, user.id, false)}
                   className="px-2 py-1 text-xs bg-primary-100 text-primary-700 rounded hover:bg-primary-200"
                   title="Adicionar como membro"
                 >
                   + Membro
-                </button>
-                <button
+				</button>
+				{canSetSupervisor && <button
                   onClick={() => onAddMember(teamId, user.id, true)}
                   className="px-2 py-1 text-xs bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200"
                   title="Adicionar como supervisor"
                 >
                   ⭐ Supervisor
-                </button>
+				</button>}
               </div>
             </div>
           ))}

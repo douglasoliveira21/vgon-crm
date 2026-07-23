@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { Plus, Pencil, Trash2, Search, Zap, X } from 'lucide-react'
+import { useAuthStore } from '@/store/auth'
 
 interface QuickReply {
   id: string
@@ -15,6 +16,8 @@ interface QuickReply {
 }
 
 export default function QuickRepliesPage() {
+	const { user } = useAuthStore()
+	const canManage = !!user && user.role_slug !== 'agent'
   const [replies, setReplies] = useState<QuickReply[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -109,10 +112,10 @@ export default function QuickRepliesPage() {
             Gerencie atalhos de texto para agilizar o atendimento. Use "/" no chat para ativar.
           </p>
         </div>
-        <button onClick={openCreate} className="btn-primary flex items-center gap-2">
+		{canManage && <button onClick={openCreate} className="btn-primary flex items-center gap-2">
           <Plus size={18} />
           Nova Resposta
-        </button>
+		</button>}
       </div>
 
       {/* Search */}
@@ -182,7 +185,7 @@ export default function QuickRepliesPage() {
                     {reply.content}
                   </p>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
+				{canManage && <div className="flex items-center gap-1 shrink-0">
                   <button
                     onClick={() => openEdit(reply)}
                     className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors"
@@ -197,7 +200,7 @@ export default function QuickRepliesPage() {
                   >
                     <Trash2 size={16} />
                   </button>
-                </div>
+				</div>}
               </div>
             </div>
           ))}
@@ -205,7 +208,7 @@ export default function QuickRepliesPage() {
       )}
 
       {/* Modal */}
-      {showModal && (
+	  {canManage && showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl">
             <div className="flex items-center justify-between p-5 border-b border-gray-100">

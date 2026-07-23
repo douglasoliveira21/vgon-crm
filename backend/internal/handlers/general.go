@@ -20,15 +20,28 @@ import (
 func GetTeams(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
+		roleSlug, _ := c.Locals("role_slug").(string)
+		membershipJoin := ""
+		conversationVisibility := ""
+		args := []interface{}{companyID}
+		if roleSlug == "agent" {
+			membershipJoin = " AND EXISTS (SELECT 1 FROM team_users visible_tu WHERE visible_tu.team_id = t.id AND visible_tu.user_id = $2)"
+			conversationVisibility = " AND (c.assigned_to = $2 OR c.assigned_to IS NULL)"
+			args = append(args, userID)
+		} else if roleSlug == "supervisor" {
+			membershipJoin = " AND EXISTS (SELECT 1 FROM team_users visible_tu WHERE visible_tu.team_id = t.id AND visible_tu.user_id = $2 AND COALESCE(visible_tu.is_supervisor, false) = true)"
+			args = append(args, userID)
+		}
 
 		rows, err := svc.DB.Query(`
 			SELECT t.id, COALESCE(t.name, 'Time'), t.description,
 				   COALESCE(t.distribution_rule, 'round-robin'), COALESCE(t.is_active, true),
 				   (SELECT COUNT(*) FROM team_users tu WHERE tu.team_id = t.id) as member_count,
-				   (SELECT COUNT(*) FROM conversations c WHERE c.team_id = t.id AND c.company_id = t.company_id AND COALESCE(c.status, 'open') IN ('open', 'in_progress', 'pending')) as open_count,
-				   (SELECT COALESCE(SUM(COALESCE(c.unread_count, 0)), 0) FROM conversations c WHERE c.team_id = t.id AND c.company_id = t.company_id AND COALESCE(c.status, 'open') IN ('open', 'in_progress', 'pending')) as unread_count
-			FROM teams t WHERE t.company_id = $1 ORDER BY COALESCE(t.name, 'Time')
-		`, companyID)
+				   (SELECT COUNT(*) FROM conversations c WHERE c.team_id = t.id AND c.company_id = t.company_id AND COALESCE(c.status, 'open') IN ('open', 'in_progress', 'pending')`+conversationVisibility+`) as open_count,
+				   (SELECT COALESCE(SUM(COALESCE(c.unread_count, 0)), 0) FROM conversations c WHERE c.team_id = t.id AND c.company_id = t.company_id AND COALESCE(c.status, 'open') IN ('open', 'in_progress', 'pending')`+conversationVisibility+`) as unread_count
+			FROM teams t WHERE t.company_id = $1`+membershipJoin+` ORDER BY COALESCE(t.name, 'Time')
+		`, args...)
 		if err != nil {
 			log.Printf("[TEAMS] failed to list teams for company %s: %v", companyID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -133,6 +146,7 @@ func DeleteTeam(svc *services.Container) fiber.Handler {
 func AddTeamMember(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		teamID := c.Params("id")
+		companyID := c.Locals("company_id").(string)
 
 		var body struct {
 			UserID       string `json:"user_id"`
@@ -141,13 +155,28 @@ func AddTeamMember(svc *services.Container) fiber.Handler {
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
 		}
+		roleSlug, _ := c.Locals("role_slug").(string)
+		if roleSlug == "supervisor" {
+			body.IsSupervisor = false
+		}
+		conflictClause := "ON CONFLICT (team_id, user_id) DO UPDATE SET is_supervisor = $4"
+		if roleSlug == "supervisor" {
+			conflictClause = "ON CONFLICT (team_id, user_id) DO NOTHING"
+		}
 
-		_, err := svc.DB.Exec(`
-			INSERT INTO team_users (id, team_id, user_id, is_supervisor) VALUES ($1, $2, $3, $4)
-			ON CONFLICT (team_id, user_id) DO UPDATE SET is_supervisor = $4
-		`, uuid.New().String(), teamID, body.UserID, body.IsSupervisor)
+		result, err := svc.DB.Exec(`
+			INSERT INTO team_users (id, team_id, user_id, is_supervisor)
+			SELECT $1, t.id, u.id, $4
+			FROM teams t JOIN users u ON u.company_id = t.company_id
+			WHERE t.id = $2 AND u.id = $3 AND t.company_id = $5
+			`+conflictClause+`
+		`, uuid.New().String(), teamID, body.UserID, body.IsSupervisor, companyID)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		rows, _ := result.RowsAffected()
+		if rows == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Time ou usuário inválido"})
 		}
 
 		return c.JSON(fiber.Map{"message": "Member added"})

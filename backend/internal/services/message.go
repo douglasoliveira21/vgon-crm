@@ -163,6 +163,32 @@ func (s *MessageService) GetConversations(companyID string, status string, assig
 		args = append(args, conversationIDs[1])
 		argIdx++
 	}
+	visibilityUserID := ""
+	visibilityRole := ""
+	if len(conversationIDs) > 2 {
+		visibilityUserID = conversationIDs[2]
+	}
+	if len(conversationIDs) > 3 {
+		visibilityRole = conversationIDs[3]
+	}
+	if visibilityUserID != "" {
+		if visibilityRole == "supervisor" {
+			query += fmt.Sprintf(` AND c.team_id IS NOT NULL AND EXISTS (
+				SELECT 1 FROM team_users visible_tu
+				WHERE visible_tu.team_id = c.team_id AND visible_tu.user_id = $%d AND COALESCE(visible_tu.is_supervisor, false) = true
+			)`, argIdx)
+		} else {
+			query += fmt.Sprintf(` AND (
+			c.assigned_to = $%d
+			OR (c.assigned_to IS NULL AND c.team_id IS NOT NULL AND EXISTS (
+				SELECT 1 FROM team_users visible_tu WHERE visible_tu.team_id = c.team_id AND visible_tu.user_id = $%d
+			))
+			OR (c.assigned_to IS NULL AND c.team_id IS NULL)
+		)`, argIdx, argIdx)
+		}
+		args = append(args, visibilityUserID)
+		argIdx++
+	}
 
 	if status != "" {
 		// Support comma-separated status values
@@ -190,6 +216,9 @@ func (s *MessageService) GetConversations(companyID string, status string, assig
 
 	if unassigned {
 		query += " AND c.assigned_to IS NULL"
+		if visibilityUserID != "" && visibilityRole == "agent" {
+			query += " AND c.team_id IS NULL"
+		}
 	}
 
 	if teamID != "" {
