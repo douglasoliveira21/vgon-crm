@@ -24,8 +24,8 @@ import {
   Settings,
   LogOut,
   Zap,
-  Pin,
-  PinOff,
+  PanelLeftClose,
+  PanelLeftOpen,
   Moon,
   Sun,
   UserCircle,
@@ -42,13 +42,11 @@ import {
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { SafeImage } from '@/components/safe-image'
-import { ChannelIcon, type ChannelIconType } from '@/components/channel-icon'
 
 type MenuItem = {
   label: string
   href: string
   icon: LucideIcon
-  iconType?: ChannelIconType
   expandable?: 'conversations' | 'contacts' | 'teams'
 }
 
@@ -62,12 +60,12 @@ const menuItems: MenuItem[] = [
   { label: 'Times', href: '/teams', icon: UsersRound, expandable: 'teams' },
   { label: 'Canais', href: '/channels', icon: Radio },
   { label: 'Funil de Vendas', href: '/funnels', icon: GitBranch },
-  { label: 'Bots e Automações', href: '/automations', icon: Bot, iconType: 'automation' },
-  { label: 'Marketing', href: '/campaigns', icon: Megaphone, iconType: 'campaign' },
+  { label: 'Bots e Automações', href: '/automations', icon: Bot },
+  { label: 'Marketing', href: '/campaigns', icon: Megaphone },
   { label: 'Métricas', href: '/metrics', icon: BarChart3 },
   { label: 'Logs Administrativos', href: '/audit-logs', icon: FileText },
-  { label: 'Privacidade e LGPD', href: '/privacy', icon: ShieldCheck, iconType: 'security' },
-  { label: 'Widget', href: '/widget', icon: Globe, iconType: 'website' },
+  { label: 'Privacidade e LGPD', href: '/privacy', icon: ShieldCheck },
+  { label: 'Widget', href: '/widget', icon: Globe },
   { label: 'Respostas Rápidas', href: '/quick-replies', icon: Zap },
 ]
 
@@ -138,6 +136,17 @@ export default function Sidebar() {
     } catch {
       toast.error('Não foi possível restaurar a sessão administrativa')
     }
+  }
+
+  const toggleSidebar = () => {
+    if (sidebarExpanded) {
+      setSidebarPinned(false)
+      setSidebarHovered(false)
+      setExpandedSections({ conversations: false, contacts: false, teams: false })
+      setProfileMenuOpen(false)
+      return
+    }
+    setSidebarPinned(true)
   }
 
   useEffect(() => {
@@ -264,11 +273,11 @@ export default function Sidebar() {
       <div className="flex items-center justify-between gap-2 px-4 py-3">
         <button
           type="button"
-          onClick={() => setSidebarPinned(!sidebarPinned)}
+          onClick={toggleSidebar}
           className="hidden h-9 w-9 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-white/10 hover:text-white md:flex"
-          title={sidebarPinned ? 'Desfixar menu' : 'Fixar menu'}
+          title={sidebarExpanded ? 'Recolher menu' : 'Expandir menu'}
         >
-          {sidebarPinned ? <PinOff size={17} /> : <Pin size={17} />}
+          {sidebarExpanded ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
         </button>
         <button
           type="button"
@@ -311,7 +320,7 @@ export default function Sidebar() {
                 )}
               >
                 <Link href={item.href} title={item.label} className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5">
-                  {item.iconType ? <ChannelIcon type={item.iconType} size={20} className="text-current" /> : <Icon size={20} className="shrink-0" />}
+                  <Icon size={20} className="shrink-0 text-current" />
                   <span className={clsx('min-w-0 flex-1 whitespace-nowrap transition-opacity duration-200', showTextClass, 'max-md:pointer-events-auto max-md:w-auto max-md:overflow-visible max-md:opacity-100')}>
                     {item.label}
                   </span>
