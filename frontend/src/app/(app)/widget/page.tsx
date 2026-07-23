@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { Plus, Globe, Code, Eye, MessageCircle } from 'lucide-react'
+import { Plus, Globe, Code, Eye } from 'lucide-react'
+import { ChannelIcon } from '@/components/channel-icon'
 
 export default function WidgetPage() {
   const [widgets, setWidgets] = useState<any[]>([])
@@ -83,8 +84,8 @@ export default function WidgetPage() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className="mx-auto max-w-5xl p-4 sm:p-6">
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Widget para Site</h1>
           <p className="text-gray-500 mt-1">Configure o chat widget para seu website</p>
@@ -174,7 +175,7 @@ export default function WidgetPage() {
                   </div>
                   <div className="p-4">
                     <div className="flex items-center gap-3 p-3 bg-green-50 rounded-lg cursor-pointer hover:bg-green-100 transition-colors">
-                      <MessageCircle size={20} className="text-green-600" />
+                      <ChannelIcon type="whatsapp" size={20} />
                       <span className="text-sm font-medium text-green-700">Falar pelo WhatsApp</span>
                     </div>
                   </div>
@@ -186,7 +187,7 @@ export default function WidgetPage() {
                 className="w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-transform hover:scale-110"
                 style={{ backgroundColor: previewColor }}
               >
-                <MessageCircle size={24} className="text-white" />
+                <ChannelIcon type="webchat" size={24} className="text-white" />
               </button>
             </div>
           </div>

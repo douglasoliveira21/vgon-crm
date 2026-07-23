@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import api from '@/lib/api'
-import { Building2, Loader2, MessageSquare, Phone, Search, Users } from 'lucide-react'
+import { Building2, Loader2, MessageSquare, Search, SearchX, Users } from 'lucide-react'
 
 interface GlobalSearchResponse {
   contacts: Array<{ id: string; name: string; phone?: string; email?: string; company_name?: string; origin?: string }>
@@ -59,7 +59,7 @@ export default function GlobalSearchPage() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="mx-auto max-w-6xl p-4 sm:p-6">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Busca global</h1>
         <p className="text-gray-500 mt-1">Encontre contatos, conversas, empresas, e-mails e telefones em um só lugar.</p>
@@ -120,7 +120,7 @@ export default function GlobalSearchPage() {
 
       {!loading && searched && totalResults === 0 && (
         <div className="card p-12 text-center mt-6">
-          <Phone size={36} className="text-gray-300 mx-auto mb-3" />
+          <SearchX size={36} className="mx-auto mb-3 text-gray-300" />
           <p className="text-gray-500">Nenhum resultado encontrado para essa busca.</p>
         </div>
       )}

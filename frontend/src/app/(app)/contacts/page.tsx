@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { Search, Plus, Edit2, Trash2, MapPin, MessageSquare, X, ShieldCheck, Download, History } from 'lucide-react'
+import { Search, Plus, Edit2, Trash2, MapPin, MessageSquare, X, ShieldCheck, Download, History, GitMerge } from 'lucide-react'
+import { SafeImage } from '@/components/safe-image'
 
 const PAGE_SIZE = 25
 
@@ -59,6 +60,7 @@ export default function ContactsPage() {
   const [editingContact, setEditingContact] = useState<Contact | null>(null)
   const [conversationContact, setConversationContact] = useState<Contact | null>(null)
   const [privacyContact, setPrivacyContact] = useState<Contact | null>(null)
+  const [showDuplicates, setShowDuplicates] = useState(false)
   const [channels, setChannels] = useState<Channel[]>([])
   const [loadingChannels, setLoadingChannels] = useState(false)
   const [startingConversation, setStartingConversation] = useState(false)
@@ -158,16 +160,22 @@ export default function ContactsPage() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="mx-auto max-w-6xl p-4 sm:p-6">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Contatos</h1>
           <p className="text-gray-500 mt-1">{total} contatos registrados</p>
         </div>
-        <button onClick={() => setShowForm(true)} className="btn-primary">
-          <Plus size={18} />
-          Novo contato
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowDuplicates(true)} className="btn-secondary">
+            <GitMerge size={18} />
+            Localizar duplicados
+          </button>
+          <button onClick={() => setShowForm(true)} className="btn-primary">
+            <Plus size={18} />
+            Novo contato
+          </button>
+        </div>
       </div>
 
       {/* Search */}
@@ -186,8 +194,8 @@ export default function ContactsPage() {
       </div>
 
       {/* Contacts Table */}
-      <div className="card overflow-hidden">
-        <table className="w-full">
+      <div className="card overflow-x-auto">
+        <table className="w-full min-w-[760px]">
           <thead className="bg-gray-50 border-b border-gray-100">
             <tr>
               <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Contato</th>
@@ -205,11 +213,11 @@ export default function ContactsPage() {
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 bg-primary-100 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0">
                       {contact.avatar_url ? (
-                        <img
+                        <SafeImage
                           src={contact.avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${contact.avatar_url}` : contact.avatar_url}
                           alt=""
                           className="w-full h-full object-cover"
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                          fallback={<span className="text-primary-700 font-medium text-sm">{contact.name?.charAt(0)?.toUpperCase() || '?'}</span>}
                         />
                       ) : (
                         <span className="text-primary-700 text-sm font-medium">
@@ -336,6 +344,15 @@ export default function ContactsPage() {
           }}
         />
       )}
+      {showDuplicates && (
+        <DuplicateContactsModal
+          onClose={() => setShowDuplicates(false)}
+          onMerged={() => {
+            setShowDuplicates(false)
+            fetchContacts()
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -348,6 +365,80 @@ function getConsentLabel(status?: string) {
     unknown: 'Não informado',
   }
   return labels[status || 'unknown'] || 'Não informado'
+}
+
+function DuplicateContactsModal({ onClose, onMerged }: { onClose: () => void; onMerged: () => void }) {
+  const [duplicates, setDuplicates] = useState<Contact[]>([])
+  const [primaryID, setPrimaryID] = useState('')
+  const [duplicateID, setDuplicateID] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [merging, setMerging] = useState(false)
+
+  useEffect(() => {
+    api.get('/contacts/duplicates')
+      .then((response) => setDuplicates(response.data.duplicates || []))
+      .catch((error) => toast.error(error.response?.data?.error || 'Erro ao localizar duplicados'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  const merge = async () => {
+    if (!primaryID || !duplicateID || primaryID === duplicateID) {
+      toast.error('Escolha dois contatos diferentes')
+      return
+    }
+    if (!confirm('Mesclar estes contatos? O histórico será movido para o contato principal.')) return
+    setMerging(true)
+    try {
+      await api.post(`/contacts/${primaryID}/merge`, { duplicate_id: duplicateID })
+      toast.success('Contatos e históricos mesclados')
+      onMerged()
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao mesclar contatos')
+    } finally {
+      setMerging(false)
+    }
+  }
+
+  const label = (contact: Contact) => `${contact.name || 'Sem nome'} - ${contact.phone || contact.email || 'sem identificação'}`
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-xl rounded-xl bg-white p-6 shadow-xl">
+        <div className="mb-4 flex items-start justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Mesclar contatos duplicados</h3>
+            <p className="mt-1 text-sm text-gray-500">Mensagens, conversas, negócios, tags e consentimentos serão preservados.</p>
+          </div>
+          <button type="button" onClick={onClose} className="p-1 text-gray-400 hover:text-gray-700"><X size={18} /></button>
+        </div>
+        {loading ? (
+          <p className="py-8 text-center text-sm text-gray-500">Analisando telefone e e-mail...</p>
+        ) : duplicates.length < 2 ? (
+          <p className="rounded-lg bg-green-50 p-4 text-sm text-green-700">Nenhum contato duplicado foi encontrado.</p>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Contato principal que será mantido</label>
+              <select className="input" value={primaryID} onChange={(event) => setPrimaryID(event.target.value)}>
+                <option value="">Selecione...</option>
+                {duplicates.map((contact) => <option key={contact.id} value={contact.id}>{label(contact)}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Contato duplicado que será incorporado</label>
+              <select className="input" value={duplicateID} onChange={(event) => setDuplicateID(event.target.value)}>
+                <option value="">Selecione...</option>
+                {duplicates.filter((contact) => contact.id !== primaryID).map((contact) => <option key={contact.id} value={contact.id}>{label(contact)}</option>)}
+              </select>
+            </div>
+            <button type="button" onClick={merge} disabled={merging} className="btn-primary w-full justify-center">
+              <GitMerge size={16} /> {merging ? 'Mesclando históricos...' : 'Mesclar contatos'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function ContactPrivacyModal({
@@ -367,6 +458,11 @@ function ContactPrivacyModal({
   const [loadingAudit, setLoadingAudit] = useState(true)
   const [consents, setConsents] = useState<Array<any>>([])
   const [audit, setAudit] = useState<Array<any>>([])
+  const [channelConsents, setChannelConsents] = useState<Record<string, string>>({
+    whatsapp: 'unknown',
+    email: 'unknown',
+    marketing: 'unknown',
+  })
 
   useEffect(() => {
     loadAudit()
@@ -375,13 +471,38 @@ function ContactPrivacyModal({
   const loadAudit = async () => {
     setLoadingAudit(true)
     try {
-      const response = await api.get(`/contacts/${contact.id}/audit`)
+      const [response, channelResponse] = await Promise.all([
+        api.get(`/contacts/${contact.id}/audit`),
+        api.get(`/contacts/${contact.id}/channel-consents`),
+      ])
       setConsents(response.data.consents || [])
       setAudit(response.data.audit || [])
+      const next = { whatsapp: 'unknown', email: 'unknown', marketing: 'unknown' }
+      for (const item of channelResponse.data.consents || []) {
+        if (item.channel in next) next[item.channel as keyof typeof next] = item.status
+      }
+      setChannelConsents(next)
     } catch {
       toast.error('Erro ao carregar histórico LGPD')
     } finally {
       setLoadingAudit(false)
+    }
+  }
+
+  const saveChannelConsent = async (channel: string, nextStatus: string) => {
+    try {
+      await api.put(`/contacts/${contact.id}/channel-consents`, {
+        channel,
+        purpose: 'marketing',
+        status: nextStatus,
+        source,
+        consent_text: consentText,
+      })
+      setChannelConsents((current) => ({ ...current, [channel]: nextStatus }))
+      toast.success('Consentimento do canal atualizado')
+      await loadAudit()
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao atualizar canal')
     }
   }
 
@@ -443,7 +564,7 @@ function ContactPrivacyModal({
                 <ShieldCheck size={18} className="text-primary-600" />
                 <h4 className="font-medium text-gray-900">Consentimento e opt-out</h4>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
                   <select value={status} onChange={(e) => setStatus(e.target.value)} className="input">
@@ -478,6 +599,35 @@ function ContactPrivacyModal({
                 <button type="button" disabled={saving} onClick={() => saveConsent('opted_out')} className="btn-secondary text-red-600">
                   Registrar opt-out
                 </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <ShieldCheck size={18} className="text-primary-600" />
+                <h4 className="font-medium text-gray-900">Consentimento por canal</h4>
+              </div>
+              <div className="space-y-3">
+                {[
+                  ['whatsapp', 'WhatsApp'],
+                  ['email', 'E-mail'],
+                  ['marketing', 'Marketing geral'],
+                ].map(([channel, label]) => (
+                  <div key={channel} className="flex items-center gap-3">
+                    <span className="w-32 text-sm text-gray-700">{label}</span>
+                    <select
+                      value={channelConsents[channel] || 'unknown'}
+                      onChange={(event) => saveChannelConsent(channel, event.target.value)}
+                      className="input"
+                    >
+                      <option value="unknown">Não informado</option>
+                      <option value="granted">Autorizado</option>
+                      <option value="denied">Negado</option>
+                      <option value="revoked">Revogado</option>
+                      <option value="opted_out">Opt-out</option>
+                    </select>
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -692,7 +842,7 @@ function ContactFormModal({
         </h3>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Nome</label>
               <input
@@ -726,7 +876,7 @@ function ContactFormModal({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Empresa vinculada</label>
               <select
@@ -754,7 +904,7 @@ function ContactFormModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Cidade</label>
               <input
@@ -781,7 +931,7 @@ function ContactFormModal({
               <ShieldCheck size={16} className="text-primary-600" />
               <p className="text-sm font-medium text-gray-900">LGPD e consentimento</p>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
                 <select

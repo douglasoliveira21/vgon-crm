@@ -45,6 +45,9 @@ func SaveBase64File(base64Data, fileExtension string) (string, error) {
 			return "", fmt.Errorf("failed to decode base64: %w", err)
 		}
 	}
+	if len(decoded) > 25*1024*1024 {
+		return "", fmt.Errorf("file exceeds the 25MB limit")
+	}
 
 	// Generate unique filename
 	fileName := uuid.New().String() + fileExtension

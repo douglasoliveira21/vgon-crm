@@ -22,6 +22,7 @@ type Container struct {
 	Bot       *BotEngine
 	GLPI      *GLPIService
 	GLPIFlow  *GLPIFlowEngine
+	Jobs      *JobQueue
 }
 
 // NewContainer creates a new service container
@@ -34,11 +35,13 @@ func NewContainer(db *sql.DB, rdb *redis.Client, cfg *config.Config, wsHub *webs
 	}
 
 	container.Auth = NewAuthService(db, cfg)
+	container.Jobs = NewJobQueue(db)
 	container.Evolution = NewEvolutionService(cfg, db, wsHub)
 	container.Message = NewMessageService(db, rdb, wsHub)
 	container.Email = NewEmailService(db, wsHub, cfg)
 	container.Contact = NewContactService(db)
 	container.Bot = NewBotEngine(db, wsHub, container.Evolution)
+	container.Bot.EnableDurableJobs(container.Jobs)
 	container.GLPI = NewGLPIService(cfg.GLPIBaseURL, cfg.GLPIAppToken)
 	container.GLPIFlow = NewGLPIFlowEngine(db, wsHub, container.Evolution, container.GLPI, cfg.GLPIUserToken)
 

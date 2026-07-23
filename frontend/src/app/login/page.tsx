@@ -5,14 +5,18 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import toast from 'react-hot-toast'
-import { Eye, EyeOff, Mail, MessageCircle, Globe, Lock, Shield, HeadphonesIcon } from 'lucide-react'
+import { Eye, EyeOff, Mail, Lock, Shield, HeadphonesIcon } from 'lucide-react'
 import api from '@/lib/api'
+import { ChannelIcon } from '@/components/channel-icon'
+import { SafeImage } from '@/components/safe-image'
 
 export default function LoginPage() {
   const router = useRouter()
   const { login, isLoading } = useAuthStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [totpCode, setTotpCode] = useState('')
+  const [requiresTwoFactor, setRequiresTwoFactor] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [isSendingReset, setIsSendingReset] = useState(false)
@@ -20,10 +24,14 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await login(email, password)
+      await login(email, password, totpCode)
       router.push('/dashboard')
       toast.success('Login realizado!')
     } catch (error: any) {
+      if (error.message === 'Informe o código do aplicativo autenticador') {
+        setRequiresTwoFactor(true)
+        return
+      }
       toast.error(error.message)
     }
   }
@@ -55,6 +63,7 @@ export default function LoginPage() {
             loop
             muted
             playsInline
+            onError={(event) => { event.currentTarget.style.display = 'none' }}
             className="absolute inset-0 w-full h-full object-cover opacity-50 pointer-events-none"
           >
             <source src="https://vgon.com.br/wp-content/uploads/2026/07/5925-187109675_medium.mp4" type="video/mp4" />
@@ -64,8 +73,9 @@ export default function LoginPage() {
 
           {/* Content */}
           <div className="relative z-10">
-            <img
+            <SafeImage
               src="/assets/images/logo-vgon-negativo.png"
+              fallbackSrc="/logo-white.png"
               alt="VGON"
               className="h-auto w-[clamp(180px,18vw,310px)] object-contain mb-12 opacity-95"
             />
@@ -81,10 +91,10 @@ export default function LoginPage() {
             </p>
 
             {/* Channel Cards */}
-            <div className="grid grid-cols-3 gap-3">
-              <ChannelCard icon={<Mail size={20} />} label="E-mail" />
-              <ChannelCard icon={<MessageCircle size={20} />} label="WhatsApp" />
-              <ChannelCard icon={<Globe size={20} />} label="Website" />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <ChannelCard icon={<ChannelIcon type="email" size={20} className="text-white" />} label="E-mail" />
+              <ChannelCard icon={<ChannelIcon type="whatsapp" size={20} />} label="WhatsApp" />
+              <ChannelCard icon={<ChannelIcon type="website" size={20} className="text-white" />} label="Website" />
             </div>
           </div>
         </section>
@@ -94,8 +104,9 @@ export default function LoginPage() {
           <div className="w-full max-w-[400px]">
             {/* Mobile Logo */}
             <div className="lg:hidden mb-10">
-              <img
+              <SafeImage
                 src="/assets/images/logo-vgon-negativo.png"
+                fallbackSrc="/logo-white.png"
                 alt="VGON"
                 className="h-auto w-[180px] object-contain opacity-95"
               />
@@ -147,6 +158,24 @@ export default function LoginPage() {
                       {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                     </button>
                   </div>
+                </div>
+              )}
+
+              {!showForgotPassword && requiresTwoFactor && (
+                <div>
+                  <label className="block text-[13px] font-medium text-white/60 mb-2">Código de autenticação</label>
+                  <input
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    value={totpCode}
+                    onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    className="w-full h-[52px] px-4 bg-white/[0.04] border border-white/[0.08] rounded-[10px] text-center text-xl tracking-[0.35em] text-white outline-none focus:border-white/20"
+                    placeholder="000000"
+                    required
+                    minLength={6}
+                    maxLength={6}
+                    autoFocus
+                  />
                 </div>
               )}
 

@@ -14,13 +14,14 @@ interface User {
   is_online: boolean
   availability_status?: 'online' | 'offline' | 'busy'
   is_super_admin?: boolean
+  two_factor_enabled?: boolean
 }
 
 interface AuthState {
   user: User | null
   isAuthenticated: boolean
   isLoading: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string, totpCode?: string) => Promise<void>
   register: (companyName: string, name: string, email: string, password: string) => Promise<void>
   updateUser: (user: User) => void
   updateProfile: (data: { name: string; phone?: string }) => Promise<void>
@@ -38,16 +39,12 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   isLoading: false,
 
-  login: async (email: string, password: string) => {
+  login: async (email: string, password: string, totpCode?: string) => {
     set({ isLoading: true })
     try {
-      const response = await api.post('/auth/login', { email, password })
-      const { access_token, refresh_token, user } = response.data
-
-      localStorage.setItem('access_token', access_token)
-      localStorage.setItem('refresh_token', refresh_token)
-
-      wsService.connect(access_token)
+      const response = await api.post('/auth/login', { email, password, totp_code: totpCode })
+      const { user } = response.data
+      wsService.connect()
 
       set({ user, isAuthenticated: true, isLoading: false })
     } catch (error: any) {
@@ -65,12 +62,8 @@ export const useAuthStore = create<AuthState>((set) => ({
         email,
         password,
       })
-      const { access_token, refresh_token, user } = response.data
-
-      localStorage.setItem('access_token', access_token)
-      localStorage.setItem('refresh_token', refresh_token)
-
-      wsService.connect(access_token)
+      const { user } = response.data
+      wsService.connect()
 
       set({ user, isAuthenticated: true, isLoading: false })
     } catch (error: any) {
@@ -101,39 +94,26 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: () => {
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
+    void api.post('/auth/logout').catch(() => undefined)
     wsService.disconnect()
     set({ user: null, isAuthenticated: false })
   },
 
   checkAuth: () => {
-    const token = localStorage.getItem('access_token')
-    if (token) {
-      const now = Date.now()
-      if (checkAuthPromise || now - lastCheckAuthAt < 5000) {
-        wsService.connect(token)
-        set({ isAuthenticated: true })
-        return
-      }
-
-      lastCheckAuthAt = now
-      wsService.connect(token)
-      checkAuthPromise = api.get('/me').then((response) => {
-        set({ user: response.data, isAuthenticated: true })
-      }).catch((error) => {
-        if (error.response?.status === 429 || error.response?.status >= 500) {
-          set({ isAuthenticated: true })
-          return
-        }
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
-        set({ user: null, isAuthenticated: false })
-      }).finally(() => {
-        checkAuthPromise = null
-      })
-    } else {
-      set({ user: null, isAuthenticated: false })
+    const now = Date.now()
+    if (checkAuthPromise || now - lastCheckAuthAt < 5000) {
+      return
     }
+
+    lastCheckAuthAt = now
+    set({ isLoading: true })
+    checkAuthPromise = api.get('/me').then((response) => {
+      wsService.connect()
+      set({ user: response.data, isAuthenticated: true, isLoading: false })
+    }).catch(() => {
+      set({ user: null, isAuthenticated: false, isLoading: false })
+    }).finally(() => {
+      checkAuthPromise = null
+    })
   },
 }))

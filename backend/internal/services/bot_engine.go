@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -23,10 +24,88 @@ type BotEngine struct {
 	wsHub    *websocket.Hub
 	evo      *EvolutionService
 	glpiFlow *GLPIFlowEngine
+	jobs     *JobQueue
 }
 
 func NewBotEngine(db *sql.DB, wsHub *websocket.Hub, evo *EvolutionService) *BotEngine {
 	return &BotEngine{db: db, wsHub: wsHub, evo: evo}
+}
+
+type botFlowJobPayload struct {
+	FlowID         string          `json:"flow_id"`
+	TriggerType    string          `json:"trigger_type"`
+	CompanyID      string          `json:"company_id"`
+	ConversationID string          `json:"conversation_id"`
+	ContactID      string          `json:"contact_id"`
+	InstanceName   string          `json:"instance_name"`
+	Phone          string          `json:"phone"`
+	TriggerMessage string          `json:"trigger_message"`
+	Nodes          json.RawMessage `json:"nodes"`
+	Edges          json.RawMessage `json:"edges"`
+	StartNodeID    string          `json:"start_node_id"`
+}
+
+func (e *BotEngine) EnableDurableJobs(queue *JobQueue) {
+	e.jobs = queue
+	queue.Register("automation.execute", func(_ context.Context, raw json.RawMessage) error {
+		var payload botFlowJobPayload
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return err
+		}
+		if payload.FlowID == "" || payload.CompanyID == "" || payload.ConversationID == "" {
+			return fmt.Errorf("invalid automation payload")
+		}
+		e.executeFlowFrom(payload.FlowID, payload.TriggerType, payload.CompanyID,
+			payload.ConversationID, payload.ContactID, payload.InstanceName, payload.Phone,
+			payload.TriggerMessage, payload.Nodes, payload.Edges, payload.StartNodeID)
+		return nil
+	})
+}
+
+func (e *BotEngine) ResumeDurableExecutions() error {
+	rows, err := e.db.Query(`
+		SELECT flow.id, COALESCE(published.trigger_type, flow.trigger_type), flow.company_id, execution.conversation_id,
+		       execution.contact_id, COALESCE(instance.instance_name, ''), COALESCE(contact.phone, ''),
+		       COALESCE(published.nodes, flow.nodes), COALESCE(published.edges, flow.edges),
+		       COALESCE(execution.context ->> 'current_node_id', '')
+		FROM bot_executions execution
+		JOIN bot_flows flow ON flow.id = execution.flow_id
+		LEFT JOIN bot_flow_versions published
+		  ON published.flow_id = flow.id AND published.version = flow.published_version
+		LEFT JOIN conversations conversation ON conversation.id = execution.conversation_id
+		LEFT JOIN whatsapp_instances instance
+		  ON instance.channel_id = conversation.channel_id AND instance.company_id = flow.company_id
+		LEFT JOIN contacts contact ON contact.id = execution.contact_id
+		WHERE execution.status = 'running'
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var payload botFlowJobPayload
+		if err := rows.Scan(&payload.FlowID, &payload.TriggerType, &payload.CompanyID,
+			&payload.ConversationID, &payload.ContactID, &payload.InstanceName, &payload.Phone,
+			&payload.Nodes, &payload.Edges, &payload.StartNodeID); err != nil {
+			return err
+		}
+		e.enqueueFlow(payload)
+	}
+	return rows.Err()
+}
+
+func (e *BotEngine) enqueueFlow(payload botFlowJobPayload) {
+	if e.jobs == nil {
+		go e.executeFlowFrom(payload.FlowID, payload.TriggerType, payload.CompanyID,
+			payload.ConversationID, payload.ContactID, payload.InstanceName, payload.Phone,
+			payload.TriggerMessage, payload.Nodes, payload.Edges, payload.StartNodeID)
+		return
+	}
+	key := payload.FlowID + ":" + payload.ConversationID
+	if _, err := e.jobs.Enqueue(payload.CompanyID, "automation.execute", key, payload, time.Now()); err != nil {
+		log.Printf("[BOT] Failed to enqueue durable execution: %v", err)
+		e.finishLatestExecution(payload.FlowID, payload.ConversationID, "error")
+	}
 }
 
 type BotNode struct {
@@ -541,10 +620,16 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 
 	// Find active flows for this company
 	rows, err := e.db.Query(`
-		SELECT id, trigger_type, trigger_value, nodes, edges, priority, stop_on_match
-		FROM bot_flows
-		WHERE company_id = $1 AND is_active = true
-		ORDER BY priority DESC, created_at ASC
+		SELECT flow.id, COALESCE(published.trigger_type, flow.trigger_type),
+		       COALESCE(published.trigger_value, flow.trigger_value),
+		       COALESCE(published.nodes, flow.nodes), COALESCE(published.edges, flow.edges),
+		       COALESCE(published.priority, flow.priority),
+		       COALESCE(published.stop_on_match, flow.stop_on_match)
+		FROM bot_flows flow
+		LEFT JOIN bot_flow_versions published
+		  ON published.flow_id = flow.id AND published.version = flow.published_version
+		WHERE flow.company_id = $1 AND flow.is_active = true
+		ORDER BY COALESCE(published.priority, flow.priority) DESC, flow.created_at ASC
 	`, companyID)
 	if err != nil {
 		return
@@ -615,7 +700,11 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 			}
 
 			log.Printf("[BOT] Triggering flow %s (%s) with priority %d for conversation %s", flowID, triggerType, priority, conversationID)
-			go e.executeFlow(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone, message, nodesJSON, edgesJSON)
+			e.enqueueFlow(botFlowJobPayload{
+				FlowID: flowID, TriggerType: triggerType, CompanyID: companyID,
+				ConversationID: conversationID, ContactID: contactID, InstanceName: instanceName,
+				Phone: phone, TriggerMessage: message, Nodes: nodesJSON, Edges: edgesJSON,
+			})
 			if stopOnMatch {
 				return
 			}
@@ -647,11 +736,16 @@ func (e *BotEngine) TriggerConversationClosed(companyID, conversationID string) 
 	}
 
 	rows, err := e.db.Query(`
-		SELECT id, trigger_type, nodes, edges, priority, stop_on_match
-		FROM bot_flows
-		WHERE company_id = $1 AND is_active = true
-			AND trigger_type IN ('conversation_closed', 'trigger_conversation_closed')
-		ORDER BY priority DESC, created_at ASC
+		SELECT flow.id, COALESCE(published.trigger_type, flow.trigger_type),
+		       COALESCE(published.nodes, flow.nodes), COALESCE(published.edges, flow.edges),
+		       COALESCE(published.priority, flow.priority),
+		       COALESCE(published.stop_on_match, flow.stop_on_match)
+		FROM bot_flows flow
+		LEFT JOIN bot_flow_versions published
+		  ON published.flow_id = flow.id AND published.version = flow.published_version
+		WHERE flow.company_id = $1 AND flow.is_active = true
+			AND COALESCE(published.trigger_type, flow.trigger_type) IN ('conversation_closed', 'trigger_conversation_closed')
+		ORDER BY COALESCE(published.priority, flow.priority) DESC, flow.created_at ASC
 	`, companyID)
 	if err != nil {
 		log.Printf("[BOT] Failed to query closing flows for company %s: %v", companyID, err)
@@ -675,7 +769,11 @@ func (e *BotEngine) TriggerConversationClosed(companyID, conversationID string) 
 			continue
 		}
 		log.Printf("[BOT] Triggering closing flow %s (%s) priority %d for conversation %s", flowID, triggerType, priority, conversationID)
-		go e.executeFlow(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone, "", nodesJSON, edgesJSON)
+		e.enqueueFlow(botFlowJobPayload{
+			FlowID: flowID, TriggerType: triggerType, CompanyID: companyID,
+			ConversationID: conversationID, ContactID: contactID, InstanceName: instanceName,
+			Phone: phone, Nodes: nodesJSON, Edges: edgesJSON,
+		})
 		if stopOnMatch {
 			return
 		}
@@ -694,11 +792,17 @@ func (e *BotEngine) StartClientInactivityMonitor() {
 
 func (e *BotEngine) TriggerClientInactivityFlows() {
 	rows, err := e.db.Query(`
-		SELECT id, company_id::text, trigger_type, trigger_value, nodes, edges, priority, stop_on_match
-		FROM bot_flows
-		WHERE is_active = true
-			AND trigger_type IN ('client_inactivity', 'trigger_client_inactivity', 'no_response', 'trigger_no_response')
-		ORDER BY priority DESC, created_at ASC
+		SELECT flow.id, flow.company_id::text, COALESCE(published.trigger_type, flow.trigger_type),
+		       COALESCE(published.trigger_value, flow.trigger_value),
+		       COALESCE(published.nodes, flow.nodes), COALESCE(published.edges, flow.edges),
+		       COALESCE(published.priority, flow.priority),
+		       COALESCE(published.stop_on_match, flow.stop_on_match)
+		FROM bot_flows flow
+		LEFT JOIN bot_flow_versions published
+		  ON published.flow_id = flow.id AND published.version = flow.published_version
+		WHERE flow.is_active = true
+			AND COALESCE(published.trigger_type, flow.trigger_type) IN ('client_inactivity', 'trigger_client_inactivity', 'no_response', 'trigger_no_response')
+		ORDER BY COALESCE(published.priority, flow.priority) DESC, flow.created_at ASC
 	`)
 	if err != nil {
 		log.Printf("[BOT] Failed to query client inactivity flows: %v", err)
@@ -742,7 +846,11 @@ func (e *BotEngine) TriggerClientInactivityFlows() {
 				continue
 			}
 			log.Printf("[BOT] Triggering client inactivity flow %s priority %d for conversation %s", flowID, priority, conv.conversationID)
-			go e.executeFlow(flowID, triggerType, companyID, conv.conversationID, conv.contactID, conv.instanceName, conv.phone, "", nodesJSON, edgesJSON)
+			e.enqueueFlow(botFlowJobPayload{
+				FlowID: flowID, TriggerType: triggerType, CompanyID: companyID,
+				ConversationID: conv.conversationID, ContactID: conv.contactID,
+				InstanceName: conv.instanceName, Phone: conv.phone, Nodes: nodesJSON, Edges: edgesJSON,
+			})
 		}
 	}
 }
@@ -898,21 +1006,28 @@ func (e *BotEngine) executeFlowFrom(flowID, triggerType, companyID, conversation
 
 		conditionResult := e.evaluateCondition(node, companyID, conversationID, contactID, triggerMessage)
 
-		err := e.executeNode(node, companyID, conversationID, contactID, instanceName, phone)
-		if err != nil {
-			log.Printf("[BOT] Error executing node %s: %v", node.ID, err)
-			e.markExecutionError(execID, node.ID, err)
-			e.addBotExecutionNote(companyID, conversationID, fmt.Sprintf("Falha no envio da automacao no bloco %s: %v", getNodeType(node), err))
-			return
+		if !e.executionNodeCompleted(execID, node.ID) {
+			e.recordExecutionEvent(execID, node.ID, "node_started", "running", nil)
+			err := e.executeNode(node, companyID, conversationID, contactID, instanceName, phone)
+			if err != nil {
+				e.recordExecutionEvent(execID, node.ID, "node_finished", "error", err)
+				log.Printf("[BOT] Error executing node %s: %v", node.ID, err)
+				e.markExecutionError(execID, node.ID, err)
+				e.addBotExecutionNote(companyID, conversationID, fmt.Sprintf("Falha no envio da automacao no bloco %s: %v", getNodeType(node), err))
+				return
+			}
+			e.recordExecutionEvent(execID, node.ID, "node_finished", "completed", nil)
 		}
 
 		if nodeWaitsForExternalCompletion(node) {
+			e.recordExecutionEvent(execID, node.ID, "execution_waiting", "external_wait", nil)
 			e.markExecutionExternalWait(execID, node.ID)
 			log.Printf("[BOT] Flow %s waiting for external completion at node %s", flowID, node.ID)
 			return
 		}
 
 		if nodeWaitsForResponse(node) {
+			e.recordExecutionEvent(execID, node.ID, "execution_waiting", "waiting", nil)
 			e.markExecutionWaiting(execID, node.ID)
 			log.Printf("[BOT] Flow %s waiting for response at node %s", flowID, node.ID)
 			return
@@ -947,6 +1062,7 @@ func (e *BotEngine) executeFlowFrom(flowID, triggerType, companyID, conversation
 
 	// Mark execution as completed
 	e.db.Exec("UPDATE bot_executions SET status = 'completed', completed_at = NOW() WHERE id = $1", execID)
+	e.recordExecutionEvent(execID, "", "execution_finished", "completed", nil)
 	log.Printf("[BOT] Flow %s completed for conversation %s", flowID, conversationID)
 }
 
@@ -954,9 +1070,13 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 	var execID, flowID, triggerType, waitingNodeID, executionConversationID string
 	var nodesJSON, edgesJSON json.RawMessage
 	err := e.db.QueryRow(`
-		SELECT be.id, bf.id, bf.trigger_type, bf.nodes, bf.edges, COALESCE(be.context ->> 'waiting_node_id', ''), be.conversation_id::text
+		SELECT be.id, bf.id, COALESCE(published.trigger_type, bf.trigger_type),
+		       COALESCE(published.nodes, bf.nodes), COALESCE(published.edges, bf.edges),
+		       COALESCE(be.context ->> 'waiting_node_id', ''), be.conversation_id::text
 		FROM bot_executions be
 		JOIN bot_flows bf ON bf.id = be.flow_id
+		LEFT JOIN bot_flow_versions published
+		  ON published.flow_id = bf.id AND published.version = bf.published_version
 		WHERE be.conversation_id = $1
 			AND bf.company_id = $2
 			AND (be.status = 'waiting' OR (be.status = 'running' AND COALESCE(be.context ->> 'waiting_node_id', '') <> ''))
@@ -968,9 +1088,13 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 		if err == sql.ErrNoRows {
 			log.Printf("[BOT] No waiting execution for conversation %s", conversationID)
 			err = e.db.QueryRow(`
-				SELECT be.id, bf.id, bf.trigger_type, bf.nodes, bf.edges, COALESCE(be.context ->> 'waiting_node_id', ''), be.conversation_id::text
+				SELECT be.id, bf.id, COALESCE(published.trigger_type, bf.trigger_type),
+				       COALESCE(published.nodes, bf.nodes), COALESCE(published.edges, bf.edges),
+				       COALESCE(be.context ->> 'waiting_node_id', ''), be.conversation_id::text
 				FROM bot_executions be
 				JOIN bot_flows bf ON bf.id = be.flow_id
+				LEFT JOIN bot_flow_versions published
+				  ON published.flow_id = bf.id AND published.version = bf.published_version
 				WHERE be.contact_id = $1
 					AND bf.company_id = $2
 					AND (be.status = 'waiting' OR (be.status = 'running' AND COALESCE(be.context ->> 'waiting_node_id', '') <> ''))
@@ -1049,7 +1173,11 @@ func (e *BotEngine) resumeWaitingExecution(companyID, conversationID, contactID,
 	}
 
 	instanceName = e.resolveConversationInstance(companyID, executionConversationID, instanceName)
-	go e.executeFlowFrom(flowID, triggerType, companyID, executionConversationID, contactID, instanceName, phone, message, nodesJSON, edgesJSON, nextID)
+	e.enqueueFlow(botFlowJobPayload{
+		FlowID: flowID, TriggerType: triggerType, CompanyID: companyID,
+		ConversationID: executionConversationID, ContactID: contactID, InstanceName: instanceName,
+		Phone: phone, TriggerMessage: message, Nodes: nodesJSON, Edges: edgesJSON, StartNodeID: nextID,
+	})
 	return true
 }
 
@@ -1068,6 +1196,40 @@ func (e *BotEngine) markExecutionError(execID, nodeID string, err error) {
 			context = COALESCE(context, '{}'::jsonb) || jsonb_build_object('error', $1::text, 'error_node_id', $2::text)
 		WHERE id = $3
 	`, errMsg, nodeID, execID)
+	e.recordExecutionEvent(execID, nodeID, "execution_finished", "error", err)
+}
+
+func (e *BotEngine) recordExecutionEvent(execID, nodeID, eventType, status string, eventErr error) {
+	if execID == "" {
+		return
+	}
+	errMessage := ""
+	if eventErr != nil {
+		errMessage = eventErr.Error()
+	}
+	_, err := e.db.Exec(`
+		INSERT INTO bot_execution_events
+			(id, execution_id, company_id, node_id, event_type, status, error_message)
+		SELECT $1, execution.id, flow.company_id, NULLIF($3, ''), $4, $5, NULLIF($6, '')
+		FROM bot_executions execution
+		JOIN bot_flows flow ON flow.id = execution.flow_id
+		WHERE execution.id = $2
+	`, uuid.New().String(), execID, nodeID, eventType, status, errMessage)
+	if err != nil {
+		log.Printf("[BOT] Failed to record execution event %s: %v", eventType, err)
+	}
+}
+
+func (e *BotEngine) executionNodeCompleted(execID, nodeID string) bool {
+	var completed bool
+	_ = e.db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 FROM bot_execution_events
+			WHERE execution_id = $1 AND node_id = $2
+			  AND event_type = 'node_finished' AND status = 'completed'
+		)
+	`, execID, nodeID).Scan(&completed)
+	return completed
 }
 
 func (e *BotEngine) markExecutionWaiting(execID, nodeID string) {
@@ -1116,9 +1278,13 @@ func (e *BotEngine) ResumeAfterExternalNode(companyID, conversationID, contactID
 	var execID, flowID, triggerType, externalNodeID string
 	var nodesJSON, edgesJSON json.RawMessage
 	err := e.db.QueryRow(`
-		SELECT be.id, bf.id, bf.trigger_type, bf.nodes, bf.edges, COALESCE(be.context ->> 'external_node_id', '')
+		SELECT be.id, bf.id, COALESCE(published.trigger_type, bf.trigger_type),
+		       COALESCE(published.nodes, bf.nodes), COALESCE(published.edges, bf.edges),
+		       COALESCE(be.context ->> 'external_node_id', '')
 		FROM bot_executions be
 		JOIN bot_flows bf ON bf.id = be.flow_id
+		LEFT JOIN bot_flow_versions published
+		  ON published.flow_id = bf.id AND published.version = bf.published_version
 		WHERE be.conversation_id = $1
 			AND bf.company_id = $2
 			AND be.status = 'external_wait'
@@ -1177,7 +1343,11 @@ func (e *BotEngine) ResumeAfterExternalNode(companyID, conversationID, contactID
 
 	instanceName = e.resolveConversationInstance(companyID, conversationID, instanceName)
 	log.Printf("[BOT] Resuming flow %s after external node %s at next node %s", flowID, externalNodeID, nextID)
-	go e.executeFlowFrom(flowID, triggerType, companyID, conversationID, contactID, instanceName, phone, resultMessage, nodesJSON, edgesJSON, nextID)
+	e.enqueueFlow(botFlowJobPayload{
+		FlowID: flowID, TriggerType: triggerType, CompanyID: companyID,
+		ConversationID: conversationID, ContactID: contactID, InstanceName: instanceName,
+		Phone: phone, TriggerMessage: resultMessage, Nodes: nodesJSON, Edges: edgesJSON, StartNodeID: nextID,
+	})
 }
 
 func (e *BotEngine) resolveConversationInstance(companyID, conversationID, fallback string) string {
@@ -1245,16 +1415,21 @@ func (e *BotEngine) reserveExecution(flowID, conversationID, contactID string) b
 		return false
 	}
 
+	execID := uuid.New().String()
 	_, err = tx.Exec(`
 		INSERT INTO bot_executions (id, flow_id, conversation_id, contact_id, status)
 		VALUES ($1, $2, $3, $4, 'running')
-	`, uuid.New().String(), flowID, conversationID, contactID)
+	`, execID, flowID, conversationID, contactID)
 	if err != nil {
 		log.Printf("[BOT] Failed to reserve execution: %v", err)
 		return false
 	}
 
-	return tx.Commit() == nil
+	if tx.Commit() != nil {
+		return false
+	}
+	e.recordExecutionEvent(execID, "", "execution_started", "running", nil)
+	return true
 }
 
 func (e *BotEngine) finishLatestExecution(flowID, conversationID, status string) {
@@ -1838,7 +2013,9 @@ func (e *BotEngine) nodeTransferTeam(node BotNode, companyID, conversationID str
 		}
 	}
 
-	e.db.Exec("UPDATE conversations SET team_id = $1, assigned_to = NULL, updated_at = NOW() WHERE id = $2 AND company_id = $3", teamID, conversationID, companyID)
+	if _, err := e.db.Exec("UPDATE conversations SET team_id = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3", teamID, conversationID, companyID); err != nil {
+		return err
+	}
 
 	// Pause bot when transferring to human attendance.
 	_ = pauseConversationAutomationState(e.db, conversationID)

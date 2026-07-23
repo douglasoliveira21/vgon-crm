@@ -142,8 +142,8 @@ export default function TeamsPage() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className="mx-auto max-w-5xl p-4 sm:p-6">
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Times</h1>
           <p className="text-gray-500 mt-1">Organize seus atendentes em equipes com regras de distribuição</p>

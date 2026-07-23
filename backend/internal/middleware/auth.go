@@ -10,6 +10,7 @@ import (
 	"github.com/evocrm/backend/internal/config"
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -18,23 +19,22 @@ type Claims struct {
 	CompanyID string `json:"company_id"`
 	RoleSlug  string `json:"role_slug"`
 	Email     string `json:"email"`
+	SessionID string `json:"session_id"`
 	jwt.RegisteredClaims
 }
 
-func AuthMiddleware(cfg *config.Config) fiber.Handler {
+func AuthMiddleware(db *sql.DB, cfg *config.Config) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		tokenString := c.Cookies("crm_access")
 		authHeader := c.Get("Authorization")
-		if authHeader == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Authorization header required",
-			})
+		if tokenString == "" && authHeader != "" {
+			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+			if tokenString == authHeader {
+				tokenString = ""
+			}
 		}
-
-		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		if tokenString == authHeader {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Invalid authorization format",
-			})
+		if tokenString == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Authentication required"})
 		}
 
 		claims := &Claims{}
@@ -44,31 +44,41 @@ func AuthMiddleware(cfg *config.Config) fiber.Handler {
 			}
 			return []byte(cfg.JWTSecret), nil
 		})
-
-		if err != nil || !token.Valid {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error": "Invalid or expired token",
-			})
+		if err != nil || !token.Valid || claims.SessionID == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid or expired session"})
 		}
 
-		// Set user context
+		var active bool
+		err = db.QueryRow(`SELECT EXISTS (
+			SELECT 1 FROM refresh_tokens
+			WHERE session_id = $1 AND user_id = $2 AND revoked_at IS NULL AND expires_at > NOW()
+		)`, claims.SessionID, claims.UserID).Scan(&active)
+		if err != nil || !active {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Session revoked or expired"})
+		}
+
 		c.Locals("user_id", claims.UserID)
 		c.Locals("company_id", claims.CompanyID)
 		c.Locals("role_slug", claims.RoleSlug)
 		c.Locals("email", claims.Email)
-
+		c.Locals("session_id", claims.SessionID)
 		return c.Next()
 	}
 }
 
 // GenerateTokens creates access and refresh tokens
 func GenerateTokens(userID, companyID, roleSlug, email string, cfg *config.Config) (string, string, error) {
+	return GenerateTokensForSession(userID, companyID, roleSlug, email, uuid.New().String(), cfg)
+}
+
+func GenerateTokensForSession(userID, companyID, roleSlug, email, sessionID string, cfg *config.Config) (string, string, error) {
 	// Access token
 	claims := &Claims{
 		UserID:    userID,
 		CompanyID: companyID,
 		RoleSlug:  roleSlug,
 		Email:     email,
+		SessionID: sessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(cfg.JWTExpiration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -87,6 +97,7 @@ func GenerateTokens(userID, companyID, roleSlug, email string, cfg *config.Confi
 		CompanyID: companyID,
 		RoleSlug:  roleSlug,
 		Email:     email,
+		SessionID: sessionID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(cfg.JWTRefreshExpiry)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -148,15 +159,15 @@ func ActiveTenantMiddleware(db *sql.DB) fiber.Handler {
 // RBACMiddleware checks if user has required permission
 func RBACMiddleware(requiredPermissions ...string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		roleSlug := c.Locals("role_slug").(string)
-
-		// Super admin has all permissions
-		if roleSlug == "super-admin" || roleSlug == "admin" {
-			return c.Next()
+		roleSlug, _ := c.Locals("role_slug").(string)
+		for _, permission := range requiredPermissions {
+			if !RoleHasPermission(roleSlug, permission) {
+				return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+					"error":      "Você não tem permissão para acessar este recurso",
+					"permission": permission,
+				})
+			}
 		}
-
-		// For now, allow all authenticated users
-		// TODO: Implement granular permission checking from DB
 		return c.Next()
 	}
 }
@@ -171,6 +182,31 @@ func DenyRoles(deniedRoles ...string) fiber.Handler {
 		roleSlug, _ := c.Locals("role_slug").(string)
 		if _, blocked := denied[roleSlug]; blocked {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Você não tem permissão para acessar este recurso"})
+		}
+		return c.Next()
+	}
+}
+
+// CSRFMiddleware rejects state-changing cross-site browser requests. Public
+// webhooks and the embedded widget use their own authentication contracts.
+func CSRFMiddleware(frontendURL string) fiber.Handler {
+	allowedOrigin := strings.TrimRight(frontendURL, "/")
+	return func(c *fiber.Ctx) error {
+		if c.Method() == fiber.MethodGet || c.Method() == fiber.MethodHead ||
+			c.Method() == fiber.MethodOptions {
+			return c.Next()
+		}
+		path := c.Path()
+		if strings.HasPrefix(path, "/api/webhooks/") ||
+			strings.HasPrefix(path, "/api/widget/") {
+			return c.Next()
+		}
+		if strings.EqualFold(c.Get("Sec-Fetch-Site"), "cross-site") {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Cross-site request blocked"})
+		}
+		origin := strings.TrimRight(c.Get("Origin"), "/")
+		if origin != "" && origin != allowedOrigin {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Invalid request origin"})
 		}
 		return c.Next()
 	}
@@ -214,6 +250,45 @@ func ConversationAccess(db *sql.DB) fiber.Handler {
 		}
 		return c.Next()
 	}
+}
+
+func CanAccessConversation(db *sql.DB, conversationID, companyID, userID, roleSlug string) bool {
+	if conversationID == "" || companyID == "" || userID == "" {
+		return false
+	}
+	if roleSlug != "agent" && roleSlug != "supervisor" {
+		var allowed bool
+		_ = db.QueryRow(`SELECT EXISTS (
+			SELECT 1 FROM conversations WHERE id = $1 AND company_id = $2
+		)`, conversationID, companyID).Scan(&allowed)
+		return allowed
+	}
+
+	var allowed bool
+	if roleSlug == "supervisor" {
+		_ = db.QueryRow(`SELECT EXISTS (
+			SELECT 1 FROM conversations conv
+			WHERE conv.id = $1 AND conv.company_id = $2
+			  AND conv.team_id IS NOT NULL
+			  AND EXISTS (
+				SELECT 1 FROM team_users tu
+				WHERE tu.team_id = conv.team_id AND tu.user_id = $3
+				  AND COALESCE(tu.is_supervisor, false) = true
+			  )
+		)`, conversationID, companyID, userID).Scan(&allowed)
+	} else {
+		_ = db.QueryRow(`SELECT EXISTS (
+			SELECT 1 FROM conversations conv
+			WHERE conv.id = $1 AND conv.company_id = $2 AND (
+				conv.assigned_to = $3
+				OR (conv.assigned_to IS NULL AND conv.team_id IS NOT NULL AND EXISTS (
+					SELECT 1 FROM team_users tu WHERE tu.team_id = conv.team_id AND tu.user_id = $3
+				))
+				OR (conv.assigned_to IS NULL AND conv.team_id IS NULL)
+			)
+		)`, conversationID, companyID, userID).Scan(&allowed)
+	}
+	return allowed
 }
 
 // SupervisorTeamAccess allows supervisors to add members only to teams they supervise.

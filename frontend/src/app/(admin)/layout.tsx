@@ -12,6 +12,8 @@ import {
   ArrowLeft,
   Shield,
   LogOut,
+  Menu,
+  X,
 } from 'lucide-react'
 
 const adminNavItems = [
@@ -24,25 +26,32 @@ const adminNavItems = [
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
-  const { user, isAuthenticated, checkAuth, logout } = useAuthStore()
+  const { user, isAuthenticated, isLoading, checkAuth, logout } = useAuthStore()
   const [mounted, setMounted] = useState(false)
+  const [authRequested, setAuthRequested] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   useEffect(() => {
     setMounted(true)
-    if (!isAuthenticated) {
-      router.push('/login')
-      return
-    }
+    setAuthRequested(true)
     checkAuth()
-  }, [isAuthenticated, router, checkAuth])
+  }, [checkAuth])
 
   useEffect(() => {
-    if (mounted && user && !user.is_super_admin) {
-      router.push('/dashboard')
+    if (mounted && authRequested && !isLoading && !isAuthenticated) {
+      router.replace('/login')
+      return
     }
-  }, [mounted, user, router])
+    if (mounted && user && !user.is_super_admin) {
+      router.replace('/dashboard')
+    }
+  }, [authRequested, isAuthenticated, isLoading, mounted, user, router])
 
-  if (!mounted || !isAuthenticated || !user?.is_super_admin) {
+  useEffect(() => {
+    setMobileNavOpen(false)
+  }, [pathname])
+
+  if (!mounted || isLoading || !isAuthenticated || !user?.is_super_admin) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
@@ -52,10 +61,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   return (
     <div className="min-h-screen bg-gray-900">
+      <header className="fixed inset-x-0 top-0 z-40 flex h-14 items-center border-b border-gray-800 bg-gray-950 px-4 md:hidden">
+        <button onClick={() => setMobileNavOpen(true)} className="rounded-lg p-2 text-gray-300 hover:bg-gray-800" aria-label="Abrir menu">
+          <Menu className="h-5 w-5" />
+        </button>
+        <span className="ml-3 font-semibold text-white">Super Admin</span>
+      </header>
+      {mobileNavOpen && <button className="fixed inset-0 z-40 bg-black/60 md:hidden" onClick={() => setMobileNavOpen(false)} aria-label="Fechar menu" />}
       {/* Sidebar */}
-      <aside className="fixed left-0 top-0 h-full w-64 bg-gray-950 border-r border-gray-800 flex flex-col">
+      <aside className={`fixed left-0 top-0 z-50 flex h-full w-64 flex-col border-r border-gray-800 bg-gray-950 transition-transform md:translate-x-0 ${mobileNavOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         {/* Header */}
         <div className="p-6 border-b border-gray-800">
+          <button onClick={() => setMobileNavOpen(false)} className="absolute right-3 top-3 rounded-lg p-2 text-gray-400 hover:bg-gray-800 md:hidden" aria-label="Fechar menu"><X className="h-5 w-5" /></button>
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-indigo-600 flex items-center justify-center">
               <Shield className="w-5 h-5 text-white" />
@@ -109,7 +126,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       </aside>
 
       {/* Main content */}
-      <main className="ml-64 min-h-screen p-8">
+      <main className="min-h-screen min-w-0 px-4 pb-6 pt-20 sm:px-6 md:ml-64 md:p-8">
         {children}
       </main>
     </div>

@@ -152,9 +152,9 @@ export default function FunnelsPage() {
   const totalValue = deals.filter(d => d.status === 'open').reduce((sum, d) => sum + d.value, 0)
 
   return (
-    <div className="p-6 h-screen flex flex-col">
+    <div className="flex h-[calc(100dvh-3.5rem)] flex-col p-4 sm:p-6 md:h-screen">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4 flex-shrink-0">
+      <div className="mb-4 flex flex-shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Funil de Vendas</h1>
           <div className="flex items-center gap-4 mt-2">

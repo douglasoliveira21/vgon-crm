@@ -469,7 +469,7 @@ export default function FlowEditorPage() {
   }
 
   return (
-    <div className="automation-builder h-screen flex flex-col">
+    <div className="automation-builder flex h-[calc(100dvh-3.5rem)] min-w-0 flex-col md:h-screen">
       <style jsx global>{`
         .dark .automation-builder .bg-white {
           background-color: rgb(17 24 39) !important;
@@ -1417,7 +1417,7 @@ function BusinessHoursConfig({
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Inicio</label>
           <input

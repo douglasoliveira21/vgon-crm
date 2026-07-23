@@ -181,7 +181,7 @@ export default function TenantUsersPage() {
 
       {/* Stats */}
       {stats && (
-        <div className="grid grid-cols-4 gap-4 mb-8">
+        <div className="mb-8 grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-4 lg:gap-4">
           <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
             <div className="flex items-center gap-2 text-gray-400 mb-1">
               <Users className="w-4 h-4" /> <span className="text-xs">Usuários</span>
@@ -210,7 +210,7 @@ export default function TenantUsersPage() {
       )}
 
       {/* Users section */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-lg font-semibold text-white flex items-center gap-2">
           <Users className="w-5 h-5" /> Usuários da Empresa
         </h2>
@@ -223,7 +223,7 @@ export default function TenantUsersPage() {
       </div>
 
       {/* Users Table */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
+      <div className="overflow-x-auto rounded-xl border border-gray-700 bg-gray-800">
         {loading ? (
           <div className="flex items-center justify-center h-32">
             <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-500"></div>
@@ -231,7 +231,7 @@ export default function TenantUsersPage() {
         ) : users.length === 0 ? (
           <div className="p-8 text-center text-gray-400">Nenhum usuário encontrado</div>
         ) : (
-          <table className="w-full">
+          <table className="w-full min-w-[760px]">
             <thead>
               <tr className="border-b border-gray-700">
                 <th className="text-left px-6 py-3 text-xs font-medium text-gray-400 uppercase">Nome</th>

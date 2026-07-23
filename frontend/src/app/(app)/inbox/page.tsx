@@ -4,13 +4,10 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import {
-  MessageSquare,
-  Mail,
-  Globe,
-  Inbox as InboxIcon,
   ChevronRight,
 } from 'lucide-react'
 import { clsx } from 'clsx'
+import { ChannelIcon, channelSurface } from '@/components/channel-icon'
 
 interface Channel {
   id: string
@@ -47,25 +44,11 @@ export default function InboxPage() {
   }
 
   const getChannelIcon = (type: string) => {
-    switch (type) {
-      case 'whatsapp':
-        return <MessageSquare size={20} className="text-green-600" />
-      case 'email':
-        return <Mail size={20} className="text-blue-600" />
-      case 'webchat':
-        return <Globe size={20} className="text-purple-600" />
-      default:
-        return <InboxIcon size={20} className="text-gray-600" />
-    }
+    return <ChannelIcon type={type} size={20} />
   }
 
   const getChannelColor = (type: string) => {
-    switch (type) {
-      case 'whatsapp': return 'bg-green-100'
-      case 'email': return 'bg-blue-100'
-      case 'webchat': return 'bg-purple-100'
-      default: return 'bg-gray-100'
-    }
+    return channelSurface(type)
   }
 
   const getChannelLabel = (type: string) => {
@@ -78,8 +61,8 @@ export default function InboxPage() {
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className="mx-auto max-w-4xl p-4 sm:p-6">
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Caixa de Entrada</h1>
           <p className="text-gray-500 mt-1">Todas as suas conversas organizadas por canal</p>
@@ -93,7 +76,7 @@ export default function InboxPage() {
       >
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center">
-            <InboxIcon size={24} className="text-gray-600" />
+            <ChannelIcon type="inbox" size={24} />
           </div>
           <div>
             <h3 className="font-semibold text-gray-900">Todas as conversas</h3>
@@ -137,7 +120,7 @@ export default function InboxPage() {
 
       {channels.length === 0 && !loading && (
         <div className="card p-12 text-center mt-4">
-          <InboxIcon size={40} className="text-gray-300 mx-auto mb-4" />
+          <ChannelIcon type="inbox" size={40} className="mx-auto mb-4 text-gray-300" />
           <p className="text-gray-500 mb-4">Nenhum canal configurado</p>
           <button
             onClick={() => router.push('/channels')}
@@ -159,7 +142,7 @@ export default function InboxPage() {
             >
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                  <MessageSquare size={18} className="text-green-600" />
+                  <ChannelIcon type="whatsapp" size={18} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-900">WhatsApp</p>
@@ -174,7 +157,7 @@ export default function InboxPage() {
             >
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <Mail size={18} className="text-blue-600" />
+                  <ChannelIcon type="email" size={18} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-900">E-mail</p>
@@ -189,7 +172,7 @@ export default function InboxPage() {
             >
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                  <Globe size={18} className="text-purple-600" />
+                  <ChannelIcon type="webchat" size={18} />
                 </div>
                 <div>
                   <p className="text-sm font-medium text-gray-900">Chat do Site</p>

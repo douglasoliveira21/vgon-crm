@@ -337,7 +337,7 @@ func (s *MessageService) TransferConversation(conversationID, companyID string, 
 
 	if toTeamID != nil {
 		_, err := tx.Exec(`
-			UPDATE conversations SET team_id = $1, assigned_to = NULL, updated_at = NOW()
+			UPDATE conversations SET team_id = $1, updated_at = NOW()
 			WHERE id = $2 AND company_id = $3
 		`, *toTeamID, conversationID, companyID)
 		if err != nil {
@@ -346,9 +346,8 @@ func (s *MessageService) TransferConversation(conversationID, companyID string, 
 		shouldPauseAutomation = true
 
 		s.wsHub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
-			"id":          conversationID,
-			"team_id":     *toTeamID,
-			"assigned_to": nil,
+			"id":      conversationID,
+			"team_id": *toTeamID,
 		})
 	}
 

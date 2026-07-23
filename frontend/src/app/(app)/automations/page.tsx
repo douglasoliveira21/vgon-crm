@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
+import { ChannelIcon } from '@/components/channel-icon'
 import { Plus, Bot, Play, Pause, Edit2, Trash2, Zap, Ticket, Search, Building2, Link2, Eye, Copy } from 'lucide-react'
 
 interface BotFlow {
@@ -18,6 +19,9 @@ interface BotFlow {
   nodes: any[]
   edges: any[]
   created_at: string
+  lifecycle_status?: string
+  current_version?: number
+  published_version?: number
 }
 
 interface GLPIEntity {
@@ -45,6 +49,7 @@ export default function AutomationsPage() {
   const [flows, setFlows] = useState<BotFlow[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'bots' | 'glpi'>('bots')
+  const [inspectingFlow, setInspectingFlow] = useState<BotFlow | null>(null)
 
   // GLPI State
   const [glpiEntities, setGlpiEntities] = useState<GLPIEntity[]>([])
@@ -73,16 +78,11 @@ export default function AutomationsPage() {
 
   const toggleFlow = async (flow: BotFlow) => {
     try {
-      await api.put(`/bot-flows/${flow.id}`, {
-        ...flow,
-        is_active: !flow.is_active,
-      })
-      setFlows((prev) =>
-        prev.map((f) => (f.id === flow.id ? { ...f, is_active: !f.is_active } : f))
-      )
-      toast.success(flow.is_active ? 'Fluxo desativado' : 'Fluxo ativado')
-    } catch {
-      toast.error('Erro ao atualizar')
+      await api.post(`/bot-flows/${flow.id}/${flow.is_active ? 'unpublish' : 'publish'}`)
+      toast.success(flow.is_active ? 'Automação desativada' : 'Rascunho publicado')
+      await fetchFlows()
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao atualizar')
     }
   }
 
@@ -182,8 +182,8 @@ export default function AutomationsPage() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className="mx-auto max-w-5xl p-4 sm:p-6">
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Bots e Automações</h1>
           <p className="text-gray-500 dark:text-gray-400 mt-1">Crie fluxos automáticos e integre com GLPI</p>
@@ -204,7 +204,7 @@ export default function AutomationsPage() {
             activeTab === 'bots' ? 'border-primary-600 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
           }`}
         >
-          <span className="flex items-center gap-2"><Bot size={16} /> Bots e Fluxos</span>
+          <span className="flex items-center gap-2"><ChannelIcon type="automation" size={16} className="text-current" /> Bots e Fluxos</span>
         </button>
         <button
           onClick={() => { setActiveTab('glpi'); fetchGLPIEntities() }}
@@ -225,7 +225,7 @@ export default function AutomationsPage() {
                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
                   flow.is_active ? 'bg-green-100 dark:bg-green-500/15' : 'bg-gray-100 dark:bg-gray-800'
                 }`}>
-                  <Bot size={22} className={flow.is_active ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'} />
+                  <ChannelIcon type="automation" size={22} className={flow.is_active ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'} />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
@@ -250,11 +250,22 @@ export default function AutomationsPage() {
                     <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary-50 text-primary-700 dark:bg-primary-500/15 dark:text-primary-300">
                       Prioridade {flow.priority ?? 10}
                     </span>
+                    <span className="text-[11px] text-gray-500">
+                      Versão {flow.current_version || 1}
+                      {flow.published_version ? ` · publicada ${flow.published_version}` : ' · rascunho'}
+                    </span>
                   </div>
                 </div>
               </div>
 
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setInspectingFlow(flow)}
+                  className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg"
+                  title="Simulação, versões e execuções"
+                >
+                  <Eye size={18} />
+                </button>
                 <button
                   onClick={() => toggleFlow(flow)}
                   className={`p-2 rounded-lg transition-colors ${
@@ -293,7 +304,7 @@ export default function AutomationsPage() {
 
           {flows.length === 0 && !loading && (
             <div className="card p-12 text-center">
-              <Bot size={40} className="text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+              <ChannelIcon type="automation" size={40} className="mx-auto mb-4 text-gray-300 dark:text-gray-600" />
               <p className="text-gray-500 dark:text-gray-400 mb-2">Nenhuma automação criada</p>
               <p className="text-sm text-gray-400 dark:text-gray-500 mb-6 max-w-sm mx-auto">
                 Crie fluxos de bots para automatizar o atendimento, respostas e ações
@@ -304,6 +315,14 @@ export default function AutomationsPage() {
             </div>
           )}
         </div>
+      )}
+
+      {inspectingFlow && (
+        <AutomationInspectionModal
+          flow={inspectingFlow}
+          onClose={() => setInspectingFlow(null)}
+          onChanged={fetchFlows}
+        />
       )}
 
       {/* GLPI Tab */}
@@ -433,7 +452,7 @@ export default function AutomationsPage() {
                         placeholder="Descreva o problema ou solicitação..."
                       />
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
                         <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">Tipo</label>
                         <select
@@ -536,7 +555,7 @@ export default function AutomationsPage() {
                       <span className="text-xs font-medium text-gray-400 uppercase">Descrição</span>
                       <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{viewedTicket.content}</p>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <div>
                         <span className="text-xs font-medium text-gray-400 uppercase">Prioridade</span>
                         <p className="text-sm text-gray-900 dark:text-white">{priorityLabels[viewedTicket.priority] || viewedTicket.priority}</p>
@@ -559,6 +578,125 @@ export default function AutomationsPage() {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function AutomationInspectionModal({
+  flow,
+  onClose,
+  onChanged,
+}: {
+  flow: BotFlow
+  onClose: () => void
+  onChanged: () => Promise<void>
+}) {
+  const [loading, setLoading] = useState(true)
+  const [simulation, setSimulation] = useState<any>(null)
+  const [versions, setVersions] = useState<Array<any>>([])
+  const [executions, setExecutions] = useState<Array<any>>([])
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const [simulationResponse, versionResponse, executionResponse] = await Promise.all([
+        api.post(`/bot-flows/${flow.id}/simulate`),
+        api.get(`/bot-flows/${flow.id}/versions`),
+        api.get(`/bot-flows/${flow.id}/executions`),
+      ])
+      setSimulation(simulationResponse.data)
+      setVersions(versionResponse.data.versions || [])
+      setExecutions(executionResponse.data.executions || [])
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao analisar automação')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    load()
+  }, [flow.id])
+
+  const rollback = async (version: number) => {
+    if (!confirm(`Restaurar a versão ${version} como novo rascunho?`)) return
+    try {
+      await api.post(`/bot-flows/${flow.id}/versions/${version}/rollback`)
+      toast.success('Versão restaurada como rascunho')
+      await Promise.all([load(), onChanged()])
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao restaurar versão')
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-gray-900">
+        <div className="mb-5 flex items-start justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Diagnóstico: {flow.name}</h3>
+            <p className="text-sm text-gray-500">Simulação sem efeitos, versões e histórico por bloco.</p>
+          </div>
+          <button type="button" onClick={onClose} className="text-2xl text-gray-400 hover:text-gray-700">&times;</button>
+        </div>
+        {loading ? (
+          <p className="py-10 text-center text-sm text-gray-500">Analisando automação...</p>
+        ) : (
+          <div className="space-y-5">
+            <section className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+              <div className="mb-3 flex items-center justify-between">
+                <h4 className="font-medium text-gray-900 dark:text-white">Simulação</h4>
+                <span className={`badge ${simulation?.valid ? 'badge-green' : 'badge-red'}`}>{simulation?.valid ? 'Fluxo válido' : 'Requer correção'}</span>
+              </div>
+              {(simulation?.errors || []).map((error: string) => <p key={error} className="mb-1 text-sm text-red-600">{error}</p>)}
+              <div className="flex flex-wrap gap-2">
+                {(simulation?.trace || []).map((step: any) => (
+                  <span key={`${step.step}-${step.node_id}`} className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                    {step.step}. {step.type || step.node_id}
+                  </span>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+              <h4 className="mb-3 font-medium text-gray-900 dark:text-white">Versões</h4>
+              <div className="space-y-2">
+                {versions.map((version) => (
+                  <div key={version.version} className="flex items-center gap-3 rounded-md bg-gray-50 p-3 text-sm dark:bg-gray-800">
+                    <strong className="text-gray-900 dark:text-white">v{version.version}</strong>
+                    <span className="flex-1 text-gray-500">{new Date(version.created_at).toLocaleString('pt-BR')} · {version.created_by}</span>
+                    <button type="button" onClick={() => rollback(version.version)} className="btn-secondary py-1 text-xs">Restaurar</button>
+                  </div>
+                ))}
+                {versions.length === 0 && <p className="text-sm text-gray-500">Salve o fluxo para criar a primeira versão.</p>}
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+              <h4 className="mb-3 font-medium text-gray-900 dark:text-white">Execuções recentes</h4>
+              <div className="space-y-3">
+                {executions.map((execution) => (
+                  <div key={execution.id} className="rounded-md bg-gray-50 p-3 dark:bg-gray-800">
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className={`badge ${execution.status === 'completed' ? 'badge-green' : execution.status === 'error' ? 'badge-red' : 'badge-yellow'}`}>{execution.status}</span>
+                      <span className="font-medium text-gray-900 dark:text-white">{execution.contact || execution.subject || 'Conversa'}</span>
+                      <span className="ml-auto text-xs text-gray-400">{new Date(execution.started_at).toLocaleString('pt-BR')}</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {(execution.events || []).map((event: any, index: number) => (
+                        <span key={`${event.created_at}-${index}`} title={event.error || event.event_type} className={`rounded px-2 py-1 text-[11px] ${event.status === 'error' ? 'bg-red-100 text-red-700' : 'bg-white text-gray-600 dark:bg-gray-900 dark:text-gray-300'}`}>
+                          {event.node_id || 'fluxo'}: {event.status}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {executions.length === 0 && <p className="text-sm text-gray-500">Nenhuma execução registrada.</p>}
+              </div>
+            </section>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -9,6 +10,149 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
+
+func GetDuplicateContacts(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		rows, err := svc.DB.Query(`
+			WITH normalized AS (
+				SELECT id, name, phone, email,
+					NULLIF(regexp_replace(COALESCE(phone, ''), '\D', '', 'g'), '') AS normalized_phone,
+					NULLIF(LOWER(TRIM(COALESCE(email, ''))), '') AS normalized_email
+				FROM contacts WHERE company_id = $1
+			), duplicate_keys AS (
+				SELECT normalized_phone, normalized_email
+				FROM normalized
+				GROUP BY normalized_phone, normalized_email
+				HAVING COUNT(*) FILTER (WHERE normalized_phone IS NOT NULL OR normalized_email IS NOT NULL) > 1
+			)
+			SELECT n.id, COALESCE(n.name, ''), COALESCE(n.phone, ''), COALESCE(n.email, ''),
+			       COALESCE(n.normalized_phone, ''), COALESCE(n.normalized_email, '')
+			FROM normalized n
+			WHERE EXISTS (
+				SELECT 1 FROM normalized other
+				WHERE other.id <> n.id AND (
+					(n.normalized_phone IS NOT NULL AND other.normalized_phone = n.normalized_phone)
+					OR (n.normalized_email IS NOT NULL AND other.normalized_email = n.normalized_email)
+				)
+			)
+			ORDER BY COALESCE(n.normalized_phone, n.normalized_email), n.id
+		`, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Erro ao detectar contatos duplicados"})
+		}
+		defer rows.Close()
+		items := []fiber.Map{}
+		for rows.Next() {
+			var id, name, phone, email, normalizedPhone, normalizedEmail string
+			if rows.Scan(&id, &name, &phone, &email, &normalizedPhone, &normalizedEmail) == nil {
+				items = append(items, fiber.Map{
+					"id": id, "name": name, "phone": phone, "email": email,
+					"normalized_phone": normalizedPhone, "normalized_email": normalizedEmail,
+				})
+			}
+		}
+		return c.JSON(fiber.Map{"duplicates": items})
+	}
+}
+
+func MergeContacts(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
+		primaryID := c.Params("id")
+		var body struct {
+			DuplicateID string `json:"duplicate_id"`
+		}
+		if c.BodyParser(&body) != nil || body.DuplicateID == "" || body.DuplicateID == primaryID {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Selecione dois contatos diferentes"})
+		}
+		tx, err := svc.DB.Begin()
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Erro ao iniciar mesclagem"})
+		}
+		defer tx.Rollback()
+
+		var snapshotRaw []byte
+		err = tx.QueryRow(`
+			SELECT to_jsonb(c) FROM contacts c
+			WHERE c.id = $1 AND c.company_id = $2
+			FOR UPDATE
+		`, body.DuplicateID, companyID).Scan(&snapshotRaw)
+		if err != nil {
+			return c.Status(404).JSON(fiber.Map{"error": "Contato duplicado não encontrado"})
+		}
+		var lockedPrimaryID string
+		if tx.QueryRow(`SELECT id FROM contacts WHERE id = $1 AND company_id = $2 FOR UPDATE`,
+			primaryID, companyID).Scan(&lockedPrimaryID) != nil {
+			return c.Status(404).JSON(fiber.Map{"error": "Contato principal não encontrado"})
+		}
+		var snapshotFields map[string]interface{}
+		_ = json.Unmarshal(snapshotRaw, &snapshotFields)
+		sourcePhone, _ := snapshotFields["phone"].(string)
+		_, _ = tx.Exec(`UPDATE contacts SET phone = NULL WHERE id = $1 AND company_id = $2`, body.DuplicateID, companyID)
+
+		_, err = tx.Exec(`
+			UPDATE contacts target SET
+				name = COALESCE(NULLIF(target.name, ''), source.name),
+				phone = COALESCE(NULLIF(target.phone, ''), NULLIF($4, '')),
+				email = COALESCE(NULLIF(target.email, ''), source.email),
+				avatar_url = COALESCE(target.avatar_url, source.avatar_url),
+				notes = CONCAT_WS(E'\n', NULLIF(target.notes, ''), NULLIF(source.notes, '')),
+				custom_fields = COALESCE(source.custom_fields, '{}'::jsonb) || COALESCE(target.custom_fields, '{}'::jsonb),
+				updated_at = NOW()
+			FROM contacts source
+			WHERE target.id = $1 AND source.id = $2
+			  AND target.company_id = $3 AND source.company_id = $3
+		`, primaryID, body.DuplicateID, companyID, sourcePhone)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Erro ao combinar os dados"})
+		}
+		mergeStatements := []struct {
+			query string
+			args  []interface{}
+		}{
+			{`INSERT INTO contact_tags(contact_id, tag_id)
+			 SELECT $1, tag_id FROM contact_tags WHERE contact_id = $2 ON CONFLICT DO NOTHING`, []interface{}{primaryID, body.DuplicateID}},
+			{`UPDATE conversations SET contact_id = $1 WHERE contact_id = $2 AND company_id = $3`, []interface{}{primaryID, body.DuplicateID, companyID}},
+			{`UPDATE deals SET contact_id = $1 WHERE contact_id = $2 AND company_id = $3`, []interface{}{primaryID, body.DuplicateID, companyID}},
+			{`UPDATE bot_executions SET contact_id = $1 WHERE contact_id = $2`, []interface{}{primaryID, body.DuplicateID}},
+			{`DELETE FROM campaign_contacts duplicate USING campaign_contacts existing
+			 WHERE duplicate.contact_id = $2 AND existing.contact_id = $1
+			   AND duplicate.campaign_id = existing.campaign_id`, []interface{}{primaryID, body.DuplicateID}},
+			{`UPDATE campaign_contacts SET contact_id = $1 WHERE contact_id = $2`, []interface{}{primaryID, body.DuplicateID}},
+			{`UPDATE contact_consents SET contact_id = $1 WHERE contact_id = $2`, []interface{}{primaryID, body.DuplicateID}},
+			{`DELETE FROM contact_channel_consents duplicate USING contact_channel_consents existing
+			 WHERE duplicate.contact_id = $2 AND existing.contact_id = $1
+			   AND duplicate.channel = existing.channel AND duplicate.purpose = existing.purpose`, []interface{}{primaryID, body.DuplicateID}},
+			{`UPDATE contact_channel_consents SET contact_id = $1 WHERE contact_id = $2`, []interface{}{primaryID, body.DuplicateID}},
+			{`UPDATE campaign_delivery_events SET contact_id = $1 WHERE contact_id = $2`, []interface{}{primaryID, body.DuplicateID}},
+			{`UPDATE data_subject_requests SET contact_id = $1 WHERE contact_id = $2`, []interface{}{primaryID, body.DuplicateID}},
+		}
+		for _, statement := range mergeStatements {
+			if _, err := tx.Exec(statement.query, statement.args...); err != nil {
+				return c.Status(500).JSON(fiber.Map{"error": "Erro ao transferir o histórico do contato"})
+			}
+		}
+		snapshot := json.RawMessage(snapshotRaw)
+		_, err = tx.Exec(`
+			INSERT INTO contact_merge_history
+				(id, company_id, primary_contact_id, merged_contact_id, merged_snapshot, merged_by)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`, uuid.New().String(), companyID, primaryID, body.DuplicateID, snapshot, userID)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Erro ao registrar histórico da mesclagem"})
+		}
+		if _, err = tx.Exec(`DELETE FROM contacts WHERE id = $1 AND company_id = $2`, body.DuplicateID, companyID); err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Erro ao finalizar mesclagem"})
+		}
+		if err = tx.Commit(); err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Erro ao confirmar mesclagem"})
+		}
+		logAuditEvent(svc.DB, c, "contact.merge", "contact", primaryID, fiber.Map{"merged_contact_id": body.DuplicateID})
+		return c.JSON(fiber.Map{"message": "Contatos mesclados", "contact_id": primaryID})
+	}
+}
 
 func GetContacts(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
@@ -223,13 +367,13 @@ func ExportContactData(svc *services.Container) fiber.Handler {
 		logAuditEvent(svc.DB, c, "contact.export", "contact", contactID, nil)
 		c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=contato-%s-lgpd.json", contactID))
 		return c.JSON(fiber.Map{
-			"exported_at":    time.Now(),
-			"contact":        contact,
-			"consents":       consents,
-			"audit":          audit,
-			"conversations":  conversations,
-			"messages":       messages,
-			"legal_notice":   "Exportação de dados pessoais solicitada no CRM.",
+			"exported_at":     time.Now(),
+			"contact":         contact,
+			"consents":        consents,
+			"audit":           audit,
+			"conversations":   conversations,
+			"messages":        messages,
+			"legal_notice":    "Exportação de dados pessoais solicitada no CRM.",
 			"data_subject_id": contactID,
 		})
 	}

@@ -35,6 +35,7 @@ type Config struct {
 	StorageSecretKey string
 	StorageBucket    string
 	StorageUseSSL    bool
+	ClamAVAddr       string
 
 	// Rate Limit
 	RateLimitMax    int
@@ -53,11 +54,12 @@ type Config struct {
 	OAuthRedirectBaseURL  string
 
 	// SMTP
-	SMTPHost string
-	SMTPPort string
-	SMTPUser string
-	SMTPPass string
-	SMTPFrom string
+	SMTPHost           string
+	SMTPPort           string
+	SMTPUser           string
+	SMTPPass           string
+	SMTPFrom           string
+	EmailWebhookSecret string
 }
 
 func Load() *Config {
@@ -79,6 +81,7 @@ func Load() *Config {
 		StorageSecretKey:      getEnv("STORAGE_SECRET_KEY", "minioadmin"),
 		StorageBucket:         getEnv("STORAGE_BUCKET", "evocrm"),
 		StorageUseSSL:         getEnv("STORAGE_USE_SSL", "false") == "true",
+		ClamAVAddr:            getEnv("CLAMAV_ADDR", ""),
 		RateLimitMax:          parseInt(getEnv("RATE_LIMIT_MAX", "1200"), 1200),
 		RateLimitWindow:       parseDuration(getEnv("RATE_LIMIT_WINDOW", "1m")),
 		GLPIBaseURL:           getEnv("GLPI_BASE_URL", ""),
@@ -94,6 +97,7 @@ func Load() *Config {
 		SMTPUser:              getEnv("SMTP_USER", ""),
 		SMTPPass:              getEnv("SMTP_PASS", ""),
 		SMTPFrom:              getEnv("SMTP_FROM", getEnv("SMTP_USER", "")),
+		EmailWebhookSecret:    getEnv("EMAIL_WEBHOOK_SECRET", ""),
 	}
 }
 

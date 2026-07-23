@@ -106,6 +106,19 @@ FRONTEND_URL=http://localhost:3000
 - ✅ Widget para site
 - ✅ Recados internos
 
+## Operação e webhooks
+
+- Disponibilidade: `GET /health/live`
+- Prontidão e dependências: `GET /health/ready`
+- O provedor de e-mail deve enviar eventos para `POST /api/webhooks/email/events`
+  usando o cabeçalho `X-Webhook-Secret` com o valor de `EMAIL_WEBHOOK_SECRET`.
+- Eventos aceitos: `sent`, `delivered`, `opened`, `clicked`, `bounced` e
+  `complained`. O corpo deve informar `company_id`, `email`, `event` e
+  `provider_event_id`; `campaign_id`, `contact_id` e `details` são opcionais.
+- Bounce e reclamação adicionam o e-mail automaticamente à lista de supressão.
+- Jobs que esgotam as tentativas aparecem em Operações e Segurança para
+  diagnóstico e reenvio manual.
+
 ## Licença
 
 Proprietário - Todos os direitos reservados.

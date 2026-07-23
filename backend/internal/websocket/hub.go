@@ -8,13 +8,13 @@ import (
 
 // Message types for WebSocket communication
 const (
-	EventNewMessage       = "new_message"
-	EventMessageStatus    = "message_status"
-	EventConversationNew  = "conversation_new"
+	EventNewMessage         = "new_message"
+	EventMessageStatus      = "message_status"
+	EventConversationNew    = "conversation_new"
 	EventConversationUpdate = "conversation_update"
-	EventTyping           = "typing"
-	EventPresence         = "presence"
-	EventNotification     = "notification"
+	EventTyping             = "typing"
+	EventPresence           = "presence"
+	EventNotification       = "notification"
 )
 
 // WSMessage represents a WebSocket message
@@ -31,6 +31,7 @@ type Client struct {
 	ID        string
 	UserID    string
 	CompanyID string
+	RoleSlug  string
 	Send      chan []byte
 	Hub       *Hub
 	mu        sync.Mutex
@@ -44,6 +45,13 @@ type Hub struct {
 	broadcast  chan *WSMessage
 	rooms      map[string]map[string]*Client // room -> clientID -> client
 	mu         sync.RWMutex
+	authorize  func(*Client, *WSMessage) bool
+}
+
+func (h *Hub) SetAuthorizer(authorize func(*Client, *WSMessage) bool) {
+	h.mu.Lock()
+	h.authorize = authorize
+	h.mu.Unlock()
 }
 
 // NewHub creates a new WebSocket hub
@@ -227,6 +235,9 @@ func (h *Hub) broadcastMessage(msg *WSMessage) {
 	if msg.Room != "" {
 		if clients, ok := h.rooms[msg.Room]; ok {
 			for _, client := range clients {
+				if h.authorize != nil && !h.authorize(client, msg) {
+					continue
+				}
 				select {
 				case client.Send <- data:
 				default:

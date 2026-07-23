@@ -38,6 +38,7 @@ type User struct {
 	IsOnline           bool       `json:"is_online"`
 	AvailabilityStatus string     `json:"availability_status"`
 	IsSuperAdmin       bool       `json:"is_super_admin"`
+	TwoFactorEnabled   bool       `json:"two_factor_enabled"`
 	LastSeenAt         *time.Time `json:"last_seen_at,omitempty"`
 	RoleName           string     `json:"role_name,omitempty"`
 	RoleSlug           string     `json:"role_slug,omitempty"`
@@ -88,56 +89,56 @@ type Channel struct {
 
 // WhatsAppInstance represents an Evolution API instance
 type WhatsAppInstance struct {
-	ID           string     `json:"id"`
-	CompanyID    string     `json:"company_id"`
-	ChannelID    *string    `json:"channel_id,omitempty"`
-	InstanceName string     `json:"instance_name"`
-	InstanceID   *string    `json:"instance_id,omitempty"`
-	Token        *string    `json:"token,omitempty"`
-	Status       string     `json:"status"`
-	QRCode       *string    `json:"qrcode,omitempty"`
-	PhoneNumber  *string    `json:"phone_number,omitempty"`
-	WebhookURL   *string    `json:"webhook_url,omitempty"`
-	ConnectedAt  *time.Time `json:"connected_at,omitempty"`
-	LastStatusCheckAt *time.Time `json:"last_status_check_at,omitempty"`
-	LastStatusError   *string    `json:"last_status_error,omitempty"`
+	ID                    string     `json:"id"`
+	CompanyID             string     `json:"company_id"`
+	ChannelID             *string    `json:"channel_id,omitempty"`
+	InstanceName          string     `json:"instance_name"`
+	InstanceID            *string    `json:"instance_id,omitempty"`
+	Token                 *string    `json:"token,omitempty"`
+	Status                string     `json:"status"`
+	QRCode                *string    `json:"qrcode,omitempty"`
+	PhoneNumber           *string    `json:"phone_number,omitempty"`
+	WebhookURL            *string    `json:"webhook_url,omitempty"`
+	ConnectedAt           *time.Time `json:"connected_at,omitempty"`
+	LastStatusCheckAt     *time.Time `json:"last_status_check_at,omitempty"`
+	LastStatusError       *string    `json:"last_status_error,omitempty"`
 	DisconnectedAlertedAt *time.Time `json:"disconnected_alerted_at,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
 // Contact represents a customer contact
 type Contact struct {
-	ID                  string    `json:"id"`
-	CompanyID           string    `json:"company_id"`
-	Name                *string   `json:"name,omitempty"`
-	Phone               *string   `json:"phone,omitempty"`
-	Email               *string   `json:"email,omitempty"`
-	CustomerCompanyID   *string   `json:"customer_company_id,omitempty"`
-	CustomerCompanyName *string   `json:"customer_company_name,omitempty"`
-	CompanyName         *string   `json:"company_name,omitempty"`
-	Position            *string   `json:"position,omitempty"`
-	City                *string   `json:"city,omitempty"`
-	State               *string   `json:"state,omitempty"`
-	Origin              *string   `json:"origin,omitempty"`
-	AvatarURL           *string   `json:"avatar_url,omitempty"`
-	Notes               *string   `json:"notes,omitempty"`
-	AssignedTo          *string   `json:"assigned_to,omitempty"`
-	IsOptedOut          bool      `json:"is_opted_out"`
-	IsBlocked           bool      `json:"is_blocked"`
+	ID                  string     `json:"id"`
+	CompanyID           string     `json:"company_id"`
+	Name                *string    `json:"name,omitempty"`
+	Phone               *string    `json:"phone,omitempty"`
+	Email               *string    `json:"email,omitempty"`
+	CustomerCompanyID   *string    `json:"customer_company_id,omitempty"`
+	CustomerCompanyName *string    `json:"customer_company_name,omitempty"`
+	CompanyName         *string    `json:"company_name,omitempty"`
+	Position            *string    `json:"position,omitempty"`
+	City                *string    `json:"city,omitempty"`
+	State               *string    `json:"state,omitempty"`
+	Origin              *string    `json:"origin,omitempty"`
+	AvatarURL           *string    `json:"avatar_url,omitempty"`
+	Notes               *string    `json:"notes,omitempty"`
+	AssignedTo          *string    `json:"assigned_to,omitempty"`
+	IsOptedOut          bool       `json:"is_opted_out"`
+	IsBlocked           bool       `json:"is_blocked"`
 	BlockedAt           *time.Time `json:"blocked_at,omitempty"`
-	BlockedBy           *string   `json:"blocked_by,omitempty"`
+	BlockedBy           *string    `json:"blocked_by,omitempty"`
 	OptedOutAt          *time.Time `json:"opted_out_at,omitempty"`
-	OptOutReason        *string   `json:"opt_out_reason,omitempty"`
-	OptOutSource        *string   `json:"opt_out_source,omitempty"`
-	ConsentStatus       *string   `json:"consent_status,omitempty"`
-	ConsentSource       *string   `json:"consent_source,omitempty"`
-	ConsentText         *string   `json:"consent_text,omitempty"`
+	OptOutReason        *string    `json:"opt_out_reason,omitempty"`
+	OptOutSource        *string    `json:"opt_out_source,omitempty"`
+	ConsentStatus       *string    `json:"consent_status,omitempty"`
+	ConsentSource       *string    `json:"consent_source,omitempty"`
+	ConsentText         *string    `json:"consent_text,omitempty"`
 	ConsentGivenAt      *time.Time `json:"consent_given_at,omitempty"`
 	ConsentRevokedAt    *time.Time `json:"consent_revoked_at,omitempty"`
-	Tags                []Tag     `json:"tags,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	Tags                []Tag      `json:"tags,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
 // Tag represents a label/tag

@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { Plus, Send, Pause, Play, Users, Check, Eye, X, Trash2, AlertTriangle, FileText, Image, Video, Music, ArrowUp, ArrowDown, Mail } from 'lucide-react'
+import { useAuthStore } from '@/store/auth'
+import { Plus, Send, Pause, Play, Users, Check, Eye, X, Trash2, AlertTriangle, FileText, Image, Video, Music, ArrowUp, ArrowDown, Mail, CalendarClock, ShieldCheck } from 'lucide-react'
+import { ChannelIcon } from '@/components/channel-icon'
 
 type CampaignContentType = 'text' | 'image' | 'video' | 'audio'
 
@@ -33,10 +35,14 @@ interface Campaign {
   replied_count: number
   failed_count: number
   scheduled_at?: string
+  timezone?: string
+  approval_status?: string
+  frequency_cap_days?: number
   created_at: string
 }
 
 export default function CampaignsPage() {
+  const { user } = useAuthStore()
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -100,6 +106,24 @@ export default function CampaignsPage() {
     }
   }
 
+  const approveCampaign = async (campaign: Campaign) => {
+    try {
+      await api.post(`/campaigns/${campaign.id}/approve`)
+      if (campaign.scheduled_at && new Date(campaign.scheduled_at).getTime() > Date.now()) {
+        await api.post(`/campaigns/${campaign.id}/schedule`, {
+          scheduled_at: campaign.scheduled_at,
+          timezone: campaign.timezone || 'America/Sao_Paulo',
+        })
+        toast.success('Campanha aprovada e agendada')
+      } else {
+        toast.success('Campanha aprovada para envio')
+      }
+      fetchCampaigns()
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao aprovar campanha')
+    }
+  }
+
   const getStatusBadge = (status: string) => {
     const map: Record<string, { label: string; class: string }> = {
       draft: { label: 'Rascunho', class: 'badge-gray' },
@@ -113,15 +137,15 @@ export default function CampaignsPage() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className="mx-auto max-w-6xl p-4 sm:p-6">
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Marketing em Massa</h1>
           <p className="text-gray-500 mt-1">Envie campanhas para seus contatos via WhatsApp</p>
         </div>
         <div className="flex items-center gap-2">
           <Link href="/campaigns/email" className="btn-secondary">
-            <Mail size={18} />
+            <ChannelIcon type="email" size={18} />
             Campanha por e-mail
           </Link>
           <button onClick={() => { setEditingCampaign(null); setShowForm(true) }} className="btn-primary">
@@ -133,7 +157,7 @@ export default function CampaignsPage() {
 
       {/* Stats */}
       {campaigns.length > 0 && (
-        <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="mb-6 grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-4 lg:gap-4">
           <div className="card p-4">
             <p className="text-xs text-gray-400">Total enviadas</p>
             <p className="text-xl font-bold text-gray-900">{campaigns.reduce((s, c) => s + c.sent_count, 0)}</p>
@@ -168,12 +192,16 @@ export default function CampaignsPage() {
                 <div className="flex items-center gap-3">
                   <h3 className="font-semibold text-gray-900">{campaign.name}</h3>
                   {getStatusBadge(campaign.status)}
+                  <span className={`badge ${campaign.approval_status === 'approved' ? 'badge-green' : 'badge-yellow'}`}>
+                    {campaign.approval_status === 'approved' ? 'Aprovada' : 'Aguardando aprovação'}
+                  </span>
                 </div>
                 <p className="text-sm text-gray-500 mt-1 flex items-center gap-4">
                   <span className="flex items-center gap-1"><Users size={14} /> {campaign.total_contacts} contatos</span>
                   <span className="flex items-center gap-1"><FileText size={14} /> {campaign.content_items?.length || 1} conteúdos</span>
                   <span className="flex items-center gap-1"><Send size={14} /> {campaign.sent_count} enviadas</span>
                   <span className="flex items-center gap-1"><Check size={14} /> {campaign.delivered_count} entregues</span>
+                  {campaign.scheduled_at && <span className="flex items-center gap-1"><CalendarClock size={14} /> {new Date(campaign.scheduled_at).toLocaleString('pt-BR')}</span>}
                   <span className="flex items-center gap-1"><Eye size={14} /> {campaign.read_count} lidas</span>
                   {campaign.failed_count > 0 && (
                     <span className="flex items-center gap-1 text-red-600"><AlertTriangle size={14} /> {campaign.failed_count} falhas</span>
@@ -182,7 +210,15 @@ export default function CampaignsPage() {
               </div>
 
               <div className="flex items-center gap-2">
-                {campaign.status === 'draft' && (
+                {(campaign.status === 'draft' || campaign.status === 'paused') && campaign.approval_status !== 'approved' && user?.role_slug !== 'marketing' && (
+                  <button onClick={() => approveCampaign(campaign)} className="btn-primary text-sm py-2">
+                    <ShieldCheck size={14} /> {campaign.scheduled_at ? 'Aprovar e agendar' : 'Aprovar'}
+                  </button>
+                )}
+                {(campaign.status === 'draft' || campaign.status === 'paused') && campaign.approval_status !== 'approved' && user?.role_slug === 'marketing' && (
+                  <span className="text-xs text-amber-600">Aguardando aprovação do administrador</span>
+                )}
+                {campaign.status === 'draft' && campaign.approval_status === 'approved' && (
                   <button onClick={() => startCampaign(campaign.id)} className="btn-primary text-sm py-2">
                     <Play size={14} /> Iniciar
                   </button>
@@ -192,7 +228,7 @@ export default function CampaignsPage() {
                     <Pause size={14} /> Pausar
                   </button>
                 )}
-                {campaign.status === 'paused' && (
+                {campaign.status === 'paused' && campaign.approval_status === 'approved' && (
                   <button onClick={() => startCampaign(campaign.id)} className="btn-primary text-sm py-2">
                     <Play size={14} /> Retomar
                   </button>
@@ -264,6 +300,10 @@ function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campa
     initialItems.map((item, index) => ({ ...item, client_id: `${Date.now()}-${index}` }))
   )
   const [sendSpeed, setSendSpeed] = useState(campaign?.send_speed || 30)
+  const [frequencyCapDays, setFrequencyCapDays] = useState(campaign?.frequency_cap_days || 0)
+  const [scheduledAt, setScheduledAt] = useState(
+    campaign?.scheduled_at ? new Date(campaign.scheduled_at).toISOString().slice(0, 16) : ''
+  )
   const [targetType, setTargetType] = useState('all') // all, tag, selected
   const [filterTag, setFilterTag] = useState('')
   const [contactSearch, setContactSearch] = useState('')
@@ -384,6 +424,9 @@ function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campa
         media_url: firstItem.media_url,
         content_items: validItems.map(({ client_id, ...item }) => item),
         send_speed: sendSpeed,
+        frequency_cap_days: frequencyCapDays,
+        scheduled_at: !campaign && scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo',
         filter_tag: targetType === 'tag' ? filterTag : undefined,
         contact_ids: targetType === 'selected' ? selectedContacts.map((contact) => contact.id) : undefined,
         total_contacts: targetType === 'all' ? allContacts.length : selectedContacts.length,
@@ -423,6 +466,32 @@ function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campa
             />
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Agendar envio (opcional)</label>
+              <input
+                type="datetime-local"
+                value={scheduledAt}
+                min={new Date(Date.now() + 60000).toISOString().slice(0, 16)}
+                onChange={(event) => setScheduledAt(event.target.value)}
+                disabled={isEditing}
+                className="input"
+              />
+              <p className="mt-1 text-xs text-gray-400">O envio só começa após aprovação.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Limite de frequência</label>
+              <select value={frequencyCapDays} onChange={(event) => setFrequencyCapDays(Number(event.target.value))} className="input">
+                <option value={0}>Sem limite</option>
+                <option value={1}>Não repetir em 1 dia</option>
+                <option value={7}>Não repetir em 7 dias</option>
+                <option value={15}>Não repetir em 15 dias</option>
+                <option value={30}>Não repetir em 30 dias</option>
+              </select>
+              <p className="mt-1 text-xs text-gray-400">Evita excesso de mensagens ao mesmo contato.</p>
+            </div>
+          </div>
+
           <div>
             <div className="flex items-center justify-between mb-2">
               <div>
@@ -430,7 +499,7 @@ function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campa
                 <p className="text-xs text-gray-400">Monte a ordem exata do que o contato vai receber.</p>
               </div>
             </div>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <button type="button" onClick={() => addContentItem('text')} className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"><FileText size={14} className="inline mr-1" /> Texto</button>
               <button type="button" onClick={() => addContentItem('image')} className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"><Image size={14} className="inline mr-1" /> Imagem</button>
               <button type="button" onClick={() => addContentItem('video')} className="rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50"><Video size={14} className="inline mr-1" /> Vídeo</button>

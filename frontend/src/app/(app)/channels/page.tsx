@@ -13,10 +13,10 @@ import {
   Trash2,
   RefreshCw,
   Power,
-  MessageCircle,
   X,
-  Mail,
 } from 'lucide-react'
+import { ChannelIcon } from '@/components/channel-icon'
+import { SafeImage } from '@/components/safe-image'
 
 const QR_CODE_TTL_SECONDS = 45
 
@@ -362,8 +362,8 @@ export default function ChannelsPage() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="mx-auto max-w-5xl p-4 sm:p-6">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Canais & Integracoes</h1>
           <p className="text-gray-500 mt-1">Gerencie suas conexoes de atendimento</p>
@@ -388,7 +388,7 @@ export default function ChannelsPage() {
             activeTab === 'whatsapp' ? 'bg-green-100 text-green-700' : 'text-gray-500 hover:bg-gray-100'
           }`}
         >
-          <MessageCircle size={16} /> WhatsApp
+          <ChannelIcon type="whatsapp" size={16} /> WhatsApp
         </button>
         <button
           onClick={() => setActiveTab('email')}
@@ -396,7 +396,7 @@ export default function ChannelsPage() {
             activeTab === 'email' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'
           }`}
         >
-          <Mail size={16} /> E-mail
+          <ChannelIcon type="email" size={16} /> E-mail
         </button>
       </div>
 
@@ -415,7 +415,12 @@ export default function ChannelsPage() {
                 Atualizacao automatica em {qrSecondsLeft}s. O QR Code expira rapidamente por seguranca.
               </p>
               <div className="inline-block p-4 bg-white rounded-2xl shadow-lg border border-gray-100">
-                <img src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`} alt="QR Code WhatsApp" className="w-64 h-64" />
+                <SafeImage
+                  src={qrCode.startsWith('data:') ? qrCode : `data:image/png;base64,${qrCode}`}
+                  alt="QR Code para conectar o WhatsApp"
+                  className="h-64 w-64"
+                  fallback={<div className="flex h-64 w-64 flex-col items-center justify-center rounded-lg bg-gray-100 px-6 text-center text-sm text-gray-500"><QrCode size={36} className="mb-3" />QR Code indisponível. Clique em atualizar.</div>}
+                />
               </div>
               <div className="mt-4 flex flex-col items-center gap-2">
                 <div className="h-2 w-64 overflow-hidden rounded-full bg-gray-100">
@@ -441,7 +446,7 @@ export default function ChannelsPage() {
               <div key={instance.id} className="card p-5 flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${instance.status === 'connected' ? 'bg-green-100' : 'bg-gray-100'}`}>
-                    <MessageCircle size={22} className={instance.status === 'connected' ? 'text-green-600' : 'text-gray-400'} />
+                    <ChannelIcon type="whatsapp" size={22} className={instance.status === 'connected' ? undefined : 'text-gray-400'} />
                   </div>
                   <div>
                     <h3 className="font-medium text-gray-900">{instance.instance_name}</h3>
@@ -487,7 +492,7 @@ export default function ChannelsPage() {
             {instances.length === 0 && !loading && (
               <div className="card p-12 text-center">
                 <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <MessageCircle size={28} className="text-green-600" />
+                  <ChannelIcon type="whatsapp" size={28} />
                 </div>
                 <h3 className="text-lg font-medium text-gray-900 mb-2">Conecte seu WhatsApp</h3>
                 <p className="text-gray-500 text-sm mb-6 max-w-sm mx-auto">Crie uma integracao para receber e enviar mensagens pelo WhatsApp.</p>
@@ -509,7 +514,7 @@ export default function ChannelsPage() {
             <div key={channel.id} className="card p-5 flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${channel.status === 'connected' ? 'bg-blue-100' : 'bg-gray-100'}`}>
-                  <Mail size={22} className={channel.status === 'connected' ? 'text-blue-600' : 'text-gray-400'} />
+                  <ChannelIcon type="email" size={22} className={channel.status === 'connected' ? undefined : 'text-gray-400'} />
                 </div>
                 <div>
                   <h3 className="font-medium text-gray-900">{channel.name}</h3>
@@ -535,7 +540,7 @@ export default function ChannelsPage() {
 
           {emailChannels.length === 0 && !loading && (
             <div className="card p-12 text-center">
-              <Mail size={40} className="text-blue-300 mx-auto mb-4" />
+              <ChannelIcon type="email" size={40} className="mx-auto mb-4 text-blue-300" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">Conecte sua caixa de entrada</h3>
               <p className="text-gray-500 text-sm max-w-md mx-auto mb-6">Use IMAP para importar e-mails recebidos e exibi-los em Conversas.</p>
               <button onClick={() => setShowEmailModal(true)} className="btn-primary inline-flex">
@@ -602,7 +607,7 @@ export default function ChannelsPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Nome do canal</label>
                 <input className="input" value={emailForm.name} onChange={e => setEmailForm({ ...emailForm, name: e.target.value })} placeholder="ex: Suporte" required />
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Servidor IMAP</label>
                   <input className="input" value={emailForm.imap_host} onChange={e => setEmailForm({ ...emailForm, imap_host: e.target.value })} placeholder="imap.gmail.com" required />
@@ -620,7 +625,7 @@ export default function ChannelsPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">Senha ou senha de aplicativo</label>
                 <input type="password" className="input" value={emailForm.password} onChange={e => setEmailForm({ ...emailForm, password: e.target.value })} required />
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Servidor SMTP</label>
                   <input className="input" value={emailForm.smtp_host} onChange={e => setEmailForm({ ...emailForm, smtp_host: e.target.value })} placeholder="smtp.seudominio.com" required />
@@ -630,7 +635,7 @@ export default function ChannelsPage() {
                   <input type="number" className="input" value={emailForm.smtp_port} onChange={e => setEmailForm({ ...emailForm, smtp_port: Number(e.target.value) })} required />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Usuário SMTP</label>
                   <input className="input" value={emailForm.smtp_username} onChange={e => setEmailForm({ ...emailForm, smtp_username: e.target.value })} placeholder="vazio usa o mesmo e-mail" />
@@ -640,7 +645,7 @@ export default function ChannelsPage() {
                   <input type="password" className="input" value={emailForm.smtp_password} onChange={e => setEmailForm({ ...emailForm, smtp_password: e.target.value })} placeholder="vazio usa a mesma senha" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Pasta</label>
                   <input className="input" value={emailForm.mailbox} onChange={e => setEmailForm({ ...emailForm, mailbox: e.target.value })} placeholder="INBOX" />

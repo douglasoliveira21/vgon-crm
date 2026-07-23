@@ -411,6 +411,12 @@ func GetConversationMessages(svc *services.Container) fiber.Handler {
 			log.Printf("[CONVERSATIONS] failed to list messages for conversation %s company %s: %v", conversationID, companyID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
+		for index := range messages {
+			if messages[index].MediaURL != nil && *messages[index].MediaURL != "" {
+				signed := signedMediaPath(messages[index].ID, companyID, svc.Config.JWTSecret, time.Now().Add(5*time.Minute))
+				messages[index].MediaURL = &signed
+			}
+		}
 
 		return c.JSON(fiber.Map{"messages": messages})
 	}
@@ -610,13 +616,16 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 			if err != nil {
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save file"})
 			}
+			if err := scanSavedUpload(savedFileName, svc.Config.ClamAVAddr); err != nil {
+				return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": "Arquivo bloqueado pela verificação de segurança"})
+			}
 		}
 
 		if phone != "" && instanceName != "" && savedFileName != "" {
 			// Send using public URL of the saved file
 			publicURL := svc.Config.EvolutionWebhookURL
 			baseURL := strings.TrimSuffix(publicURL, "/api/webhooks/evolution")
-			mediaPublicURL := baseURL + "/uploads/" + savedFileName
+			mediaPublicURL := signedUploadURL(baseURL, savedFileName, svc.Config.JWTSecret, time.Now().Add(10*time.Minute))
 			externalID, _ = svc.Evolution.SendMediaMessage(instanceName, phone, body.MediaType, mediaPublicURL, body.Caption, body.FileName)
 		}
 
@@ -683,6 +692,9 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 			if err != nil {
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save audio"})
 			}
+			if err := scanSavedUpload(savedFileName, svc.Config.ClamAVAddr); err != nil {
+				return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": "Áudio bloqueado pela verificação de segurança"})
+			}
 		}
 
 		// Get contact phone and instance
@@ -703,7 +715,7 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 			// Build public URL from the backend domain
 			// Extract base URL (remove /api/webhooks/evolution)
 			baseURL := strings.TrimSuffix(publicURL, "/api/webhooks/evolution")
-			audioPublicURL := baseURL + "/uploads/" + savedFileName
+			audioPublicURL := signedUploadURL(baseURL, savedFileName, svc.Config.JWTSecret, time.Now().Add(10*time.Minute))
 			externalID, _ = svc.Evolution.SendAudioMessage(instanceName, phone, audioPublicURL)
 		}
 

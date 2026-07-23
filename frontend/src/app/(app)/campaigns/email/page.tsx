@@ -5,6 +5,7 @@ import Link from 'next/link'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { ArrowLeft, CheckCircle2, Loader2, Mail, Search, Send, Users, XCircle } from 'lucide-react'
+import { ChannelIcon } from '@/components/channel-icon'
 
 interface EmailChannel {
   id: string
@@ -29,6 +30,7 @@ interface EmailContact {
 interface SendResult {
   total: number
   sent_count: number
+  queued_count?: number
   failed_count: number
   failures?: Array<{ contact_id: string; name: string; email: string; error: string }>
 }
@@ -161,7 +163,7 @@ export default function EmailCampaignPage() {
         contact_ids: targetType === 'selected' ? selectedIds : undefined,
       })
       setResult(response.data)
-      toast.success(`Envio concluído: ${response.data.sent_count} enviados`)
+      toast.success(`${response.data.queued_count || 0} e-mails adicionados à fila de envio`)
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Erro ao enviar campanha')
     } finally {
@@ -170,8 +172,8 @@ export default function EmailCampaignPage() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className="mx-auto max-w-6xl p-4 sm:p-6">
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <Link href="/campaigns" className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900 mb-3">
             <ArrowLeft size={16} />
@@ -315,7 +317,7 @@ export default function EmailCampaignPage() {
           <div className="space-y-4">
             <div className="card p-5">
               <div className="flex items-center gap-2 mb-3">
-                <Mail size={18} className="text-primary-600" />
+                <ChannelIcon type="email" size={18} />
                 <h2 className="font-semibold text-gray-900">Resumo do envio</h2>
               </div>
               <div className="space-y-3 text-sm">
@@ -342,7 +344,7 @@ export default function EmailCampaignPage() {
                 <h2 className="font-semibold text-gray-900 mb-3">Resultado</h2>
                 <div className="space-y-2 text-sm">
                   <p className="flex items-center gap-2 text-green-700">
-                    <CheckCircle2 size={16} /> {result.sent_count} enviados
+                    <CheckCircle2 size={16} /> {result.queued_count || result.sent_count} enfileirados
                   </p>
                   <p className="flex items-center gap-2 text-red-600">
                     <XCircle size={16} /> {result.failed_count} falhas

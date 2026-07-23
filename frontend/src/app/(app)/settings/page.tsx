@@ -13,7 +13,7 @@ export default function SettingsPage() {
 	const hasRestrictedSettings = user?.role_slug === 'agent' || user?.role_slug === 'supervisor'
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="mx-auto max-w-4xl p-4 sm:p-6">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-8">Configurações do sistema</h1>
 
       <div className="space-y-6">
@@ -354,7 +354,7 @@ function NotificationSoundSettings() {
           <>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Escolher som</label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {soundOptions.map((option) => (
                   <button
                     key={option.id}

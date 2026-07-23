@@ -7,11 +7,12 @@ import { useAuthStore } from '@/store/auth'
 import { useAppearanceStore } from '@/store/appearance'
 import api from '@/lib/api'
 import wsService from '@/lib/websocket'
+import toast from 'react-hot-toast'
 import {
   LayoutDashboard,
   Inbox,
   MessageSquare,
-  Users,
+  Contact,
   Building2,
   UsersRound,
   Radio,
@@ -36,29 +37,42 @@ import {
   SlidersHorizontal,
   Search,
   Ban,
+  X,
+  type LucideIcon,
 } from 'lucide-react'
 import { clsx } from 'clsx'
+import { SafeImage } from '@/components/safe-image'
+import { ChannelIcon, type ChannelIconType } from '@/components/channel-icon'
 
-const menuItems = [
+type MenuItem = {
+  label: string
+  href: string
+  icon: LucideIcon
+  iconType?: ChannelIconType
+  expandable?: 'conversations' | 'contacts' | 'teams'
+}
+
+const menuItems: MenuItem[] = [
   { label: 'Painel', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Busca Global', href: '/search', icon: Search },
   { label: 'Caixa de Entrada', href: '/inbox', icon: Inbox },
   { label: 'Conversas', href: '/conversations', icon: MessageSquare, expandable: 'conversations' },
-  { label: 'Contatos', href: '/contacts', icon: Users, expandable: 'contacts' },
+  { label: 'Contatos', href: '/contacts', icon: Contact, expandable: 'contacts' },
   { label: 'Empresas', href: '/companies', icon: Building2 },
   { label: 'Times', href: '/teams', icon: UsersRound, expandable: 'teams' },
   { label: 'Canais', href: '/channels', icon: Radio },
   { label: 'Funil de Vendas', href: '/funnels', icon: GitBranch },
-  { label: 'Bots e Automações', href: '/automations', icon: Bot },
-  { label: 'Marketing', href: '/campaigns', icon: Megaphone },
+  { label: 'Bots e Automações', href: '/automations', icon: Bot, iconType: 'automation' },
+  { label: 'Marketing', href: '/campaigns', icon: Megaphone, iconType: 'campaign' },
   { label: 'Métricas', href: '/metrics', icon: BarChart3 },
   { label: 'Logs Administrativos', href: '/audit-logs', icon: FileText },
-  { label: 'Widget', href: '/widget', icon: Globe },
+  { label: 'Privacidade e LGPD', href: '/privacy', icon: ShieldCheck, iconType: 'security' },
+  { label: 'Widget', href: '/widget', icon: Globe, iconType: 'website' },
   { label: 'Respostas Rápidas', href: '/quick-replies', icon: Zap },
 ]
 
-const agentHiddenMenuPaths = new Set(['/inbox', '/channels', '/automations', '/campaigns', '/metrics', '/audit-logs', '/widget'])
-const supervisorHiddenMenuPaths = new Set(['/inbox', '/channels', '/automations', '/campaigns', '/audit-logs', '/widget'])
+const agentHiddenMenuPaths = new Set(['/inbox', '/channels', '/automations', '/campaigns', '/metrics', '/audit-logs', '/privacy', '/widget'])
+const supervisorHiddenMenuPaths = new Set(['/inbox', '/channels', '/automations', '/campaigns', '/audit-logs', '/privacy', '/widget'])
 
 const statusMeta = {
   online: { label: 'Online', dot: 'bg-green-500' },
@@ -99,7 +113,7 @@ const resolveImage = (url?: string) => {
 export default function Sidebar() {
   const pathname = usePathname()
   const { user, logout, updateStatus } = useAuthStore()
-  const { sidebarPinned, sidebarHovered, setSidebarPinned, setSidebarHovered, theme, toggleTheme } = useAppearanceStore()
+  const { sidebarPinned, sidebarHovered, mobileSidebarOpen, setMobileSidebarOpen, setSidebarPinned, setSidebarHovered, theme, toggleTheme } = useAppearanceStore()
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [hasImpersonationSession, setHasImpersonationSession] = useState(false)
   const [expandedSections, setExpandedSections] = useState<{ conversations: boolean; contacts: boolean; teams: boolean }>({ conversations: true, contacts: false, teams: false })
@@ -108,7 +122,6 @@ export default function Sidebar() {
   const profileMenuRef = useRef<HTMLDivElement>(null)
   const refreshTimerRef = useRef<NodeJS.Timeout | null>(null)
 	const sidebarExpanded = sidebarPinned || sidebarHovered
-	const expandedClass = sidebarExpanded ? 'w-64' : 'w-20'
 	const showTextClass = sidebarExpanded ? 'opacity-100' : 'pointer-events-none w-0 overflow-hidden opacity-0'
   const currentStatus = user?.is_online ? (user.availability_status || 'online') : 'offline'
   const currentStatusMeta = statusMeta[currentStatus] || statusMeta.offline
@@ -117,19 +130,18 @@ export default function Sidebar() {
     { label: 'Configurações', href: '/settings', icon: Settings, show: true },
     { label: 'Super Admin', href: '/admin', icon: ShieldCheck, show: !!user?.is_super_admin },
   ]
-  const returnToSuperAdmin = () => {
-    const accessToken = localStorage.getItem('super_admin_original_access_token')
-    const refreshToken = localStorage.getItem('super_admin_original_refresh_token')
-    if (!accessToken) return
-    localStorage.setItem('access_token', accessToken)
-    if (refreshToken) localStorage.setItem('refresh_token', refreshToken)
-    localStorage.removeItem('super_admin_original_access_token')
-    localStorage.removeItem('super_admin_original_refresh_token')
-    window.location.href = '/admin'
+  const returnToSuperAdmin = async () => {
+    try {
+      await api.post('/auth/impersonation/end')
+      sessionStorage.removeItem('crm_impersonating')
+      window.location.href = '/admin'
+    } catch {
+      toast.error('Não foi possível restaurar a sessão administrativa')
+    }
   }
 
   useEffect(() => {
-    setHasImpersonationSession(!!localStorage.getItem('super_admin_original_access_token'))
+    setHasImpersonationSession(sessionStorage.getItem('crm_impersonating') === 'true')
   }, [])
 
   const countUnread = (items: SidebarConversation[]) => items.reduce((sum, item) => sum + (item.unread_count || 0), 0)
@@ -196,40 +208,64 @@ export default function Sidebar() {
     }
   }, [user?.id])
 
+  useEffect(() => {
+    setMobileSidebarOpen(false)
+  }, [pathname, setMobileSidebarOpen])
+
   return (
+    <>
+    {mobileSidebarOpen && (
+      <button
+        type="button"
+        className="fixed inset-0 z-40 bg-black/55 md:hidden"
+        onClick={() => setMobileSidebarOpen(false)}
+        aria-label="Fechar menu"
+      />
+    )}
     <aside
       onMouseEnter={() => setSidebarHovered(true)}
       onMouseLeave={() => setSidebarHovered(false)}
       className={clsx(
-        'group/sidebar fixed left-0 top-0 z-50 flex h-full flex-col border-r transition-all duration-300',
-        expandedClass,
+        'group/sidebar fixed left-0 top-0 z-50 flex h-full w-72 max-w-[85vw] flex-col border-r transition-all duration-300 md:max-w-none',
+        mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+        sidebarExpanded ? 'md:w-64' : 'md:w-20',
         'border-dark-700 bg-dark-900 dark:border-gray-800 dark:bg-gray-950'
       )}
     >
       <div className="flex h-[92px] items-center justify-center border-b border-dark-700 px-4 dark:border-gray-800">
-        <img
+        <SafeImage
           src="/favicon.png"
+          fallbackSrc="/favicon.ico"
           alt="VGON"
           className={clsx(
             'object-contain transition-all duration-200',
-			sidebarExpanded ? 'hidden' : 'h-10 w-10 rounded-xl'
+			sidebarExpanded ? 'hidden md:hidden' : 'hidden h-10 w-10 rounded-xl md:block'
           )}
         />
-        <img
+        <SafeImage
           src="/assets/images/logo-vgon-negativo.png"
+          fallbackSrc="/logo-white.png"
           alt="VGON"
           className={clsx(
             'h-20 w-auto max-w-[250px] object-contain transition-all duration-200',
-			sidebarExpanded ? 'block' : 'hidden'
+			sidebarExpanded ? 'block' : 'block md:hidden'
           )}
         />
+        <button
+          type="button"
+          onClick={() => setMobileSidebarOpen(false)}
+          className="absolute right-3 top-7 rounded-lg p-2 text-gray-400 hover:bg-white/10 hover:text-white md:hidden"
+          aria-label="Fechar menu"
+        >
+          <X size={20} />
+        </button>
       </div>
 
       <div className="flex items-center justify-between gap-2 px-4 py-3">
         <button
           type="button"
           onClick={() => setSidebarPinned(!sidebarPinned)}
-          className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
+          className="hidden h-9 w-9 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-white/10 hover:text-white md:flex"
           title={sidebarPinned ? 'Desfixar menu' : 'Fixar menu'}
         >
           {sidebarPinned ? <PinOff size={17} /> : <Pin size={17} />}
@@ -239,7 +275,7 @@ export default function Sidebar() {
           onClick={toggleTheme}
           className={clsx(
             'h-9 items-center gap-2 rounded-lg px-3 text-sm text-gray-300 transition-colors hover:bg-white/10 hover:text-white',
-			sidebarExpanded ? 'flex' : 'hidden'
+			sidebarExpanded ? 'flex' : 'flex md:hidden'
           )}
           title={theme === 'dark' ? 'Usar tema claro' : 'Usar tema escuro'}
         >
@@ -275,8 +311,8 @@ export default function Sidebar() {
                 )}
               >
                 <Link href={item.href} title={item.label} className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5">
-                  <Icon size={20} className="shrink-0" />
-                  <span className={clsx('min-w-0 flex-1 whitespace-nowrap transition-opacity duration-200', showTextClass)}>
+                  {item.iconType ? <ChannelIcon type={item.iconType} size={20} className="text-current" /> : <Icon size={20} className="shrink-0" />}
+                  <span className={clsx('min-w-0 flex-1 whitespace-nowrap transition-opacity duration-200', showTextClass, 'max-md:pointer-events-auto max-md:w-auto max-md:overflow-visible max-md:opacity-100')}>
                     {item.label}
                   </span>
                   <span className={clsx(showTextClass)}><Badge value={mainBadge} /></span>
@@ -287,7 +323,7 @@ export default function Sidebar() {
                     onClick={() => setExpandedSections((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }))}
                     className={clsx(
                       'mr-2 rounded-md p-1.5 transition-colors hover:bg-white/10',
-					  sidebarExpanded ? 'block' : 'hidden'
+					  sidebarExpanded ? 'block' : 'block md:hidden'
                     )}
                     title={sectionOpen ? 'Recolher menu' : 'Expandir menu'}
                   >
@@ -296,8 +332,8 @@ export default function Sidebar() {
                 )}
               </div>
 
-			  {sectionKey === 'conversations' && sectionOpen && sidebarExpanded && (
-                <div className={clsx('mt-1 space-y-1 pl-9 pr-2 transition-opacity duration-200', showTextClass)}>
+			  {sectionKey === 'conversations' && sectionOpen && (
+                <div className={clsx('mt-1 space-y-1 pl-9 pr-2 transition-opacity duration-200', showTextClass, 'max-md:pointer-events-auto max-md:w-auto max-md:overflow-visible max-md:opacity-100')}>
                   <SubMenuLink href="/conversations?view=mine" label="Minhas" count={conversationCounts.mine} />
                   <SubMenuLink href="/conversations?view=unassigned" label="Nao atribuidas" count={conversationCounts.unassigned} />
                   <SubMenuLink href="/conversations?view=all" label="Todas" count={conversationCounts.all} />
@@ -305,15 +341,15 @@ export default function Sidebar() {
                 </div>
               )}
 
-			  {sectionKey === 'contacts' && sectionOpen && sidebarExpanded && (
-                <div className={clsx('mt-1 space-y-1 pl-9 pr-2 transition-opacity duration-200', showTextClass)}>
+			  {sectionKey === 'contacts' && sectionOpen && (
+                <div className={clsx('mt-1 space-y-1 pl-9 pr-2 transition-opacity duration-200', showTextClass, 'max-md:pointer-events-auto max-md:w-auto max-md:overflow-visible max-md:opacity-100')}>
                   <SubMenuLink href="/contacts" label="Todos os contatos" />
                   <SubMenuLink href="/contacts/blocked" label="Contatos bloqueados" icon={<Ban size={13} />} />
                 </div>
               )}
 
-			  {sectionKey === 'teams' && sectionOpen && sidebarExpanded && (
-                <div className={clsx('mt-1 space-y-1 pl-9 pr-2 transition-opacity duration-200', showTextClass)}>
+			  {sectionKey === 'teams' && sectionOpen && (
+                <div className={clsx('mt-1 space-y-1 pl-9 pr-2 transition-opacity duration-200', showTextClass, 'max-md:pointer-events-auto max-md:w-auto max-md:overflow-visible max-md:opacity-100')}>
 				  {user?.role_slug !== 'agent' && user?.role_slug !== 'supervisor' && <SubMenuLink href="/teams" label="Configurar times" icon={<SlidersHorizontal size={13} />} />}
 				  {user?.role_slug === 'supervisor' && <SubMenuLink href="/teams" label="Meus times" icon={<SlidersHorizontal size={13} />} />}
                   {teams.map((team) => (
@@ -339,7 +375,7 @@ export default function Sidebar() {
           <div
             className={clsx(
               'absolute bottom-full left-3 right-3 mb-2 overflow-hidden rounded-lg border border-white/10 bg-dark-800 py-1 shadow-xl',
-			  sidebarExpanded ? 'block' : 'hidden'
+			  sidebarExpanded ? 'block' : 'block md:hidden'
             )}
           >
             {profileMenuItems.filter((item) => item.show).map((item) => {
@@ -370,7 +406,7 @@ export default function Sidebar() {
           </div>
         )}
 
-        <div className={clsx('mb-3 transition-opacity duration-200', showTextClass)}>
+        <div className={clsx('mb-3 transition-opacity duration-200', showTextClass, 'max-md:pointer-events-auto max-md:w-auto max-md:overflow-visible max-md:opacity-100')}>
           <label className="mb-1 block text-xs font-medium text-gray-500">Status do atendente</label>
           <select
             value={currentStatus}
@@ -391,7 +427,12 @@ export default function Sidebar() {
             className="relative shrink-0"
           >
             {user?.avatar_url ? (
-              <img src={resolveImage(user.avatar_url)} alt={user.name} className="h-10 w-10 rounded-full object-cover" />
+              <SafeImage
+                src={resolveImage(user.avatar_url)}
+                alt={user.name}
+                className="h-10 w-10 rounded-full object-cover"
+                fallback={<div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-600 text-sm font-medium text-white">{user?.name?.charAt(0)?.toUpperCase() || 'U'}</div>}
+              />
             ) : (
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-600 text-sm font-medium text-white">
                 {user?.name?.charAt(0)?.toUpperCase() || 'U'}
@@ -403,7 +444,7 @@ export default function Sidebar() {
           <button
             type="button"
             onClick={() => setProfileMenuOpen((open) => !open)}
-            className={clsx('min-w-0 flex-1 text-left transition-opacity duration-200', showTextClass)}
+            className={clsx('min-w-0 flex-1 text-left transition-opacity duration-200', showTextClass, 'max-md:pointer-events-auto max-md:w-auto max-md:overflow-visible max-md:opacity-100')}
           >
             <p className="truncate text-sm font-medium text-white">{user?.name || 'Usuário'}</p>
             <p className="truncate text-xs text-gray-500">{currentStatusMeta.label} • {user?.role_name || 'Atendente'}</p>
@@ -412,7 +453,7 @@ export default function Sidebar() {
           <button
             type="button"
             onClick={() => setProfileMenuOpen((open) => !open)}
-			className={clsx('text-gray-400 transition-colors hover:text-white', sidebarExpanded ? 'block' : 'hidden')}
+			className={clsx('text-gray-400 transition-colors hover:text-white', sidebarExpanded ? 'block' : 'block md:hidden')}
             title={profileMenuOpen ? 'Fechar menu do usuário' : 'Abrir menu do usuário'}
           >
             <ChevronUp size={18} className={clsx('transition-transform', profileMenuOpen && 'rotate-180')} />
@@ -420,7 +461,7 @@ export default function Sidebar() {
 
           <button
             onClick={logout}
-			className={clsx('text-gray-400 transition-colors hover:text-red-400', sidebarExpanded ? 'block' : 'hidden')}
+			className={clsx('text-gray-400 transition-colors hover:text-red-400', sidebarExpanded ? 'block' : 'block md:hidden')}
             title="Sair"
           >
             <LogOut size={18} />
@@ -428,6 +469,7 @@ export default function Sidebar() {
         </div>
       </div>
     </aside>
+    </>
   )
 }
 

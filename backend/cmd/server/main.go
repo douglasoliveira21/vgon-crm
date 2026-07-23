@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"log"
 	"os"
 	"os/signal"
@@ -56,10 +58,41 @@ func main() {
 
 	// Initialize WebSocket hub
 	wsHub := websocket.NewHub()
+	wsHub.SetAuthorizer(func(client *websocket.Client, message *websocket.WSMessage) bool {
+		if client.RoleSlug != "agent" && client.RoleSlug != "supervisor" {
+			return true
+		}
+		var payload map[string]interface{}
+		if json.Unmarshal(message.Data, &payload) != nil {
+			return false
+		}
+		conversationID, _ := payload["conversation_id"].(string)
+		if conversationID == "" {
+			conversationID, _ = payload["id"].(string)
+		}
+		if conversationID == "" {
+			return true
+		}
+		return middleware.CanAccessConversation(db, conversationID, client.CompanyID, client.UserID, client.RoleSlug)
+	})
 	go wsHub.Run()
 
 	// Initialize services
 	svc := services.NewContainer(db, rdb, cfg, wsHub)
+	workerCtx, cancelWorkers := context.WithCancel(context.Background())
+	defer cancelWorkers()
+	handlers.RegisterDurableJobHandlers(svc)
+	handlers.RegisterPrivacyJobs(svc)
+	svc.Jobs.Start(workerCtx, 2)
+	if err := handlers.ResumeDurableCampaigns(svc); err != nil {
+		log.Printf("Failed to resume durable campaigns: %v", err)
+	}
+	if err := svc.Bot.ResumeDurableExecutions(); err != nil {
+		log.Printf("Failed to resume durable automations: %v", err)
+	}
+	if err := handlers.ScheduleRetentionJobs(svc); err != nil {
+		log.Printf("Failed to schedule retention jobs: %v", err)
+	}
 
 	// Start periodic background tasks
 	svc.Evolution.StartPeriodicPhotoSync()
@@ -75,6 +108,15 @@ func main() {
 		for range ticker.C {
 			if err := handlers.PurgeExpiredTenants(db); err != nil {
 				log.Printf("Failed to purge expired tenants: %v", err)
+			}
+		}
+	}()
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := handlers.ScheduleRetentionJobs(svc); err != nil {
+				log.Printf("Failed to schedule retention jobs: %v", err)
 			}
 		}
 	}()
@@ -96,7 +138,7 @@ func main() {
 		if strings.Contains(c.Path(), "/widget/") {
 			c.Set("Access-Control-Allow-Origin", "*")
 			c.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			c.Set("Access-Control-Allow-Headers", "Content-Type")
+			c.Set("Access-Control-Allow-Headers", "Content-Type, X-Widget-Session")
 			if c.Method() == "OPTIONS" {
 				return c.SendStatus(204)
 			}
@@ -108,7 +150,7 @@ func main() {
 		AllowOrigins:     buildAllowedOrigins(cfg.FrontendURL),
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization, X-Requested-With",
 		AllowMethods:     "GET, POST, PUT, DELETE, PATCH, OPTIONS",
-		AllowCredentials: false,
+		AllowCredentials: true,
 		Next: func(c *fiber.Ctx) bool {
 			// Widget routes already handled above.
 			return strings.Contains(c.Path(), "/widget/")
@@ -127,6 +169,7 @@ func main() {
 		c.Set("Permissions-Policy", "camera=(), microphone=(self), geolocation=()")
 		return c.Next()
 	})
+	app.Use(middleware.CSRFMiddleware(cfg.FrontendURL))
 
 	// Rate limiting
 	app.Use(middleware.RateLimiter(rdb, cfg.RateLimitMax, cfg.RateLimitWindow))
@@ -154,6 +197,7 @@ func main() {
 
 	<-quit
 	log.Println("Shutting down server...")
+	cancelWorkers()
 	if err := app.Shutdown(); err != nil {
 		log.Fatalf("Server shutdown failed: %v", err)
 	}

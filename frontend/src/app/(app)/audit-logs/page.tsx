@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
-import { FileText, RefreshCw, Search } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { FileText, RefreshCw, Search, ShieldCheck } from 'lucide-react'
 
 interface AuditLog {
   id: string
@@ -51,6 +52,15 @@ export default function AuditLogsPage() {
     }
   }
 
+  const verifyIntegrity = async () => {
+    try {
+      const response = await api.get('/audit-logs/verify')
+      toast.success(`Auditoria íntegra: ${response.data.checked || 0} registros verificados`)
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'A cadeia de auditoria não está íntegra')
+    }
+  }
+
   const formatMetadata = (raw?: string) => {
     if (!raw) return ''
     try {
@@ -64,16 +74,20 @@ export default function AuditLogsPage() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="mx-auto max-w-6xl p-4 sm:p-6">
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Logs administrativos</h1>
           <p className="text-gray-500 mt-1">Auditoria de ações críticas, envios, exportações e alertas operacionais.</p>
         </div>
-        <button type="button" onClick={fetchLogs} className="btn-secondary">
-          <RefreshCw size={16} />
-          Atualizar
-        </button>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={verifyIntegrity} className="btn-secondary">
+            <ShieldCheck size={16} /> Verificar integridade
+          </button>
+          <button type="button" onClick={fetchLogs} className="btn-secondary">
+            <RefreshCw size={16} /> Atualizar
+          </button>
+        </div>
       </div>
 
       <div className="card p-4 mb-5">
@@ -91,8 +105,8 @@ export default function AuditLogsPage() {
         </div>
       </div>
 
-      <div className="card overflow-hidden">
-        <table className="w-full">
+      <div className="card overflow-x-auto">
+        <table className="w-full min-w-[760px]">
           <thead className="bg-gray-50 border-b border-gray-100">
             <tr>
               <th className="text-left px-5 py-3 text-xs font-medium text-gray-500 uppercase">Evento</th>

@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { SafeImage } from '@/components/safe-image'
 
 export const metadata = {
   title: 'Termos de Serviço | VGON',
@@ -12,7 +13,7 @@ export default function TermsOfServicePage() {
       <header className="border-b border-white/[0.06]">
         <div className="mx-auto max-w-5xl px-6 py-6 flex items-center justify-between">
           <Link href="/login">
-            <img src="/assets/images/logo-vgon-negativo.png" alt="VGON" className="h-8 w-auto object-contain opacity-90" />
+            <SafeImage src="/assets/images/logo-vgon-negativo.png" fallbackSrc="/logo-white.png" alt="VGON" className="h-8 w-auto object-contain opacity-90" />
           </Link>
           <Link href="/login" className="text-sm text-white/40 hover:text-white/80 transition-colors duration-300">
             ← Voltar ao login

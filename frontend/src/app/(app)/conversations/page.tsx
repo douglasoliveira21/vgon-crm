@@ -39,9 +39,11 @@ import {
   ArrowLeft,
   Loader2,
   Ban,
+  ImageOff,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import toast from 'react-hot-toast'
+import { SafeImage } from '@/components/safe-image'
 
 interface Conversation {
   id: string
@@ -186,6 +188,7 @@ export default function ConversationsPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [messagesLoading, setMessagesLoading] = useState(false)
+  const [failedMediaIds, setFailedMediaIds] = useState<Record<string, boolean>>({})
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -792,8 +795,6 @@ export default function ConversationsPage() {
         ...selectedConv,
         team_id: teamId,
         team_name: selectedTeam?.name || 'Time selecionado',
-        assigned_to: undefined,
-        assigned_to_name: undefined,
       })
       setShowTransferModal(false)
       fetchConversations()
@@ -1128,12 +1129,12 @@ export default function ConversationsPage() {
       setConversations((prev) =>
         prev.map((c) =>
           c.id === conversation.id
-            ? { ...c, team_id: teamId, team_name: selectedTeam?.name || 'Time selecionado', assigned_to: undefined, assigned_to_name: undefined }
+            ? { ...c, team_id: teamId, team_name: selectedTeam?.name || 'Time selecionado' }
             : c
         )
       )
       if (selectedConv?.id === conversation.id) {
-        setSelectedConv({ ...selectedConv, team_id: teamId, team_name: selectedTeam?.name || 'Time selecionado', assigned_to: undefined, assigned_to_name: undefined })
+        setSelectedConv({ ...selectedConv, team_id: teamId, team_name: selectedTeam?.name || 'Time selecionado' })
       }
       toast.success('Chat transferido para o time')
     } catch {
@@ -1142,7 +1143,7 @@ export default function ConversationsPage() {
   }
 
   return (
-    <div className="flex h-screen min-h-0 overflow-hidden">
+    <div className="flex h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden md:h-screen">
       {/* Conversation List */}
       <div className={clsx(
         'min-h-0 w-full flex-shrink-0 border-r border-gray-200 bg-white flex-col md:flex md:w-96',
@@ -1222,11 +1223,11 @@ export default function ConversationsPage() {
                 >
                   <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0 overflow-hidden">
                     {conv.contact_avatar_url ? (
-                      <img
+                      <SafeImage
                         src={conv.contact_avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${conv.contact_avatar_url}` : conv.contact_avatar_url}
                         alt=""
                         className="w-full h-full object-cover"
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden') }}
+                        fallback={<span className="text-sm font-medium text-primary-700">{conv.contact_name?.charAt(0)?.toUpperCase() || '?'}</span>}
                       />
                     ) : (
                       <span className="text-primary-700 font-medium text-sm">
@@ -1294,10 +1295,10 @@ export default function ConversationsPage() {
               </button>
               <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center overflow-hidden">
                 {selectedConv.contact_avatar_url ? (
-                  <img
+                  <SafeImage
                     src={selectedConv.contact_avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${selectedConv.contact_avatar_url}` : selectedConv.contact_avatar_url}
                     alt="" className="w-full h-full object-cover"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                    fallback={<span className="font-medium text-primary-700">{selectedConv.contact_name?.charAt(0)?.toUpperCase() || '?'}</span>}
                   />
                 ) : (
                   <span className="text-primary-700 font-medium">
@@ -1319,11 +1320,11 @@ export default function ConversationsPage() {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto">
               <select
                 value={selectedConv.customer_company_id || ''}
                 onChange={(e) => linkCompanyToConversation(e.target.value)}
-                className="min-w-[210px] rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 focus:border-primary-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                className="w-full min-w-0 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 focus:border-primary-500 focus:outline-none sm:w-auto sm:min-w-[210px] dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
                 title="Vincular empresa"
               >
                 <option value="">Sem empresa vinculada</option>
@@ -1426,10 +1427,11 @@ export default function ConversationsPage() {
                 {msg.sender_type !== 'user' && (
                   <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gray-200">
                     {msg.sender_avatar_url || selectedConv?.contact_avatar_url ? (
-                      <img
+                      <SafeImage
                         src={resolveAvatar(msg.sender_avatar_url || selectedConv?.contact_avatar_url)}
                         alt={msg.sender_name || selectedConv?.contact_name || 'Contato'}
                         className="h-full w-full object-cover"
+                        fallback={<div className="flex h-full w-full items-center justify-center text-xs font-semibold text-gray-600">{(msg.sender_name || selectedConv?.contact_name || 'C').charAt(0).toUpperCase()}</div>}
                       />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-gray-600">
@@ -1481,24 +1483,25 @@ export default function ConversationsPage() {
 
                   {(msg.message_type === 'image' || msg.message_type === 'gif' || msg.message_type === 'sticker') && msg.media_url && (
                     <div className="mb-2">
-                      {msg.media_url.startsWith('/uploads/') ? (
-                        <img
+                      {msg.media_url.startsWith('/api/media/') ? (
+                        <SafeImage
                           src={`${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`}
                           alt={msg.message_type === 'gif' ? 'GIF' : msg.message_type === 'sticker' ? 'Figurinha' : 'Imagem'}
                           className="max-w-full rounded-lg max-h-60 object-cover cursor-pointer"
                           onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`, '_blank')}
+                          fallback={<div className="flex min-h-24 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 text-xs text-gray-500"><ImageOff size={18} /> Imagem indisponível</div>}
                         />
                       ) : msg.media_url === 'sent' ? (
                         <div className="flex items-center gap-2 text-xs opacity-70">
                           <Camera size={16} /> {msg.message_type === 'gif' ? 'GIF enviado' : msg.message_type === 'sticker' ? 'Figurinha enviada' : 'Imagem enviada'}
                         </div>
                       ) : (
-                        <img
-                          src={`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`}
+                        <SafeImage
+                          src={`${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`}
                           alt={msg.message_type === 'gif' ? 'GIF' : msg.message_type === 'sticker' ? 'Figurinha' : 'Imagem'}
                           className="max-w-full rounded-lg max-h-60 object-cover cursor-pointer"
-                          onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`, '_blank')}
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                          onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`, '_blank')}
+                          fallback={<div className="flex min-h-24 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 text-xs text-gray-500"><ImageOff size={18} /> Imagem indisponível</div>}
                         />
                       )}
                     </div>
@@ -1510,10 +1513,14 @@ export default function ConversationsPage() {
                         <div className="flex items-center gap-2 text-xs opacity-70">
                           <Mic size={16} /> Áudio enviado ✓
                         </div>
+                      ) : failedMediaIds[msg.id] ? (
+                        <div className="flex items-center gap-2 rounded-lg bg-gray-100 px-3 py-2 text-xs text-gray-500">
+                          <MicOff size={16} /> Áudio indisponível
+                        </div>
                       ) : (
                         <div className="flex items-center gap-2">
-                          <audio id={`audio-${msg.id}`} controls className="max-w-full h-10 flex-1" preload="metadata">
-                            <source src={msg.media_url.startsWith('/uploads/') ? `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}` : `${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`} />
+                          <audio id={`audio-${msg.id}`} controls className="max-w-full h-10 flex-1" preload="metadata" onError={() => setFailedMediaIds((current) => ({ ...current, [msg.id]: true }))}>
+                            <source src={msg.media_url.startsWith('/api/media/') ? `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}` : `${process.env.NEXT_PUBLIC_API_URL}/api/media/${msg.id}`} />
                           </audio>
                           <div className="flex gap-1">
                             {[1, 1.5, 2].map((speed) => (
@@ -1541,9 +1548,13 @@ export default function ConversationsPage() {
 
                   {msg.message_type === 'video' && msg.media_url && (
                     <div className="mb-2">
-                      <video controls className="max-w-full rounded-lg max-h-60">
-                        <source src={`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`} />
-                      </video>
+                      {failedMediaIds[msg.id] ? (
+                        <div className="flex min-h-24 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 text-xs text-gray-500"><Video size={18} /> Vídeo indisponível</div>
+                      ) : (
+                        <video controls className="max-w-full rounded-lg max-h-60" onError={() => setFailedMediaIds((current) => ({ ...current, [msg.id]: true }))}>
+                          <source src={msg.media_url.startsWith('/api/media/') ? `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}` : `${process.env.NEXT_PUBLIC_API_URL}/api/media/${msg.id}`} />
+                        </video>
+                      )}
                     </div>
                   )}
 
@@ -1551,7 +1562,7 @@ export default function ConversationsPage() {
                     <div className="flex items-center gap-2 mb-1 p-2 bg-gray-50 rounded-lg">
                       <FileText size={20} className="text-gray-500" />
                       <a
-                        href={`${process.env.NEXT_PUBLIC_API_URL}/media/${msg.id}`}
+                        href={msg.media_url?.startsWith('/api/media/') ? `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}` : `${process.env.NEXT_PUBLIC_API_URL}/api/media/${msg.id}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-sm text-primary-600 underline truncate"
@@ -1578,10 +1589,11 @@ export default function ConversationsPage() {
                 {msg.sender_type === 'user' && (
                   <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-primary-100">
                     {msg.sender_avatar_url || user?.avatar_url ? (
-                      <img
+                      <SafeImage
                         src={resolveAvatar(msg.sender_avatar_url || user?.avatar_url)}
                         alt={msg.sender_name || user?.name || 'Usuário'}
                         className="h-full w-full object-cover"
+                        fallback={<div className="flex h-full w-full items-center justify-center text-xs font-semibold text-primary-700">{(msg.sender_name || user?.name || 'U').charAt(0).toUpperCase()}</div>}
                       />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-primary-700">
@@ -1989,7 +2001,7 @@ export default function ConversationsPage() {
           className="fixed z-50"
           style={{ top: conversationContextMenu.y, left: conversationContextMenu.x }}
         >
-          <div className="min-w-[250px] rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-800 dark:bg-gray-900">
+          <div className="w-[min(250px,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-800 dark:bg-gray-900">
             <button
               onClick={() => archiveConversationFromMenu(conversationContextMenu.conversation)}
               className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
@@ -2011,7 +2023,7 @@ export default function ConversationsPage() {
                 Transferir para atendente
                 <ChevronRight size={15} className="ml-auto" />
               </button>
-              <div className="invisible absolute left-full top-0 max-h-72 min-w-[230px] overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100 dark:border-gray-800 dark:bg-gray-900">
+              <div className="invisible absolute right-0 top-full z-10 mt-1 max-h-72 w-[min(230px,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100 md:left-full md:right-auto md:top-0 md:mt-0 dark:border-gray-800 dark:bg-gray-900">
                 {users.map((u) => (
                   <button
                     key={u.id}
@@ -2035,7 +2047,7 @@ export default function ConversationsPage() {
                 Transferir para time
                 <ChevronRight size={15} className="ml-auto" />
               </button>
-              <div className="invisible absolute left-full top-0 max-h-72 min-w-[230px] overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100 dark:border-gray-800 dark:bg-gray-900">
+              <div className="invisible absolute right-0 top-full z-10 mt-1 max-h-72 w-[min(230px,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100 md:left-full md:right-auto md:top-0 md:mt-0 dark:border-gray-800 dark:bg-gray-900">
                 {teams.map((t) => (
                   <button
                     key={t.id}
@@ -2069,7 +2081,7 @@ export default function ConversationsPage() {
             {/* Preview */}
             <div className="mb-4 flex justify-center bg-gray-50 rounded-lg p-4 min-h-[200px] items-center">
               {pendingFile.type === 'image' && pendingFile.preview ? (
-                <img src={pendingFile.preview} alt="Preview" className="max-h-60 rounded-lg object-contain" />
+                <SafeImage src={pendingFile.preview} alt="Prévia da imagem" className="max-h-60 rounded-lg object-contain" fallback={<div className="text-center text-gray-500"><ImageOff size={40} className="mx-auto mb-2" /><p className="text-sm">Não foi possível gerar a prévia</p></div>} />
               ) : pendingFile.type === 'video' ? (
                 <div className="text-center">
                   <Video size={48} className="text-purple-400 mx-auto mb-2" />
@@ -2296,10 +2308,10 @@ function ContactPanel({
       <div className="text-center mb-4">
         <div className="w-14 h-14 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-2 overflow-hidden">
           {conversation.contact_avatar_url ? (
-            <img
+            <SafeImage
               src={conversation.contact_avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${conversation.contact_avatar_url}` : conversation.contact_avatar_url}
               alt="" className="w-full h-full object-cover"
-              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+              fallback={<span className="text-lg font-bold text-primary-700">{conversation.contact_name?.charAt(0)?.toUpperCase() || '?'}</span>}
             />
           ) : (
             <span className="text-primary-700 font-bold text-lg">

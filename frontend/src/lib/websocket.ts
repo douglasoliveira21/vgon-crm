@@ -6,17 +6,16 @@ class WebSocketService {
   private reconnectAttempts = 0
   private maxReconnectAttempts = 5
   private reconnectDelay = 5000
-  private currentToken: string | null = null
   private intentionalClose = false
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectPausedUntil = 0
 
-  connect(token: string) {
-    if (!token || Date.now() < this.reconnectPausedUntil) {
+  connect() {
+    if (Date.now() < this.reconnectPausedUntil) {
       return
     }
 
-    if (this.ws && this.currentToken === token && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return
     }
 
@@ -27,9 +26,8 @@ class WebSocketService {
     }
 
     this.intentionalClose = false
-    this.currentToken = token
     const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001'
-    this.ws = new WebSocket(`${WS_URL}/ws?token=${token}`)
+    this.ws = new WebSocket(`${WS_URL}/ws`)
 
     this.ws.onopen = () => {
       console.log('WebSocket connected')
@@ -52,7 +50,7 @@ class WebSocketService {
         this.intentionalClose = false
         return
       }
-      this.attemptReconnect(token)
+      this.attemptReconnect()
     }
 
     this.ws.onerror = (error) => {
@@ -60,8 +58,8 @@ class WebSocketService {
     }
   }
 
-  private attemptReconnect(token: string) {
-    if (!token || Date.now() < this.reconnectPausedUntil) return
+  private attemptReconnect() {
+    if (Date.now() < this.reconnectPausedUntil) return
     if (typeof navigator !== 'undefined' && !navigator.onLine) return
     if (this.reconnectTimer) return
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
@@ -70,7 +68,7 @@ class WebSocketService {
       this.reconnectTimer = setTimeout(() => {
         this.reconnectTimer = null
         console.log(`WebSocket reconnecting... attempt ${this.reconnectAttempts}`)
-        this.connect(token)
+        this.connect()
       }, delay)
     }
   }
@@ -130,7 +128,6 @@ class WebSocketService {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
-    this.currentToken = null
     this.reconnectAttempts = 0
     this.reconnectPausedUntil = 0
   }

@@ -5,6 +5,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
 
 export const api = axios.create({
   baseURL: `${API_URL}/api`,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -15,14 +16,9 @@ const emitRequestActivity = (active: boolean) => {
   window.dispatchEvent(new CustomEvent('api:activity', { detail: { active } }))
 }
 
-// Request interceptor to add auth token
 api.interceptors.request.use(
   (config) => {
     emitRequestActivity(true)
-    const token = localStorage.getItem('access_token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
-    }
     return config
   },
   (error) => {
@@ -52,30 +48,15 @@ api.interceptors.response.use(
 
       originalRequest._retry = true
 
-      const refreshToken = localStorage.getItem('refresh_token')
-      if (refreshToken) {
-        try {
-          const response = await axios.post(`${API_URL}/api/auth/refresh`, {
-            refresh_token: refreshToken,
-          })
-
-          const { access_token, refresh_token: newRefreshToken } = response.data
-          localStorage.setItem('access_token', access_token)
-          localStorage.setItem('refresh_token', newRefreshToken)
-
-          originalRequest.headers.Authorization = `Bearer ${access_token}`
-          return api(originalRequest)
-        } catch (refreshError: any) {
-          if (refreshError.response?.status === 429 || refreshError.response?.status >= 500) {
-            return Promise.reject(refreshError)
-          }
-
-          wsService.pauseReconnect()
-          localStorage.removeItem('access_token')
-          localStorage.removeItem('refresh_token')
-          window.location.href = '/login'
+      try {
+        await axios.post(`${API_URL}/api/auth/refresh`, {}, { withCredentials: true })
+        wsService.connect()
+        return api(originalRequest)
+      } catch (refreshError: any) {
+        if (refreshError.response?.status === 429 || refreshError.response?.status >= 500) {
+          return Promise.reject(refreshError)
         }
-      } else {
+        wsService.pauseReconnect()
         window.location.href = '/login'
       }
     }

@@ -3,6 +3,7 @@ module github.com/evocrm/backend
 go 1.22.0
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/gofiber/contrib/websocket v1.3.2
 	github.com/gofiber/fiber/v2 v2.52.6
 	github.com/golang-jwt/jwt/v5 v5.2.1

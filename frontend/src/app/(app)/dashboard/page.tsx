@@ -108,9 +108,9 @@ export default function DashboardPage() {
 
   if (loading && !data) {
     return (
-      <div className="p-6 animate-pulse">
+    <div className="animate-pulse p-4 sm:p-6">
         <div className="h-8 bg-gray-200 dark:bg-gray-800 rounded w-64 mb-6" />
-        <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="mb-6 grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-4 lg:gap-4">
           {[1, 2, 3, 4].map((i) => <div key={i} className="h-28 bg-gray-200 dark:bg-gray-800 rounded-xl" />)}
         </div>
       </div>
@@ -124,7 +124,7 @@ export default function DashboardPage() {
 	const supervisor = user?.role_slug === 'supervisor' || data?.supervisor
 
   return (
-    <div className="p-6 max-w-[1500px] mx-auto space-y-6">
+    <div className="mx-auto max-w-[1500px] space-y-6 p-4 sm:p-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
 		  <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{personal ? 'Meu desempenho' : supervisor ? 'Desempenho do meu time' : 'Dashboard total'}</h1>
@@ -179,7 +179,7 @@ export default function DashboardPage() {
                   </div>
                   <Badge tone={channel.queue_size > 0 ? 'yellow' : 'green'}>{channel.queue_size} na fila</Badge>
                 </div>
-                <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                   <SmallStat label="Ativas" value={channel.active_count} />
                   <SmallStat label="Espera media" value={formatDuration(channel.avg_wait_seconds)} />
                 </div>
@@ -190,7 +190,7 @@ export default function DashboardPage() {
         </Panel>
 
 		<Panel title={personal ? 'Minha disponibilidade' : supervisor ? 'Disponibilidade do time' : 'Disponibilidade dos agentes'}>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <SmallStat label="Online" value={availability.online} tone="green" />
             <SmallStat label="Ocupados" value={availability.busy} tone="yellow" />
             <SmallStat label="Em pausa" value={availability.pause} tone="blue" />
@@ -268,7 +268,7 @@ export default function DashboardPage() {
             {(data?.sla_by_channel || []).map((channel) => (
               <div key={channel.name} className="rounded-lg border border-gray-100 p-3 dark:border-gray-800">
                 <p className="mb-2 font-medium text-gray-900 dark:text-white">{channel.name}</p>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <SmallStat label="Resposta" value={`${formatPercent(channel.first_response_sla)}%`} tone={channel.first_response_sla < 80 ? 'red' : 'green'} />
                   <SmallStat label="Resolucao" value={`${formatPercent(channel.resolution_sla)}%`} tone={channel.resolution_sla < 80 ? 'red' : 'green'} />
                 </div>

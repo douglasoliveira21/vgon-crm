@@ -31,6 +31,7 @@ func NewAuthService(db *sql.DB, cfg *config.Config) *AuthService {
 type LoginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	TOTPCode string `json:"totp_code"`
 }
 
 type RegisterRequest struct {
@@ -51,19 +52,20 @@ type ResetPasswordRequest struct {
 }
 
 type AuthResponse struct {
-	AccessToken  string       `json:"access_token"`
-	RefreshToken string       `json:"refresh_token"`
+	AccessToken  string       `json:"-"`
+	RefreshToken string       `json:"-"`
 	User         *models.User `json:"user"`
 }
 
 func (s *AuthService) Login(req *LoginRequest) (*AuthResponse, error) {
 	var user models.User
-	var roleSlug sql.NullString
+	var roleSlug, twoFactorSecret sql.NullString
 
 	err := s.db.QueryRow(`
 		SELECT u.id, u.company_id, u.name, u.email, u.password_hash, u.avatar_url, 
 			   u.is_active, u.is_online, COALESCE(u.availability_status, 'offline'),
-			   COALESCE(u.is_super_admin, false), r.slug, r.name
+			   COALESCE(u.is_super_admin, false), r.slug, r.name,
+			   COALESCE(u.two_factor_enabled, false), u.two_factor_secret
 		FROM users u
 		LEFT JOIN roles r ON u.role_id = r.id
 		JOIN companies co ON co.id = u.company_id AND co.is_active = true
@@ -72,6 +74,7 @@ func (s *AuthService) Login(req *LoginRequest) (*AuthResponse, error) {
 		&user.ID, &user.CompanyID, &user.Name, &user.Email, &user.PasswordHash,
 		&user.AvatarURL, &user.IsActive, &user.IsOnline, &user.AvailabilityStatus,
 		&user.IsSuperAdmin, &roleSlug, &user.RoleName,
+		&user.TwoFactorEnabled, &twoFactorSecret,
 	)
 
 	if err != nil {
@@ -84,6 +87,15 @@ func (s *AuthService) Login(req *LoginRequest) (*AuthResponse, error) {
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
 		return nil, fmt.Errorf("invalid credentials")
 	}
+	if user.TwoFactorEnabled {
+		secret := DecryptSecret(twoFactorSecret.String, s.cfg.JWTSecret)
+		if req.TOTPCode == "" {
+			return nil, ErrTwoFactorRequired
+		}
+		if !ValidateTOTP(secret, req.TOTPCode, time.Now()) {
+			return nil, ErrInvalidTwoFactorCode
+		}
+	}
 
 	user.RoleSlug = ""
 	if roleSlug.Valid {
@@ -91,8 +103,9 @@ func (s *AuthService) Login(req *LoginRequest) (*AuthResponse, error) {
 	}
 
 	// Generate tokens
-	accessToken, refreshToken, err := middleware.GenerateTokens(
-		user.ID, user.CompanyID, user.RoleSlug, user.Email, s.cfg,
+	sessionID := uuid.New().String()
+	accessToken, refreshToken, err := middleware.GenerateTokensForSession(
+		user.ID, user.CompanyID, user.RoleSlug, user.Email, sessionID, s.cfg,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate tokens: %w", err)
@@ -101,9 +114,9 @@ func (s *AuthService) Login(req *LoginRequest) (*AuthResponse, error) {
 	// Save refresh token (hashed)
 	hashedRefresh := hashToken(refreshToken)
 	_, err = s.db.Exec(`
-		INSERT INTO refresh_tokens (id, user_id, token, expires_at)
-		VALUES ($1, $2, $3, $4)
-	`, uuid.New().String(), user.ID, hashedRefresh, time.Now().Add(s.cfg.JWTRefreshExpiry))
+		INSERT INTO refresh_tokens (id, user_id, token, expires_at, session_id)
+		VALUES ($1, $2, $3, $4, $5)
+	`, uuid.New().String(), user.ID, hashedRefresh, time.Now().Add(s.cfg.JWTRefreshExpiry), sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save refresh token: %w", err)
 	}
@@ -161,16 +174,17 @@ func (s *AuthService) Register(req *RegisterRequest) (*AuthResponse, error) {
 	}
 
 	// Generate tokens
-	accessToken, refreshToken, err := middleware.GenerateTokens(userID, companyID, "admin", req.Email, s.cfg)
+	sessionID := uuid.New().String()
+	accessToken, refreshToken, err := middleware.GenerateTokensForSession(userID, companyID, "admin", req.Email, sessionID, s.cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate tokens: %w", err)
 	}
 
 	// Save refresh token (hashed)
 	s.db.Exec(`
-		INSERT INTO refresh_tokens (id, user_id, token, expires_at)
-		VALUES ($1, $2, $3, $4)
-	`, uuid.New().String(), userID, hashToken(refreshToken), time.Now().Add(s.cfg.JWTRefreshExpiry))
+		INSERT INTO refresh_tokens (id, user_id, token, expires_at, session_id)
+		VALUES ($1, $2, $3, $4, $5)
+	`, uuid.New().String(), userID, hashToken(refreshToken), time.Now().Add(s.cfg.JWTRefreshExpiry), sessionID)
 
 	user := &models.User{
 		ID:        userID,
@@ -201,14 +215,15 @@ func (s *AuthService) RefreshToken(refreshTokenStr string) (*AuthResponse, error
 
 	// Check if token exists in DB (compare hashed)
 	hashedRefresh := hashToken(refreshTokenStr)
-	var tokenID string
+	var tokenID, sessionID string
 	err = s.db.QueryRow(`
-		SELECT rt.id
+		SELECT rt.id, rt.session_id
 		FROM refresh_tokens rt
 		JOIN users u ON u.id = rt.user_id AND u.is_active = true
 		JOIN companies co ON co.id = u.company_id AND co.is_active = true
 		WHERE rt.token = $1 AND rt.user_id = $2 AND rt.expires_at > NOW()
-	`, hashedRefresh, claims.UserID).Scan(&tokenID)
+		  AND rt.revoked_at IS NULL
+	`, hashedRefresh, claims.UserID).Scan(&tokenID, &sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("refresh token not found or expired")
 	}
@@ -217,8 +232,8 @@ func (s *AuthService) RefreshToken(refreshTokenStr string) (*AuthResponse, error
 	s.db.Exec("DELETE FROM refresh_tokens WHERE id = $1", tokenID)
 
 	// Generate new tokens
-	accessToken, newRefreshToken, err := middleware.GenerateTokens(
-		claims.UserID, claims.CompanyID, claims.RoleSlug, claims.Email, s.cfg,
+	accessToken, newRefreshToken, err := middleware.GenerateTokensForSession(
+		claims.UserID, claims.CompanyID, claims.RoleSlug, claims.Email, sessionID, s.cfg,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate tokens: %w", err)
@@ -226,9 +241,9 @@ func (s *AuthService) RefreshToken(refreshTokenStr string) (*AuthResponse, error
 
 	// Save new refresh token (hashed)
 	s.db.Exec(`
-		INSERT INTO refresh_tokens (id, user_id, token, expires_at)
-		VALUES ($1, $2, $3, $4)
-	`, uuid.New().String(), claims.UserID, hashToken(newRefreshToken), time.Now().Add(s.cfg.JWTRefreshExpiry))
+		INSERT INTO refresh_tokens (id, user_id, token, expires_at, session_id)
+		VALUES ($1, $2, $3, $4, $5)
+	`, uuid.New().String(), claims.UserID, hashToken(newRefreshToken), time.Now().Add(s.cfg.JWTRefreshExpiry), sessionID)
 
 	return &AuthResponse{
 		AccessToken:  accessToken,
@@ -413,14 +428,15 @@ func (s *AuthService) GetUserByID(userID string) (*models.User, error) {
 	err := s.db.QueryRow(`
 		SELECT u.id, u.company_id, u.name, u.email, u.avatar_url, u.phone,
 			   u.is_active, u.is_online, COALESCE(u.availability_status, 'offline'),
-			   COALESCE(u.is_super_admin, false), r.slug, r.name
+			   COALESCE(u.is_super_admin, false), r.slug, r.name,
+			   COALESCE(u.two_factor_enabled, false)
 		FROM users u
 		LEFT JOIN roles r ON u.role_id = r.id
 		WHERE u.id = $1
 	`, userID).Scan(
 		&user.ID, &user.CompanyID, &user.Name, &user.Email, &user.AvatarURL,
 		&user.Phone, &user.IsActive, &user.IsOnline, &user.AvailabilityStatus,
-		&user.IsSuperAdmin, &user.RoleSlug, &user.RoleName,
+		&user.IsSuperAdmin, &user.RoleSlug, &user.RoleName, &user.TwoFactorEnabled,
 	)
 	if err != nil {
 		return nil, err
@@ -428,6 +444,75 @@ func (s *AuthService) GetUserByID(userID string) (*models.User, error) {
 	return &user, nil
 }
 
+var (
+	ErrTwoFactorRequired    = errors.New("two_factor_required")
+	ErrInvalidTwoFactorCode = errors.New("invalid_two_factor_code")
+)
+
+func (s *AuthService) BeginTwoFactorSetup(userID, companyID string) (string, error) {
+	secret, err := NewTOTPSecret()
+	if err != nil {
+		return "", err
+	}
+	encrypted, err := EncryptSecret(secret, s.cfg.JWTSecret)
+	if err != nil {
+		return "", err
+	}
+	result, err := s.db.Exec(`
+		UPDATE users SET two_factor_pending_secret = $1, updated_at = NOW()
+		WHERE id = $2 AND company_id = $3
+	`, encrypted, userID, companyID)
+	if err != nil {
+		return "", err
+	}
+	count, _ := result.RowsAffected()
+	if count == 0 {
+		return "", sql.ErrNoRows
+	}
+	return secret, nil
+}
+
+func (s *AuthService) ConfirmTwoFactor(userID, companyID, code string) error {
+	var encrypted string
+	if err := s.db.QueryRow(`
+		SELECT COALESCE(two_factor_pending_secret, '') FROM users
+		WHERE id = $1 AND company_id = $2
+	`, userID, companyID).Scan(&encrypted); err != nil {
+		return err
+	}
+	if !ValidateTOTP(DecryptSecret(encrypted, s.cfg.JWTSecret), code, time.Now()) {
+		return ErrInvalidTwoFactorCode
+	}
+	_, err := s.db.Exec(`
+		UPDATE users SET two_factor_enabled = true,
+			two_factor_secret = two_factor_pending_secret,
+			two_factor_pending_secret = NULL,
+			two_factor_confirmed_at = NOW(), updated_at = NOW()
+		WHERE id = $1 AND company_id = $2
+	`, userID, companyID)
+	return err
+}
+
+func (s *AuthService) DisableTwoFactor(userID, companyID, password, code string) error {
+	var passwordHash, encrypted string
+	if err := s.db.QueryRow(`
+		SELECT password_hash, COALESCE(two_factor_secret, '') FROM users
+		WHERE id = $1 AND company_id = $2 AND two_factor_enabled = true
+	`, userID, companyID).Scan(&passwordHash, &encrypted); err != nil {
+		return err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)) != nil ||
+		!ValidateTOTP(DecryptSecret(encrypted, s.cfg.JWTSecret), code, time.Now()) {
+		return errors.New("senha ou código inválido")
+	}
+	_, err := s.db.Exec(`
+		UPDATE users SET two_factor_enabled = false, two_factor_secret = NULL,
+			two_factor_pending_secret = NULL,
+			two_factor_confirmed_at = NULL, updated_at = NOW()
+		WHERE id = $1 AND company_id = $2
+	`, userID, companyID)
+	return err
+}
 
 // hashToken creates a SHA256 hash of a token for secure storage
 func hashToken(token string) string {

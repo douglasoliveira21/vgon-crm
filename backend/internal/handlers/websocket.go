@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/evocrm/backend/internal/config"
 	"github.com/evocrm/backend/internal/middleware"
@@ -17,8 +18,12 @@ import (
 
 func WebSocketHandler(hub *ws.Hub, cfg *config.Config, svc *services.Container) fiber.Handler {
 	return websocket.New(func(c *websocket.Conn) {
-		// Authenticate via query param token
-		token := c.Query("token")
+		if strings.TrimRight(c.Headers("Origin"), "/") != strings.TrimRight(cfg.FrontendURL, "/") {
+			c.Close()
+			return
+		}
+		// Browser clients authenticate exclusively with the HttpOnly cookie.
+		token := c.Cookies("crm_access")
 		if token == "" {
 			c.Close()
 			return
@@ -36,6 +41,14 @@ func WebSocketHandler(hub *ws.Hub, cfg *config.Config, svc *services.Container) 
 			c.Close()
 			return
 		}
+		var active bool
+		if claims.SessionID == "" || svc.DB.QueryRow(`SELECT EXISTS (
+			SELECT 1 FROM refresh_tokens
+			WHERE session_id = $1 AND user_id = $2 AND revoked_at IS NULL AND expires_at > NOW()
+		)`, claims.SessionID, claims.UserID).Scan(&active) != nil || !active {
+			c.Close()
+			return
+		}
 
 		// Create client
 		clientID := uuid.New().String()
@@ -43,6 +56,7 @@ func WebSocketHandler(hub *ws.Hub, cfg *config.Config, svc *services.Container) 
 			ID:        clientID,
 			UserID:    claims.UserID,
 			CompanyID: claims.CompanyID,
+			RoleSlug:  claims.RoleSlug,
 			Send:      make(chan []byte, 256),
 			Hub:       hub,
 		}
@@ -88,14 +102,20 @@ func WebSocketHandler(hub *ws.Hub, cfg *config.Config, svc *services.Container) 
 				var data struct {
 					ConversationID string `json:"conversation_id"`
 				}
-				json.Unmarshal(wsMsg.Data, &data)
+				if json.Unmarshal(wsMsg.Data, &data) != nil ||
+					!middleware.CanAccessConversation(svc.DB, data.ConversationID, claims.CompanyID, claims.UserID, claims.RoleSlug) {
+					continue
+				}
 				hub.JoinRoom(clientID, "conversation:"+data.ConversationID)
 
 			case "leave_conversation":
 				var data struct {
 					ConversationID string `json:"conversation_id"`
 				}
-				json.Unmarshal(wsMsg.Data, &data)
+				if json.Unmarshal(wsMsg.Data, &data) != nil ||
+					!middleware.CanAccessConversation(svc.DB, data.ConversationID, claims.CompanyID, claims.UserID, claims.RoleSlug) {
+					continue
+				}
 				hub.LeaveRoom(clientID, "conversation:"+data.ConversationID)
 
 			case "typing":
@@ -103,7 +123,10 @@ func WebSocketHandler(hub *ws.Hub, cfg *config.Config, svc *services.Container) 
 					ConversationID string `json:"conversation_id"`
 					IsTyping       bool   `json:"is_typing"`
 				}
-				json.Unmarshal(wsMsg.Data, &data)
+				if json.Unmarshal(wsMsg.Data, &data) != nil ||
+					!middleware.CanAccessConversation(svc.DB, data.ConversationID, claims.CompanyID, claims.UserID, claims.RoleSlug) {
+					continue
+				}
 				// Get agent name
 				var userName string
 				if svc != nil && svc.DB != nil {
@@ -129,10 +152,12 @@ func WebSocketHandler(hub *ws.Hub, cfg *config.Config, svc *services.Container) 
 // WidgetWebSocketHandler provides a public (no JWT) WebSocket connection for
 // website visitors using the chat widget. The visitor joins a room keyed by
 // their conversation_id so they receive agent/bot replies in real-time.
-func WidgetWebSocketHandler(hub *ws.Hub) fiber.Handler {
+func WidgetWebSocketHandler(hub *ws.Hub, svc *services.Container) fiber.Handler {
 	return websocket.New(func(c *websocket.Conn) {
 		conversationID := c.Query("conversation_id")
-		if conversationID == "" {
+		visitorID := c.Query("visitor_id")
+		sessionToken := c.Query("session_token")
+		if !svc.Auth.ValidateWidgetSocket(conversationID, visitorID, sessionToken) {
 			c.Close()
 			return
 		}

@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"time"
@@ -9,6 +11,7 @@ import (
 	"github.com/evocrm/backend/internal/middleware"
 	"github.com/evocrm/backend/internal/services"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 func GetPlatformHealth(svc *services.Container) fiber.Handler {
@@ -218,13 +221,42 @@ func ImpersonateTenant(svc *services.Container) fiber.Handler {
 		if err != nil {
 			return c.Status(404).JSON(fiber.Map{"error": "Nenhum usuário ativo encontrado no tenant"})
 		}
-		access, _, err := middleware.GenerateTokens(id, companyID, roleSlug, email, svc.Config)
+		originalAccess := c.Cookies("crm_access")
+		if originalAccess == "" {
+			return c.Status(401).JSON(fiber.Map{"error": "Sessão administrativa inválida"})
+		}
+		sessionID := uuid.New().String()
+		access, refresh, err := middleware.GenerateTokensForSession(id, companyID, roleSlug, email, sessionID, svc.Config)
 		if err != nil {
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
+		_, err = svc.DB.Exec(`
+			INSERT INTO refresh_tokens (id, user_id, token, expires_at, session_id, device_name, ip_address, user_agent)
+			VALUES ($1, $2, $3, $4, $5, 'Impersonação administrativa', $6, $7)
+		`, uuid.New().String(), id, hashAdminToken(refresh), time.Now().Add(svc.Config.JWTRefreshExpiry),
+			sessionID, c.IP(), c.Get("User-Agent"))
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Não foi possível criar a sessão de suporte"})
+		}
+		secure := strings.EqualFold(svc.Config.AppEnv, "production")
+		c.Cookie(&fiber.Cookie{
+			Name: "crm_impersonator", Value: originalAccess, Path: "/api/auth/impersonation",
+			HTTPOnly: true, Secure: secure, SameSite: fiber.CookieSameSiteLaxMode,
+			MaxAge: int((2 * time.Hour).Seconds()),
+		})
+		c.Cookie(&fiber.Cookie{
+			Name: "crm_access", Value: access, Path: "/", HTTPOnly: true,
+			Secure: secure, SameSite: fiber.CookieSameSiteLaxMode,
+			MaxAge: int((2 * time.Hour).Seconds()),
+		})
 		logAuditEvent(svc.DB, c, "admin.tenant.impersonate", "company", tenantID, fiber.Map{"reason": body.Reason, "target_user_id": id, "target_email": email})
-		return c.JSON(fiber.Map{"access_token": access, "user": fiber.Map{"id": id, "company_id": companyID, "name": name, "email": email, "role_slug": roleSlug, "role_name": roleName, "is_online": isOnline, "is_super_admin": false}})
+		return c.JSON(fiber.Map{"impersonating": true, "user": fiber.Map{"id": id, "company_id": companyID, "name": name, "email": email, "role_slug": roleSlug, "role_name": roleName, "is_online": isOnline, "is_super_admin": false}})
 	}
+}
+
+func hashAdminToken(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }
 
 func ExportTenantData(svc *services.Container) fiber.Handler {

@@ -188,12 +188,7 @@ export default function TenantsPage() {
     if (!reason) return
     try {
       const response = await api.post(`/admin/tenants/${tenant.id}/impersonate`, { reason })
-      const currentAccess = localStorage.getItem('access_token')
-      const currentRefresh = localStorage.getItem('refresh_token')
-      if (currentAccess) localStorage.setItem('super_admin_original_access_token', currentAccess)
-      if (currentRefresh) localStorage.setItem('super_admin_original_refresh_token', currentRefresh)
-      localStorage.setItem('access_token', response.data.access_token)
-      localStorage.removeItem('refresh_token')
+      sessionStorage.setItem('crm_impersonating', response.data.impersonating ? 'true' : 'false')
       window.location.href = '/dashboard'
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Erro ao acessar tenant')
@@ -223,7 +218,7 @@ export default function TenantsPage() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Empresas (Tenants)</h1>
           <p className="text-gray-400 mt-1">Gerencie todas as empresas da plataforma</p>
@@ -261,7 +256,7 @@ export default function TenantsPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
+      <div className="overflow-x-auto rounded-xl border border-gray-700 bg-gray-800">
         {loading ? (
           <div className="flex items-center justify-center h-48">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div>
@@ -272,7 +267,7 @@ export default function TenantsPage() {
             <p>Nenhuma empresa encontrada</p>
           </div>
         ) : (
-          <table className="w-full">
+          <table className="w-full min-w-[820px]">
             <thead>
               <tr className="border-b border-gray-700">
                 <th className="text-left px-6 py-4 text-xs font-medium text-gray-400 uppercase tracking-wider">
@@ -471,7 +466,7 @@ export default function TenantsPage() {
 
               <div className="border-t border-gray-700 pt-4">
                 <p className="text-sm font-medium text-gray-300 mb-3">Configurações</p>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                   <div>
                     <label className="block text-sm font-medium text-gray-300 mb-1.5">
                       Plano
@@ -562,7 +557,7 @@ export default function TenantsPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">
                     Plano

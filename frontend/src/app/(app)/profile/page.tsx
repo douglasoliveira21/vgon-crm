@@ -1,10 +1,20 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuthStore } from '@/store/auth'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { Camera, Circle, KeyRound, Mail, Phone, Save, User } from 'lucide-react'
+import { Camera, Circle, KeyRound, Mail, MonitorSmartphone, Phone, Save, ShieldCheck, Trash2, User } from 'lucide-react'
+import { SafeImage } from '@/components/safe-image'
+
+interface Session {
+  id: string
+  ip_address: string
+  user_agent: string
+  last_used_at: string
+  expires_at: string
+  current: boolean
+}
 
 const resolveImage = (url?: string) => {
   if (!url) return ''
@@ -27,7 +37,61 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [savingPassword, setSavingPassword] = useState(false)
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(!!user?.two_factor_enabled)
+  const [twoFactorSecret, setTwoFactorSecret] = useState('')
+  const [twoFactorCode, setTwoFactorCode] = useState('')
+  const [twoFactorPassword, setTwoFactorPassword] = useState('')
+  const [sessions, setSessions] = useState<Session[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const loadSessions = async () => {
+    const response = await api.get('/me/sessions')
+    setSessions(response.data.sessions || [])
+  }
+
+  useEffect(() => {
+    void loadSessions()
+  }, [])
+
+  const beginTwoFactor = async () => {
+    try {
+      const response = await api.post('/me/2fa/setup')
+      setTwoFactorSecret(response.data.secret)
+      setTwoFactorCode('')
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao iniciar autenticação')
+    }
+  }
+
+  const confirmTwoFactor = async () => {
+    try {
+      await api.post('/me/2fa/confirm', { code: twoFactorCode })
+      setTwoFactorEnabled(true)
+      setTwoFactorSecret('')
+      setTwoFactorCode('')
+      toast.success('Autenticação em dois fatores ativada')
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Código inválido')
+    }
+  }
+
+  const disableTwoFactor = async () => {
+    try {
+      await api.delete('/me/2fa', { data: { password: twoFactorPassword, code: twoFactorCode } })
+      setTwoFactorEnabled(false)
+      setTwoFactorPassword('')
+      setTwoFactorCode('')
+      toast.success('Autenticação em dois fatores desativada')
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Não foi possível desativar')
+    }
+  }
+
+  const revokeSession = async (id: string) => {
+    await api.delete(`/me/sessions/${id}`)
+    await loadSessions()
+    toast.success('Sessão revogada')
+  }
 
   const saveProfile = async () => {
     if (!name.trim()) {
@@ -103,7 +167,12 @@ export default function ProfilePage() {
           <div className="flex flex-col items-center text-center">
             <div className="relative">
               {user?.avatar_url ? (
-                <img src={resolveImage(user.avatar_url)} alt={user.name} className="h-32 w-32 rounded-full object-cover" />
+                <SafeImage
+                  src={resolveImage(user.avatar_url)}
+                  alt={user.name}
+                  className="h-32 w-32 rounded-full object-cover"
+                  fallback={<div className="flex h-32 w-32 items-center justify-center rounded-full bg-primary-100 text-4xl font-semibold text-primary-700">{user.name?.charAt(0)?.toUpperCase() || 'U'}</div>}
+                />
               ) : (
                 <div className="flex h-32 w-32 items-center justify-center rounded-full bg-primary-600 text-4xl font-semibold text-white">
                   {user?.name?.charAt(0)?.toUpperCase() || 'U'}
@@ -162,6 +231,60 @@ export default function ProfilePage() {
               <Save size={16} />
               {saving ? 'Salvando...' : 'Salvar perfil'}
             </button>
+          </div>
+
+          <div className="card p-6">
+            <div className="mb-3 flex items-center gap-3">
+              <ShieldCheck size={20} className="text-gray-400" />
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Autenticação em dois fatores</h2>
+            </div>
+            <p className="text-sm text-gray-500">
+              {twoFactorEnabled
+                ? 'Ativa. O código do aplicativo autenticador será exigido em cada novo login.'
+                : 'Proteja sua conta com Google Authenticator, Microsoft Authenticator ou aplicativo compatível.'}
+            </p>
+            {!twoFactorEnabled && !twoFactorSecret && (
+              <button type="button" onClick={beginTwoFactor} className="btn-primary mt-4">Configurar 2FA</button>
+            )}
+            {!twoFactorEnabled && twoFactorSecret && (
+              <div className="mt-4 space-y-3">
+                <p className="text-sm text-gray-600 dark:text-gray-300">Adicione uma conta manualmente e informe esta chave:</p>
+                <code className="block break-all rounded-md bg-gray-100 p-3 text-sm dark:bg-gray-800">{twoFactorSecret}</code>
+                <input className="input max-w-xs" inputMode="numeric" placeholder="Código de 6 dígitos" value={twoFactorCode} onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))} />
+                <button type="button" onClick={confirmTwoFactor} disabled={twoFactorCode.length !== 6} className="btn-primary">Confirmar e ativar</button>
+              </div>
+            )}
+            {twoFactorEnabled && (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <input type="password" className="input" placeholder="Senha atual" value={twoFactorPassword} onChange={(e) => setTwoFactorPassword(e.target.value)} />
+                <input className="input" inputMode="numeric" placeholder="Código de 6 dígitos" value={twoFactorCode} onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))} />
+                <button type="button" onClick={disableTwoFactor} className="btn-secondary text-red-600">Desativar 2FA</button>
+              </div>
+            )}
+          </div>
+
+          <div className="card p-6">
+            <div className="mb-4 flex items-center gap-3">
+              <MonitorSmartphone size={20} className="text-gray-400" />
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Dispositivos conectados</h2>
+            </div>
+            <div className="divide-y divide-gray-200 dark:divide-gray-800">
+              {sessions.map((session) => (
+                <div key={session.id} className="flex items-center justify-between gap-4 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
+                      {session.current ? 'Este dispositivo' : session.user_agent || 'Dispositivo'}
+                    </p>
+                    <p className="text-xs text-gray-500">{session.ip_address || 'IP não informado'} · Último acesso {new Date(session.last_used_at).toLocaleString('pt-BR')}</p>
+                  </div>
+                  {!session.current && (
+                    <button type="button" onClick={() => revokeSession(session.id)} className="rounded-md p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30" title="Revogar sessão">
+                      <Trash2 size={17} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="card p-6">

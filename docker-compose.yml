@@ -16,8 +16,11 @@ services:
       - EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
       - APP_PORT=3001
       - FRONTEND_URL=http://localhost:3000
+      - CLAMAV_ADDR=clamav:3310
+      - EMAIL_WEBHOOK_SECRET=${EMAIL_WEBHOOK_SECRET}
     depends_on:
       - redis
+      - clamav
     restart: unless-stopped
     networks:
       - evocrm
@@ -47,8 +50,17 @@ services:
     networks:
       - evocrm
 
+  clamav:
+    image: clamav/clamav:stable
+    volumes:
+      - clamav_data:/var/lib/clamav
+    restart: unless-stopped
+    networks:
+      - evocrm
+
 volumes:
   redis_data:
+  clamav_data:
 
 networks:
   evocrm:

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { Ban, Loader2, Search, Unlock } from 'lucide-react'
+import { SafeImage } from '@/components/safe-image'
 
 const PAGE_SIZE = 25
 type BlockedContact = { id: string; name?: string; phone?: string; email?: string; avatar_url?: string }
@@ -52,7 +53,7 @@ export default function BlockedContactsPage() {
         {loading ? <div className="flex h-48 items-center justify-center"><Loader2 className="animate-spin text-primary-600" /></div> : contacts.length === 0 ? <div className="p-12 text-center text-gray-400">Nenhum contato bloqueado</div> : (
           <div className="divide-y divide-gray-100 dark:divide-gray-800">{contacts.map((contact) => (
             <div key={contact.id} className="flex items-center gap-4 px-5 py-4">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-100 font-semibold text-gray-600">{contact.avatar_url ? <img src={contact.avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${contact.avatar_url}` : contact.avatar_url} alt="" className="h-full w-full object-cover" /> : (contact.name || '?').charAt(0).toUpperCase()}</div>
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-100 font-semibold text-gray-600">{contact.avatar_url ? <SafeImage src={contact.avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${contact.avatar_url}` : contact.avatar_url} alt="" className="h-full w-full object-cover" fallback={(contact.name || '?').charAt(0).toUpperCase()} /> : (contact.name || '?').charAt(0).toUpperCase()}</div>
               <div className="min-w-0 flex-1"><p className="truncate font-medium text-gray-900 dark:text-white">{contact.name || 'Sem nome'}</p><p className="truncate text-sm text-gray-500">{contact.phone || contact.email || 'Sem telefone ou e-mail'}</p></div>
               <button type="button" onClick={() => unblock(contact)} className="btn-secondary flex items-center gap-2 text-sm"><Unlock size={15} /> Desbloquear</button>
             </div>

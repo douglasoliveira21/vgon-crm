@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import toast from 'react-hot-toast'
+import { SafeImage } from '@/components/safe-image'
 import { Eye, EyeOff } from 'lucide-react'
 import api from '@/lib/api'
 
@@ -104,7 +105,7 @@ function ResetPasswordShell({
     <main className="flex min-h-screen items-center justify-center bg-dark-900 px-6 py-10 text-white">
       <div className="w-full max-w-md">
         <div className="mb-8 flex justify-center">
-          <img src="/logo-white.png" alt="Logo do crmvgon" className="h-20 w-auto max-w-full object-contain" />
+          <SafeImage src="/logo-white.png" fallbackSrc="/assets/images/logo-vgon-negativo.png" alt="Logo do crmvgon" className="h-20 w-auto max-w-full object-contain" />
         </div>
 
         <div className="rounded-2xl border border-gray-100 bg-white p-8 text-gray-900 shadow-xl shadow-black/20">

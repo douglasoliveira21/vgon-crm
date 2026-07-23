@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,6 +27,18 @@ func AuthLogin(svc *services.Container) fiber.Handler {
 
 		resp, err := svc.Auth.Login(&req)
 		if err != nil {
+			if errors.Is(err, services.ErrTwoFactorRequired) {
+				return c.Status(fiber.StatusPreconditionRequired).JSON(fiber.Map{
+					"error": "Informe o código do aplicativo autenticador",
+					"code":  "two_factor_required",
+				})
+			}
+			if errors.Is(err, services.ErrInvalidTwoFactorCode) {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+					"error": "Código de autenticação inválido",
+					"code":  "invalid_two_factor_code",
+				})
+			}
 			recordLoginEvent(svc, c, req.Email, false, err.Error(), "", "")
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -37,7 +50,60 @@ func AuthLogin(svc *services.Container) fiber.Handler {
 			)
 		`, c.IP(), c.Get("User-Agent"), resp.User.ID)
 
+		setAuthCookies(c, svc, resp.AccessToken, resp.RefreshToken)
 		return c.JSON(resp)
+	}
+}
+
+func BeginTwoFactorSetup(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userID := c.Locals("user_id").(string)
+		companyID := c.Locals("company_id").(string)
+		email := c.Locals("email").(string)
+		secret, err := svc.Auth.BeginTwoFactorSetup(userID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Não foi possível iniciar o 2FA"})
+		}
+		return c.JSON(fiber.Map{
+			"secret": secret,
+			"otpauth_url": fmt.Sprintf("otpauth://totp/VGON:%s?secret=%s&issuer=VGON&digits=6&period=30",
+				email, secret),
+		})
+	}
+}
+
+func ConfirmTwoFactor(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		var body struct {
+			Code string `json:"code"`
+		}
+		if c.BodyParser(&body) != nil || body.Code == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Informe o código"})
+		}
+		if err := svc.Auth.ConfirmTwoFactor(c.Locals("user_id").(string), c.Locals("company_id").(string), body.Code); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Código inválido"})
+		}
+		_, _ = svc.DB.Exec(`
+			UPDATE refresh_tokens SET revoked_at = NOW()
+			WHERE user_id = $1 AND session_id <> $2 AND revoked_at IS NULL
+		`, c.Locals("user_id"), c.Locals("session_id"))
+		return c.JSON(fiber.Map{"message": "Autenticação em dois fatores ativada"})
+	}
+}
+
+func DisableTwoFactor(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		var body struct {
+			Password string `json:"password"`
+			Code     string `json:"code"`
+		}
+		if c.BodyParser(&body) != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Dados inválidos"})
+		}
+		if err := svc.Auth.DisableTwoFactor(c.Locals("user_id").(string), c.Locals("company_id").(string), body.Password, body.Code); err != nil {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(fiber.Map{"message": "Autenticação em dois fatores desativada"})
 	}
 }
 
@@ -74,6 +140,7 @@ func AuthRegister(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
 
+		setAuthCookies(c, svc, resp.AccessToken, resp.RefreshToken)
 		return c.Status(fiber.StatusCreated).JSON(resp)
 	}
 }
@@ -83,8 +150,12 @@ func AuthRefresh(svc *services.Container) fiber.Handler {
 		var body struct {
 			RefreshToken string `json:"refresh_token"`
 		}
-		if err := c.BodyParser(&body); err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
+		_ = c.BodyParser(&body)
+		if body.RefreshToken == "" {
+			body.RefreshToken = c.Cookies("crm_refresh")
+		}
+		if body.RefreshToken == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Refresh session required"})
 		}
 
 		resp, err := svc.Auth.RefreshToken(body.RefreshToken)
@@ -92,7 +163,124 @@ func AuthRefresh(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": err.Error()})
 		}
 
+		setAuthCookies(c, svc, resp.AccessToken, resp.RefreshToken)
 		return c.JSON(resp)
+	}
+}
+
+func setAuthCookies(c *fiber.Ctx, svc *services.Container, accessToken, refreshToken string) {
+	secure := strings.EqualFold(svc.Config.AppEnv, "production")
+	c.Cookie(&fiber.Cookie{
+		Name: "crm_access", Value: accessToken, Path: "/", HTTPOnly: true,
+		Secure: secure, SameSite: fiber.CookieSameSiteLaxMode,
+		MaxAge: int(svc.Config.JWTExpiration.Seconds()),
+	})
+	c.Cookie(&fiber.Cookie{
+		Name: "crm_refresh", Value: refreshToken, Path: "/api/auth", HTTPOnly: true,
+		Secure: secure, SameSite: fiber.CookieSameSiteLaxMode,
+		MaxAge: int(svc.Config.JWTRefreshExpiry.Seconds()),
+	})
+}
+
+func clearAuthCookies(c *fiber.Ctx, svc *services.Container) {
+	secure := strings.EqualFold(svc.Config.AppEnv, "production")
+	for _, cookie := range []fiber.Cookie{
+		{Name: "crm_access", Path: "/", HTTPOnly: true, Secure: secure, SameSite: fiber.CookieSameSiteLaxMode, MaxAge: -1},
+		{Name: "crm_refresh", Path: "/api/auth", HTTPOnly: true, Secure: secure, SameSite: fiber.CookieSameSiteLaxMode, MaxAge: -1},
+		{Name: "crm_impersonator", Path: "/api/auth/impersonation", HTTPOnly: true, Secure: secure, SameSite: fiber.CookieSameSiteLaxMode, MaxAge: -1},
+	} {
+		current := cookie
+		c.Cookie(&current)
+	}
+}
+
+func AuthLogout(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		sessionID, _ := c.Locals("session_id").(string)
+		userID, _ := c.Locals("user_id").(string)
+		_, _ = svc.DB.Exec(`
+			UPDATE refresh_tokens SET revoked_at = NOW()
+			WHERE session_id = $1 AND user_id = $2
+		`, sessionID, userID)
+		clearAuthCookies(c, svc)
+		return c.JSON(fiber.Map{"message": "Sessão encerrada"})
+	}
+}
+
+func EndImpersonation(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		originalAccess := c.Cookies("crm_impersonator")
+		if originalAccess == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Não existe impersonação ativa"})
+		}
+		_, _ = svc.DB.Exec(`
+			UPDATE refresh_tokens SET revoked_at = NOW()
+			WHERE session_id = $1 AND user_id = $2
+		`, c.Locals("session_id"), c.Locals("user_id"))
+		secure := strings.EqualFold(svc.Config.AppEnv, "production")
+		c.Cookie(&fiber.Cookie{
+			Name: "crm_access", Value: originalAccess, Path: "/", HTTPOnly: true,
+			Secure: secure, SameSite: fiber.CookieSameSiteLaxMode,
+			MaxAge: int(svc.Config.JWTExpiration.Seconds()),
+		})
+		c.Cookie(&fiber.Cookie{
+			Name: "crm_impersonator", Path: "/api/auth/impersonation", HTTPOnly: true,
+			Secure: secure, SameSite: fiber.CookieSameSiteLaxMode, MaxAge: -1,
+		})
+		return c.JSON(fiber.Map{"message": "Sessão administrativa restaurada"})
+	}
+}
+
+func GetCurrentSessions(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		rows, err := svc.DB.Query(`
+			SELECT session_id, COALESCE(device_name, ''), COALESCE(ip_address, ''),
+			       COALESCE(user_agent, ''), COALESCE(last_used_at, created_at),
+			       expires_at, session_id = $2
+			FROM refresh_tokens
+			WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > NOW()
+			ORDER BY COALESCE(last_used_at, created_at) DESC
+		`, c.Locals("user_id").(string), c.Locals("session_id").(string))
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Não foi possível carregar as sessões"})
+		}
+		defer rows.Close()
+		sessions := []fiber.Map{}
+		for rows.Next() {
+			var id, device, ip, userAgent string
+			var lastUsed, expiresAt time.Time
+			var current bool
+			if rows.Scan(&id, &device, &ip, &userAgent, &lastUsed, &expiresAt, &current) == nil {
+				sessions = append(sessions, fiber.Map{
+					"id": id, "device_name": device, "ip_address": ip,
+					"user_agent": userAgent, "last_used_at": lastUsed,
+					"expires_at": expiresAt, "current": current,
+				})
+			}
+		}
+		return c.JSON(fiber.Map{"sessions": sessions})
+	}
+}
+
+func RevokeCurrentSession(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		sessionID := c.Params("id")
+		currentID := c.Locals("session_id").(string)
+		if sessionID == currentID {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Use sair para encerrar a sessão atual"})
+		}
+		result, err := svc.DB.Exec(`
+			UPDATE refresh_tokens SET revoked_at = NOW()
+			WHERE session_id = $1 AND user_id = $2 AND revoked_at IS NULL
+		`, sessionID, c.Locals("user_id").(string))
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Não foi possível revogar a sessão"})
+		}
+		count, _ := result.RowsAffected()
+		if count == 0 {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Sessão não encontrada"})
+		}
+		return c.JSON(fiber.Map{"message": "Sessão revogada"})
 	}
 }
 
@@ -298,6 +486,10 @@ func UpdateCurrentUserPassword(svc *services.Container) fiber.Handler {
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
+		_, _ = svc.DB.Exec(`
+			UPDATE refresh_tokens SET revoked_at = NOW()
+			WHERE user_id = $1 AND session_id <> $2 AND revoked_at IS NULL
+		`, userID, c.Locals("session_id"))
 
 		return c.JSON(fiber.Map{"message": "Password updated"})
 	}

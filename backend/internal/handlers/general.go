@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -551,7 +553,9 @@ func GetBotFlows(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 
 		rows, err := svc.DB.Query(`
-			SELECT id, name, COALESCE(bot_name, 'Assistente'), description, trigger_type, trigger_value, is_active, priority, stop_on_match, nodes, edges, created_at
+			SELECT id, name, COALESCE(bot_name, 'Assistente'), description, trigger_type, trigger_value,
+			       is_active, priority, stop_on_match, nodes, edges, created_at,
+			       COALESCE(lifecycle_status, 'draft'), COALESCE(current_version, 1), published_version
 			FROM bot_flows WHERE company_id = $1 ORDER BY priority DESC, created_at ASC
 		`, companyID)
 		if err != nil {
@@ -568,13 +572,18 @@ func GetBotFlows(svc *services.Container) fiber.Handler {
 			var stopOnMatch bool
 			var nodes, edges json.RawMessage
 			var createdAt string
-			rows.Scan(&id, &name, &botName, &description, &triggerType, &triggerValue, &isActive, &priority, &stopOnMatch, &nodes, &edges, &createdAt)
+			var lifecycleStatus string
+			var currentVersion int
+			var publishedVersion sql.NullInt64
+			rows.Scan(&id, &name, &botName, &description, &triggerType, &triggerValue, &isActive, &priority, &stopOnMatch, &nodes, &edges, &createdAt, &lifecycleStatus, &currentVersion, &publishedVersion)
 			flows = append(flows, map[string]interface{}{
 				"id": id, "name": name, "description": description,
 				"bot_name":     botName,
 				"trigger_type": triggerType, "trigger_value": triggerValue,
 				"is_active": isActive, "priority": priority, "stop_on_match": stopOnMatch, "nodes": nodes, "edges": edges,
-				"created_at": createdAt,
+				"created_at":       createdAt,
+				"lifecycle_status": lifecycleStatus, "current_version": currentVersion,
+				"published_version": nullableInt64Value(publishedVersion),
 			})
 		}
 
@@ -593,12 +602,17 @@ func GetBotFlow(svc *services.Container) fiber.Handler {
 		var priority int
 		var nodes, edges json.RawMessage
 		var createdAt string
+		var lifecycleStatus string
+		var currentVersion int
+		var publishedVersion sql.NullInt64
 
 		err := svc.DB.QueryRow(`
-			SELECT id, name, COALESCE(bot_name, 'Assistente'), description, trigger_type, trigger_value, is_active, priority, stop_on_match, nodes, edges, created_at
+			SELECT id, name, COALESCE(bot_name, 'Assistente'), description, trigger_type, trigger_value,
+			       is_active, priority, stop_on_match, nodes, edges, created_at,
+			       COALESCE(lifecycle_status, 'draft'), COALESCE(current_version, 1), published_version
 			FROM bot_flows
 			WHERE id = $1 AND company_id = $2
-		`, flowID, companyID).Scan(&id, &name, &botName, &description, &triggerType, &triggerValue, &isActive, &priority, &stopOnMatch, &nodes, &edges, &createdAt)
+		`, flowID, companyID).Scan(&id, &name, &botName, &description, &triggerType, &triggerValue, &isActive, &priority, &stopOnMatch, &nodes, &edges, &createdAt, &lifecycleStatus, &currentVersion, &publishedVersion)
 		if err != nil {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Fluxo não encontrado"})
 		}
@@ -609,6 +623,8 @@ func GetBotFlow(svc *services.Container) fiber.Handler {
 			"trigger_type": triggerType, "trigger_value": triggerValue,
 			"is_active": isActive, "priority": priority, "stop_on_match": stopOnMatch,
 			"nodes": nodes, "edges": edges, "created_at": createdAt,
+			"lifecycle_status": lifecycleStatus, "current_version": currentVersion,
+			"published_version": nullableInt64Value(publishedVersion),
 		})
 	}
 }
@@ -691,13 +707,292 @@ func UpdateBotFlow(svc *services.Container) fiber.Handler {
 			stopOnMatch = *body.StopOnMatch
 		}
 
-		svc.DB.Exec(`
+		result, err := svc.DB.Exec(`
 			UPDATE bot_flows SET name = $1, bot_name = $2, description = $3, trigger_type = $4, trigger_value = $5,
-			is_active = $6, priority = $7, stop_on_match = $8, nodes = $9, edges = $10, updated_at = NOW()
-			WHERE id = $11 AND company_id = $12
-		`, body.Name, body.BotName, body.Description, body.TriggerType, body.TriggerValue, body.IsActive, body.Priority, stopOnMatch, body.Nodes, body.Edges, flowID, companyID)
+			lifecycle_status = CASE WHEN published_version IS NULL THEN 'draft' ELSE 'published_with_draft' END,
+			priority = $6, stop_on_match = $7,
+			nodes = $8, edges = $9, current_version = current_version + 1, updated_at = NOW()
+			WHERE id = $10 AND company_id = $11
+		`, body.Name, body.BotName, body.Description, body.TriggerType, body.TriggerValue,
+			body.Priority, stopOnMatch, body.Nodes, body.Edges, flowID, companyID)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Erro ao salvar rascunho"})
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			return c.Status(404).JSON(fiber.Map{"error": "Fluxo não encontrado"})
+		}
+		_, _ = svc.DB.Exec(`
+			INSERT INTO bot_flow_versions
+				(id, flow_id, company_id, version, name, bot_name, description, trigger_type,
+				 trigger_value, priority, stop_on_match, nodes, edges, created_by)
+			SELECT $1, id, company_id, current_version, name, bot_name, description, trigger_type,
+			       trigger_value, priority, stop_on_match, nodes, edges, $4
+			FROM bot_flows WHERE id = $2 AND company_id = $3
+			ON CONFLICT (flow_id, version) DO NOTHING
+		`, uuid.New().String(), flowID, companyID, c.Locals("user_id"))
 
-		return c.JSON(fiber.Map{"message": "Flow updated"})
+		return c.JSON(fiber.Map{"message": "Rascunho salvo"})
+	}
+}
+
+func PublishBotFlow(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		flowID := c.Params("id")
+		userID := c.Locals("user_id").(string)
+		tx, err := svc.DB.Begin()
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Erro ao publicar"})
+		}
+		defer tx.Rollback()
+		_, err = tx.Exec(`
+			INSERT INTO bot_flow_versions
+				(id, flow_id, company_id, version, name, bot_name, description, trigger_type,
+				 trigger_value, priority, stop_on_match, nodes, edges, created_by)
+			SELECT $1, id, company_id, current_version, name, bot_name, description, trigger_type,
+			       trigger_value, priority, stop_on_match, nodes, edges, $4
+			FROM bot_flows WHERE id = $2 AND company_id = $3
+			ON CONFLICT (flow_id, version) DO UPDATE SET
+				name = EXCLUDED.name, bot_name = EXCLUDED.bot_name, description = EXCLUDED.description,
+				trigger_type = EXCLUDED.trigger_type,
+				trigger_value = EXCLUDED.trigger_value, nodes = EXCLUDED.nodes,
+				edges = EXCLUDED.edges, priority = EXCLUDED.priority,
+				stop_on_match = EXCLUDED.stop_on_match, created_by = EXCLUDED.created_by
+		`, uuid.New().String(), flowID, companyID, userID)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Erro ao versionar fluxo"})
+		}
+		result, err := tx.Exec(`
+			UPDATE bot_flows SET lifecycle_status = 'published', is_active = true,
+				published_version = current_version, published_at = NOW(),
+				published_by = $3, updated_at = NOW()
+			WHERE id = $1 AND company_id = $2
+			  AND jsonb_array_length(COALESCE(nodes, '[]'::jsonb)) > 0
+		`, flowID, companyID, userID)
+		affected, _ := result.RowsAffected()
+		if err != nil || affected == 0 {
+			return c.Status(400).JSON(fiber.Map{"error": "Adicione e salve os blocos antes de publicar"})
+		}
+		if err = tx.Commit(); err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Erro ao confirmar publicação"})
+		}
+		logAuditEvent(svc.DB, c, "automation.publish", "bot_flow", flowID, nil)
+		return c.JSON(fiber.Map{"message": "Automação publicada"})
+	}
+}
+
+func UnpublishBotFlow(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		result, err := svc.DB.Exec(`
+			UPDATE bot_flows SET is_active = false, lifecycle_status = 'draft', updated_at = NOW()
+			WHERE id = $1 AND company_id = $2
+		`, c.Params("id"), companyID)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Erro ao desativar automação"})
+		}
+		if affected, _ := result.RowsAffected(); affected == 0 {
+			return c.Status(404).JSON(fiber.Map{"error": "Fluxo não encontrado"})
+		}
+		logAuditEvent(svc.DB, c, "automation.unpublish", "bot_flow", c.Params("id"), nil)
+		return c.JSON(fiber.Map{"message": "Automação desativada"})
+	}
+}
+
+func GetBotFlowVersions(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		rows, err := svc.DB.Query(`
+			SELECT v.version, v.name, v.created_at, COALESCE(u.name, '')
+			FROM bot_flow_versions v
+			LEFT JOIN users u ON u.id = v.created_by
+			WHERE v.flow_id = $1 AND v.company_id = $2
+			ORDER BY v.version DESC
+		`, c.Params("id"), c.Locals("company_id"))
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Erro ao carregar versões"})
+		}
+		defer rows.Close()
+		items := []fiber.Map{}
+		for rows.Next() {
+			var version int
+			var name, userName string
+			var createdAt time.Time
+			if rows.Scan(&version, &name, &createdAt, &userName) == nil {
+				items = append(items, fiber.Map{"version": version, "name": name, "created_at": createdAt, "created_by": userName})
+			}
+		}
+		return c.JSON(fiber.Map{"versions": items})
+	}
+}
+
+func RollbackBotFlow(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		version := c.Params("version")
+		result, err := svc.DB.Exec(`
+			UPDATE bot_flows flow SET
+				name = version.name, bot_name = COALESCE(version.bot_name, flow.bot_name),
+				description = COALESCE(version.description, flow.description),
+				trigger_type = version.trigger_type,
+				trigger_value = version.trigger_value, nodes = version.nodes,
+				edges = version.edges, current_version = flow.current_version + 1,
+				priority = COALESCE(version.priority, flow.priority),
+				stop_on_match = COALESCE(version.stop_on_match, flow.stop_on_match),
+				lifecycle_status = CASE WHEN flow.published_version IS NULL THEN 'draft' ELSE 'published_with_draft' END,
+				updated_at = NOW()
+			FROM bot_flow_versions version
+			WHERE flow.id = $1 AND flow.company_id = $2
+			  AND version.flow_id = flow.id AND version.version = $3::int
+		`, c.Params("id"), c.Locals("company_id"), version)
+		affected, _ := result.RowsAffected()
+		if err != nil || affected == 0 {
+			return c.Status(404).JSON(fiber.Map{"error": "Versão não encontrada"})
+		}
+		logAuditEvent(svc.DB, c, "automation.rollback", "bot_flow", c.Params("id"), fiber.Map{"version": version})
+		return c.JSON(fiber.Map{"message": "Versão restaurada como rascunho"})
+	}
+}
+
+func SimulateBotFlow(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		var nodes, edges json.RawMessage
+		err := svc.DB.QueryRow(`
+			SELECT COALESCE(nodes, '[]'::jsonb), COALESCE(edges, '[]'::jsonb)
+			FROM bot_flows WHERE id = $1 AND company_id = $2
+		`, c.Params("id"), c.Locals("company_id")).Scan(&nodes, &edges)
+		if err != nil {
+			return c.Status(404).JSON(fiber.Map{"error": "Fluxo não encontrado"})
+		}
+		var nodeItems []map[string]interface{}
+		var edgeItems []map[string]interface{}
+		_ = json.Unmarshal(nodes, &nodeItems)
+		_ = json.Unmarshal(edges, &edgeItems)
+		nodeByID := make(map[string]map[string]interface{}, len(nodeItems))
+		incoming := make(map[string]int)
+		outgoing := make(map[string][]string)
+		errors := []string{}
+		for _, node := range nodeItems {
+			id, _ := node["id"].(string)
+			if id == "" {
+				errors = append(errors, "Existe um bloco sem identificador")
+				continue
+			}
+			if _, exists := nodeByID[id]; exists {
+				errors = append(errors, "Identificador de bloco duplicado: "+id)
+			}
+			nodeByID[id] = node
+		}
+		for _, edge := range edgeItems {
+			source, _ := edge["source"].(string)
+			target, _ := edge["target"].(string)
+			if nodeByID[source] == nil || nodeByID[target] == nil {
+				errors = append(errors, "Existe uma conexão apontando para bloco inexistente")
+				continue
+			}
+			outgoing[source] = append(outgoing[source], target)
+			incoming[target]++
+		}
+		startID := ""
+		for _, node := range nodeItems {
+			id, _ := node["id"].(string)
+			if incoming[id] == 0 {
+				startID = id
+				break
+			}
+		}
+		trace := make([]fiber.Map, 0, len(nodeItems))
+		visited := map[string]bool{}
+		currentID := startID
+		for len(trace) <= len(nodeItems) && currentID != "" {
+			if visited[currentID] {
+				errors = append(errors, "Ciclo detectado no bloco "+currentID)
+				break
+			}
+			visited[currentID] = true
+			node := nodeByID[currentID]
+			trace = append(trace, fiber.Map{
+				"step": len(trace) + 1, "node_id": currentID, "type": node["type"],
+				"status": "simulated", "side_effects": false,
+			})
+			next := outgoing[currentID]
+			if len(next) > 1 {
+				trace[len(trace)-1]["branches"] = next
+			}
+			if len(next) == 0 {
+				currentID = ""
+			} else {
+				currentID = next[0]
+			}
+		}
+		if len(nodeItems) > 0 && startID == "" {
+			errors = append(errors, "Não foi possível identificar o início do fluxo")
+		}
+		return c.JSON(fiber.Map{
+			"valid": len(nodeItems) > 0 && len(errors) == 0, "nodes": len(nodeItems), "edges": len(edgeItems),
+			"trace": trace, "errors": errors, "message": "Simulação concluída sem executar envios ou alterações",
+		})
+	}
+}
+
+func GetBotExecutionHistory(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		rows, err := svc.DB.Query(`
+			SELECT be.id, be.status, be.started_at, be.completed_at,
+			       COALESCE(conv.subject, ''), COALESCE(contact.name, contact.phone, contact.email, '')
+			FROM bot_executions be
+			JOIN bot_flows bf ON bf.id = be.flow_id
+			LEFT JOIN conversations conv ON conv.id = be.conversation_id
+			LEFT JOIN contacts contact ON contact.id = be.contact_id
+			WHERE bf.id = $1 AND bf.company_id = $2
+			ORDER BY be.started_at DESC LIMIT 100
+		`, c.Params("id"), c.Locals("company_id"))
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Erro ao carregar execuções"})
+		}
+		defer rows.Close()
+		items := []fiber.Map{}
+		for rows.Next() {
+			var id, status, subject, contact string
+			var startedAt time.Time
+			var completedAt sql.NullTime
+			if rows.Scan(&id, &status, &startedAt, &completedAt, &subject, &contact) == nil {
+				items = append(items, fiber.Map{"id": id, "status": status, "started_at": startedAt, "completed_at": nullableTimeValue(completedAt), "subject": subject, "contact": contact})
+			}
+		}
+		if len(items) == 0 {
+			return c.JSON(fiber.Map{"executions": items})
+		}
+		executionIDs := make([]string, 0, len(items))
+		indexByID := make(map[string]int, len(items))
+		for index, item := range items {
+			id := item["id"].(string)
+			executionIDs = append(executionIDs, id)
+			indexByID[id] = index
+			items[index]["events"] = []fiber.Map{}
+		}
+		eventRows, err := svc.DB.Query(`
+			SELECT execution_id, node_id, event_type, status, COALESCE(error_message, ''), created_at
+			FROM bot_execution_events
+			WHERE company_id = $1 AND execution_id = ANY($2::uuid[])
+			ORDER BY created_at
+		`, c.Locals("company_id"), "{"+strings.Join(executionIDs, ",")+"}")
+		if err == nil {
+			defer eventRows.Close()
+			for eventRows.Next() {
+				var executionID, eventType, status, errorMessage string
+				var nodeID sql.NullString
+				var createdAt time.Time
+				if eventRows.Scan(&executionID, &nodeID, &eventType, &status, &errorMessage, &createdAt) == nil {
+					index := indexByID[executionID]
+					events := items[index]["events"].([]fiber.Map)
+					items[index]["events"] = append(events, fiber.Map{
+						"node_id": nullableStringMapValue(nodeID), "event_type": eventType,
+						"status": status, "error": errorMessage, "created_at": createdAt,
+					})
+				}
+			}
+		}
+		return c.JSON(fiber.Map{"executions": items})
 	}
 }
 
@@ -783,7 +1078,9 @@ func GetCampaigns(svc *services.Container) fiber.Handler {
 				   COALESCE(stats.read_count, c.read_count, 0) AS read_count,
 				   COALESCE(stats.replied_count, c.replied_count, 0) AS replied_count,
 				   COALESCE(stats.failed_count, c.failed_count, 0) AS failed_count,
-				   c.scheduled_at, c.created_at, COALESCE(c.variables, '[]'::jsonb)
+				   c.scheduled_at, c.created_at, COALESCE(c.variables, '[]'::jsonb),
+				   COALESCE(c.timezone, 'America/Sao_Paulo'), COALESCE(c.approval_status, 'draft'),
+				   COALESCE(c.frequency_cap_days, 0)
 			FROM campaigns c
 			LEFT JOIN (
 				SELECT campaign_id,
@@ -809,9 +1106,11 @@ func GetCampaigns(svc *services.Container) fiber.Handler {
 			var id, name, status, msgContent, msgType string
 			var mediaURL sql.NullString
 			var total, sent, delivered, read, replied, failed, sendSpeed int
+			var frequencyCapDays int
 			var scheduledAt, createdAt sql.NullTime
 			var variables []byte
-			if err := rows.Scan(&id, &name, &status, &msgContent, &msgType, &mediaURL, &sendSpeed, &total, &sent, &delivered, &read, &replied, &failed, &scheduledAt, &createdAt, &variables); err != nil {
+			var timezone, approvalStatus string
+			if err := rows.Scan(&id, &name, &status, &msgContent, &msgType, &mediaURL, &sendSpeed, &total, &sent, &delivered, &read, &replied, &failed, &scheduledAt, &createdAt, &variables, &timezone, &approvalStatus, &frequencyCapDays); err != nil {
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 			}
 			contentItems := campaignItemsFromStored(json.RawMessage(variables), msgContent, msgType, mediaURL.String)
@@ -820,6 +1119,7 @@ func GetCampaigns(svc *services.Container) fiber.Handler {
 				"total_contacts": total, "sent_count": sent, "delivered_count": delivered,
 				"read_count": read, "replied_count": replied, "failed_count": failed,
 				"scheduled_at": nullableTimeValue(scheduledAt), "created_at": nullableTimeValue(createdAt), "content_items": contentItems,
+				"timezone": timezone, "approval_status": approvalStatus, "frequency_cap_days": frequencyCapDays,
 			})
 		}
 
@@ -827,7 +1127,7 @@ func GetCampaigns(svc *services.Container) fiber.Handler {
 	}
 }
 
-func normalizeCampaignItems(items []campaignMessageItem, legacyContent, legacyType, legacyMediaURL, legacyMediaBase64, legacyMediaFileName string, allowExistingMedia bool) ([]campaignMessageItem, error) {
+func normalizeCampaignItems(items []campaignMessageItem, legacyContent, legacyType, legacyMediaURL, legacyMediaBase64, legacyMediaFileName string, allowExistingMedia bool, clamAVAddr string) ([]campaignMessageItem, error) {
 	if len(items) == 0 {
 		items = []campaignMessageItem{{
 			Type:          legacyType,
@@ -874,6 +1174,9 @@ func normalizeCampaignItems(items []campaignMessageItem, legacyContent, legacyTy
 			savedFileName, err := services.SaveBase64File(item.MediaBase64, ext)
 			if err != nil {
 				return nil, fmt.Errorf("erro ao salvar arquivo da campanha")
+			}
+			if err := scanSavedUpload(savedFileName, clamAVAddr); err != nil {
+				return nil, fmt.Errorf("mídia bloqueada pela verificação de segurança")
 			}
 			item.MediaURL = "/uploads/" + savedFileName
 		}
@@ -937,25 +1240,34 @@ func nullableTimeValue(value sql.NullTime) interface{} {
 	return value.Time
 }
 
+func nullableInt64Value(value sql.NullInt64) interface{} {
+	if !value.Valid {
+		return nil
+	}
+	return value.Int64
+}
+
 func CreateCampaign(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
 		userID := c.Locals("user_id").(string)
 
 		var body struct {
-			Name           string                `json:"name"`
-			ChannelID      string                `json:"channel_id"`
-			MessageContent string                `json:"message_content"`
-			MessageType    string                `json:"message_type"`
-			MediaURL       string                `json:"media_url"`
-			MediaBase64    string                `json:"media_base64"`
-			MediaFileName  string                `json:"media_filename"`
-			ContentItems   []campaignMessageItem `json:"content_items"`
-			ScheduledAt    string                `json:"scheduled_at"`
-			SendSpeed      int                   `json:"send_speed"`
-			TotalContacts  int                   `json:"total_contacts"`
-			FilterTag      string                `json:"filter_tag"`
-			ContactIDs     []string              `json:"contact_ids"`
+			Name             string                `json:"name"`
+			ChannelID        string                `json:"channel_id"`
+			MessageContent   string                `json:"message_content"`
+			MessageType      string                `json:"message_type"`
+			MediaURL         string                `json:"media_url"`
+			MediaBase64      string                `json:"media_base64"`
+			MediaFileName    string                `json:"media_filename"`
+			ContentItems     []campaignMessageItem `json:"content_items"`
+			ScheduledAt      string                `json:"scheduled_at"`
+			Timezone         string                `json:"timezone"`
+			FrequencyCapDays int                   `json:"frequency_cap_days"`
+			SendSpeed        int                   `json:"send_speed"`
+			TotalContacts    int                   `json:"total_contacts"`
+			FilterTag        string                `json:"filter_tag"`
+			ContactIDs       []string              `json:"contact_ids"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
@@ -969,12 +1281,23 @@ func CreateCampaign(svc *services.Container) fiber.Handler {
 		if body.MessageType == "" {
 			body.MessageType = "text"
 		}
-		contentItems, err := normalizeCampaignItems(body.ContentItems, body.MessageContent, body.MessageType, body.MediaURL, body.MediaBase64, body.MediaFileName, false)
+		contentItems, err := normalizeCampaignItems(body.ContentItems, body.MessageContent, body.MessageType, body.MediaURL, body.MediaBase64, body.MediaFileName, false, svc.Config.ClamAVAddr)
 		if err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
 		body.MessageContent, body.MessageType, body.MediaURL = campaignPrimaryFields(contentItems)
 		contentItemsJSON, _ := json.Marshal(contentItems)
+		if body.Timezone == "" {
+			body.Timezone = "America/Sao_Paulo"
+		}
+		var scheduledAt interface{}
+		if strings.TrimSpace(body.ScheduledAt) != "" {
+			parsed, parseErr := time.Parse(time.RFC3339, body.ScheduledAt)
+			if parseErr != nil || parsed.Before(time.Now()) {
+				return c.Status(400).JSON(fiber.Map{"error": "Data de agendamento inválida"})
+			}
+			scheduledAt = parsed
+		}
 
 		id := uuid.New().String()
 		tx, err := svc.DB.Begin()
@@ -984,9 +1307,15 @@ func CreateCampaign(svc *services.Container) fiber.Handler {
 		defer tx.Rollback()
 
 		_, err = tx.Exec(`
-			INSERT INTO campaigns (id, company_id, channel_id, name, message_content, message_type, media_url, variables, send_speed, total_contacts, created_by)
-			VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, $6, NULLIF($7, ''), $8::jsonb, $9, $10, $11)
-		`, id, companyID, body.ChannelID, body.Name, body.MessageContent, body.MessageType, body.MediaURL, string(contentItemsJSON), body.SendSpeed, body.TotalContacts, userID)
+			INSERT INTO campaigns
+				(id, company_id, channel_id, name, message_content, message_type, media_url,
+				 variables, send_speed, total_contacts, created_by, scheduled_at, timezone,
+				 frequency_cap_days, approval_status, status)
+			VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, $6, NULLIF($7, ''),
+				$8::jsonb, $9, $10, $11, $12, $13, $14, 'draft', 'draft')
+		`, id, companyID, body.ChannelID, body.Name, body.MessageContent, body.MessageType,
+			body.MediaURL, string(contentItemsJSON), body.SendSpeed, body.TotalContacts,
+			userID, scheduledAt, body.Timezone, body.FrequencyCapDays)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -1013,14 +1342,15 @@ func UpdateCampaign(svc *services.Container) fiber.Handler {
 		campaignID := c.Params("id")
 
 		var body struct {
-			Name           string                `json:"name"`
-			MessageContent string                `json:"message_content"`
-			MessageType    string                `json:"message_type"`
-			MediaURL       string                `json:"media_url"`
-			MediaBase64    string                `json:"media_base64"`
-			MediaFileName  string                `json:"media_filename"`
-			ContentItems   []campaignMessageItem `json:"content_items"`
-			SendSpeed      int                   `json:"send_speed"`
+			Name             string                `json:"name"`
+			MessageContent   string                `json:"message_content"`
+			MessageType      string                `json:"message_type"`
+			MediaURL         string                `json:"media_url"`
+			MediaBase64      string                `json:"media_base64"`
+			MediaFileName    string                `json:"media_filename"`
+			ContentItems     []campaignMessageItem `json:"content_items"`
+			SendSpeed        int                   `json:"send_speed"`
+			FrequencyCapDays int                   `json:"frequency_cap_days"`
 		}
 		if err := c.BodyParser(&body); err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
@@ -1031,7 +1361,7 @@ func UpdateCampaign(svc *services.Container) fiber.Handler {
 		if body.SendSpeed <= 0 {
 			body.SendSpeed = 30
 		}
-		contentItems, err := normalizeCampaignItems(body.ContentItems, body.MessageContent, body.MessageType, body.MediaURL, body.MediaBase64, body.MediaFileName, true)
+		contentItems, err := normalizeCampaignItems(body.ContentItems, body.MessageContent, body.MessageType, body.MediaURL, body.MediaBase64, body.MediaFileName, true, svc.Config.ClamAVAddr)
 		if err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -1040,9 +1370,11 @@ func UpdateCampaign(svc *services.Container) fiber.Handler {
 
 		res, err := svc.DB.Exec(`
 			UPDATE campaigns
-			SET name = $1, message_content = $2, message_type = $3, media_url = NULLIF($4, ''), variables = $5::jsonb, send_speed = $6, updated_at = NOW()
-			WHERE id = $7 AND company_id = $8 AND status IN ('draft', 'paused')
-		`, body.Name, body.MessageContent, body.MessageType, body.MediaURL, string(contentItemsJSON), body.SendSpeed, campaignID, companyID)
+			SET name = $1, message_content = $2, message_type = $3, media_url = NULLIF($4, ''),
+				variables = $5::jsonb, send_speed = $6, frequency_cap_days = $7,
+				approval_status = 'draft', approved_by = NULL, approved_at = NULL, updated_at = NOW()
+			WHERE id = $8 AND company_id = $9 AND status IN ('draft', 'paused')
+		`, body.Name, body.MessageContent, body.MessageType, body.MediaURL, string(contentItemsJSON), body.SendSpeed, body.FrequencyCapDays, campaignID, companyID)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -1076,6 +1408,14 @@ func StartCampaign(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
 		campaignID := c.Params("id")
+		var approvalStatus string
+		if err := svc.DB.QueryRow(`SELECT approval_status FROM campaigns WHERE id = $1 AND company_id = $2`,
+			campaignID, companyID).Scan(&approvalStatus); err != nil {
+			return c.Status(404).JSON(fiber.Map{"error": "Campanha não encontrada"})
+		}
+		if approvalStatus != "approved" {
+			return c.Status(400).JSON(fiber.Map{"error": "A campanha precisa ser aprovada antes do envio"})
+		}
 
 		instanceName, err := prepareCampaignForSending(svc.DB, campaignID, companyID)
 		if err != nil {
@@ -1091,9 +1431,199 @@ func StartCampaign(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		go runCampaignSender(svc, campaignID, companyID, instanceName)
-		return c.JSON(fiber.Map{"message": "Campaign started"})
+		jobID, err := svc.Jobs.Enqueue(companyID, "campaign.send", campaignID, fiber.Map{
+			"campaign_id": campaignID, "company_id": companyID, "instance_name": instanceName,
+		}, time.Now())
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Não foi possível enfileirar a campanha"})
+		}
+		return c.JSON(fiber.Map{"message": "Campaign queued", "job_id": jobID})
 	}
+}
+
+func ApproveCampaign(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		result, err := svc.DB.Exec(`
+			UPDATE campaigns SET approval_status = 'approved', approved_by = $3,
+				approved_at = NOW(), updated_at = NOW()
+			WHERE id = $1 AND company_id = $2 AND status IN ('draft', 'paused', 'scheduled')
+		`, c.Params("id"), c.Locals("company_id"), c.Locals("user_id"))
+		affected, _ := result.RowsAffected()
+		if err != nil || affected == 0 {
+			return c.Status(400).JSON(fiber.Map{"error": "Campanha não encontrada ou não pode ser aprovada"})
+		}
+		logAuditEvent(svc.DB, c, "campaign.approve", "campaign", c.Params("id"), nil)
+		return c.JSON(fiber.Map{"message": "Campanha aprovada"})
+	}
+}
+
+func ScheduleCampaign(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		var body struct {
+			ScheduledAt string `json:"scheduled_at"`
+			Timezone    string `json:"timezone"`
+		}
+		if c.BodyParser(&body) != nil {
+			return c.Status(400).JSON(fiber.Map{"error": "Dados inválidos"})
+		}
+		when, err := time.Parse(time.RFC3339, body.ScheduledAt)
+		if err != nil || when.Before(time.Now()) {
+			return c.Status(400).JSON(fiber.Map{"error": "Informe uma data futura válida"})
+		}
+		if body.Timezone == "" {
+			body.Timezone = "America/Sao_Paulo"
+		}
+		companyID := c.Locals("company_id").(string)
+		campaignID := c.Params("id")
+		var approved string
+		_ = svc.DB.QueryRow(`SELECT approval_status FROM campaigns WHERE id = $1 AND company_id = $2`,
+			campaignID, companyID).Scan(&approved)
+		if approved != "approved" {
+			return c.Status(400).JSON(fiber.Map{"error": "Aprove a campanha antes de agendar"})
+		}
+		instanceName, err := prepareCampaignForSending(svc.DB, campaignID, companyID)
+		if err != nil {
+			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+		}
+		_, err = svc.DB.Exec(`UPDATE campaigns SET status = 'scheduled', scheduled_at = $3,
+			timezone = $4, updated_at = NOW() WHERE id = $1 AND company_id = $2`,
+			campaignID, companyID, when, body.Timezone)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Erro ao agendar campanha"})
+		}
+		jobID, err := svc.Jobs.Enqueue(companyID, "campaign.send", campaignID, fiber.Map{
+			"campaign_id": campaignID, "company_id": companyID, "instance_name": instanceName,
+		}, when)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": "Erro ao criar agendamento"})
+		}
+		return c.JSON(fiber.Map{"message": "Campanha agendada", "job_id": jobID})
+	}
+}
+
+func RegisterDurableJobHandlers(svc *services.Container) {
+	svc.Jobs.Register("campaign.send", func(ctx context.Context, raw json.RawMessage) error {
+		var payload struct {
+			CampaignID   string `json:"campaign_id"`
+			CompanyID    string `json:"company_id"`
+			InstanceName string `json:"instance_name"`
+		}
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return err
+		}
+		if payload.CampaignID == "" || payload.CompanyID == "" || payload.InstanceName == "" {
+			return fmt.Errorf("payload de campanha incompleto")
+		}
+		result, err := svc.DB.Exec(`
+			UPDATE campaigns SET status = 'sending', started_at = COALESCE(started_at, NOW()), updated_at = NOW()
+			WHERE id = $1 AND company_id = $2 AND status IN ('sending', 'scheduled')
+		`, payload.CampaignID, payload.CompanyID)
+		if err != nil {
+			return err
+		}
+		affected, _ := result.RowsAffected()
+		if affected == 0 {
+			return nil
+		}
+		return runCampaignSender(ctx, svc, payload.CampaignID, payload.CompanyID, payload.InstanceName)
+	})
+	svc.Jobs.Register("campaign.email.send", func(ctx context.Context, raw json.RawMessage) error {
+		var payload emailCampaignJobPayload
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return err
+		}
+		if payload.JobKey == "" || payload.CompanyID == "" || payload.ChannelID == "" || payload.Recipient.ID == "" {
+			return fmt.Errorf("payload de e-mail incompleto")
+		}
+		var allowed bool
+		err := svc.DB.QueryRowContext(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM contacts contact
+				WHERE contact.id = $1 AND contact.company_id = $2
+				  AND LOWER(TRIM(contact.email)) = LOWER(TRIM($3))
+				  AND COALESCE(contact.is_opted_out, false) = false
+				  AND COALESCE(contact.is_blocked, false) = false
+				  AND NOT EXISTS (
+					SELECT 1 FROM campaign_suppressions suppression
+					WHERE suppression.company_id = contact.company_id AND suppression.channel = 'email'
+					  AND LOWER(TRIM(suppression.destination)) = LOWER(TRIM(contact.email))
+				  )
+				  AND NOT EXISTS (
+					SELECT 1 FROM contact_channel_consents consent
+					WHERE consent.contact_id = contact.id AND consent.channel IN ('email', 'marketing')
+					  AND consent.purpose = 'marketing'
+					  AND consent.status IN ('revoked', 'denied', 'opted_out')
+				  )
+			)
+		`, payload.Recipient.ID, payload.CompanyID, payload.Recipient.Email).Scan(&allowed)
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return nil
+		}
+		var alreadySent bool
+		if err := svc.DB.QueryRowContext(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM messages
+				WHERE company_id = $1 AND metadata ->> 'bulk_job_id' = $2
+			)
+		`, payload.CompanyID, payload.JobKey).Scan(&alreadySent); err != nil {
+			return err
+		}
+		if alreadySent {
+			return nil
+		}
+		externalID, err := svc.Email.SendMarketingEmail(payload.CompanyID, payload.ChannelID,
+			payload.Recipient.Email, payload.Subject, payload.Content)
+		if err != nil {
+			return err
+		}
+		if err := recordEmailCampaignMessage(svc.DB, payload.CompanyID, payload.ChannelID,
+			payload.UserID, payload.Recipient, payload.Subject, payload.Content, externalID, payload.JobKey); err != nil {
+			return err
+		}
+		providerID := externalID
+		if providerID == "" {
+			providerID = payload.JobKey
+		}
+		_, _ = svc.DB.ExecContext(ctx, `
+			INSERT INTO campaign_delivery_events
+				(id, company_id, contact_id, channel, destination, event_type, provider_event_id)
+			VALUES ($1, $2, $3, 'email', $4, 'sent', $5)
+			ON CONFLICT (company_id, provider_event_id, event_type) DO NOTHING
+		`, uuid.New().String(), payload.CompanyID, payload.Recipient.ID, payload.Recipient.Email, providerID)
+		return nil
+	})
+}
+
+func ResumeDurableCampaigns(svc *services.Container) error {
+	rows, err := svc.DB.Query(`
+		SELECT c.id, c.company_id, wi.instance_name, c.scheduled_at
+		FROM campaigns c
+		JOIN channels ch ON ch.id = c.channel_id
+		JOIN whatsapp_instances wi ON wi.channel_id = ch.id
+		WHERE c.status IN ('sending', 'scheduled')
+	`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var campaignID, companyID, instanceName string
+		var scheduledAt sql.NullTime
+		if rows.Scan(&campaignID, &companyID, &instanceName, &scheduledAt) != nil {
+			continue
+		}
+		availableAt := time.Now()
+		if scheduledAt.Valid && scheduledAt.Time.After(availableAt) {
+			availableAt = scheduledAt.Time
+		}
+		_, _ = svc.Jobs.Enqueue(companyID, "campaign.send", campaignID, fiber.Map{
+			"campaign_id": campaignID, "company_id": companyID, "instance_name": instanceName,
+		}, availableAt)
+	}
+	return rows.Err()
 }
 
 func createCampaignRecipients(tx *sql.Tx, campaignID, companyID, filterTag string, contactIDs []string) (int, error) {
@@ -1108,6 +1638,25 @@ func createCampaignRecipients(tx *sql.Tx, campaignID, companyID, filterTag strin
 			  AND c.phone IS NOT NULL
 			  AND COALESCE(c.is_opted_out, false) = false
 			  AND COALESCE(c.is_blocked, false) = false
+			  AND NOT EXISTS (
+				SELECT 1 FROM campaign_suppressions suppression
+				WHERE suppression.company_id = c.company_id AND suppression.channel = 'whatsapp'
+				  AND suppression.destination = regexp_replace(c.phone, '\D', '', 'g')
+			  )
+			  AND NOT EXISTS (
+				SELECT 1 FROM contact_channel_consents consent
+				WHERE consent.contact_id = c.id AND consent.channel = 'whatsapp'
+				  AND consent.purpose = 'marketing' AND consent.status IN ('revoked', 'denied', 'opted_out')
+			  )
+			  AND NOT EXISTS (
+				SELECT 1 FROM campaign_contacts previous
+				JOIN campaigns previous_campaign ON previous_campaign.id = previous.campaign_id
+				WHERE previous.contact_id = c.id AND previous.status IN ('sent', 'delivered', 'read', 'replied')
+				  AND previous.sent_at >= NOW() - (
+					COALESCE((SELECT frequency_cap_days FROM campaigns WHERE id = $1), 0) * INTERVAL '1 day'
+				  )
+				  AND COALESCE((SELECT frequency_cap_days FROM campaigns WHERE id = $1), 0) > 0
+			  )
 			  AND c.id = ANY($3::uuid[])
 		`, campaignID, companyID, "{"+strings.Join(contactIDs, ",")+"}")
 	} else if strings.TrimSpace(filterTag) != "" {
@@ -1120,6 +1669,14 @@ func createCampaignRecipients(tx *sql.Tx, campaignID, companyID, filterTag strin
 			  AND c.phone IS NOT NULL
 			  AND COALESCE(c.is_opted_out, false) = false
 			  AND COALESCE(c.is_blocked, false) = false
+			  AND NOT EXISTS (SELECT 1 FROM campaign_suppressions s WHERE s.company_id = c.company_id AND s.channel = 'whatsapp' AND s.destination = regexp_replace(c.phone, '\D', '', 'g'))
+			  AND NOT EXISTS (SELECT 1 FROM contact_channel_consents consent WHERE consent.contact_id = c.id AND consent.channel = 'whatsapp' AND consent.purpose = 'marketing' AND consent.status IN ('revoked', 'denied', 'opted_out'))
+			  AND NOT EXISTS (
+				SELECT 1 FROM campaign_contacts previous JOIN campaigns pc ON pc.id = previous.campaign_id
+				WHERE previous.contact_id = c.id AND previous.status IN ('sent', 'delivered', 'read', 'replied')
+				  AND previous.sent_at >= NOW() - (COALESCE((SELECT frequency_cap_days FROM campaigns WHERE id = $1), 0) * INTERVAL '1 day')
+				  AND COALESCE((SELECT frequency_cap_days FROM campaigns WHERE id = $1), 0) > 0
+			  )
 			  AND ct.tag_id = $3::uuid
 		`, campaignID, companyID, filterTag)
 	} else {
@@ -1130,6 +1687,15 @@ func createCampaignRecipients(tx *sql.Tx, campaignID, companyID, filterTag strin
 			WHERE c.company_id = $2
 			  AND c.phone IS NOT NULL
 			  AND COALESCE(c.is_opted_out, false) = false
+			  AND COALESCE(c.is_blocked, false) = false
+			  AND NOT EXISTS (SELECT 1 FROM campaign_suppressions s WHERE s.company_id = c.company_id AND s.channel = 'whatsapp' AND s.destination = regexp_replace(c.phone, '\D', '', 'g'))
+			  AND NOT EXISTS (SELECT 1 FROM contact_channel_consents consent WHERE consent.contact_id = c.id AND consent.channel = 'whatsapp' AND consent.purpose = 'marketing' AND consent.status IN ('revoked', 'denied', 'opted_out'))
+			  AND NOT EXISTS (
+				SELECT 1 FROM campaign_contacts previous JOIN campaigns pc ON pc.id = previous.campaign_id
+				WHERE previous.contact_id = c.id AND previous.status IN ('sent', 'delivered', 'read', 'replied')
+				  AND previous.sent_at >= NOW() - (COALESCE((SELECT frequency_cap_days FROM campaigns WHERE id = $1), 0) * INTERVAL '1 day')
+				  AND COALESCE((SELECT frequency_cap_days FROM campaigns WHERE id = $1), 0) > 0
+			  )
 		`, campaignID, companyID)
 	}
 	if err != nil {
@@ -1190,7 +1756,7 @@ func prepareCampaignForSending(db *sql.DB, campaignID, companyID string) (string
 	return instanceName.String, nil
 }
 
-func runCampaignSender(svc *services.Container, campaignID, companyID, instanceName string) {
+func runCampaignSender(ctx context.Context, svc *services.Container, campaignID, companyID, instanceName string) error {
 	var message, messageType string
 	var mediaURL sql.NullString
 	var variables []byte
@@ -1201,7 +1767,7 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 		WHERE id = $1 AND company_id = $2
 	`, campaignID, companyID).Scan(&message, &messageType, &mediaURL, &variables, &sendSpeed); err != nil {
 		log.Printf("[CAMPAIGN] failed to load campaign %s: %v", campaignID, err)
-		return
+		return err
 	}
 	items := campaignItemsFromStored(json.RawMessage(variables), message, messageType, mediaURL.String)
 	if sendSpeed <= 0 {
@@ -1213,11 +1779,36 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 	}
 
 	for {
-		var status string
-		_ = svc.DB.QueryRow("SELECT status FROM campaigns WHERE id = $1 AND company_id = $2", campaignID, companyID).Scan(&status)
-		if status != "sending" {
-			return
+		if err := ctx.Err(); err != nil {
+			return err
 		}
+		var status string
+		if err := svc.DB.QueryRowContext(ctx, "SELECT status FROM campaigns WHERE id = $1 AND company_id = $2", campaignID, companyID).Scan(&status); err != nil {
+			return err
+		}
+		if status != "sending" {
+			return nil
+		}
+		_, _ = svc.DB.Exec(`
+			UPDATE campaign_contacts cc SET status = 'failed', locked_at = NULL,
+				error_message = 'Contato bloqueado, sem consentimento ou em lista de supressão'
+			FROM contacts c
+			WHERE cc.campaign_id = $1 AND cc.contact_id = c.id AND cc.status = 'pending'
+			  AND (
+				COALESCE(c.is_opted_out, false) OR COALESCE(c.is_blocked, false)
+				OR EXISTS (
+					SELECT 1 FROM campaign_suppressions s
+					WHERE s.company_id = c.company_id AND s.channel = 'whatsapp'
+					  AND s.destination = regexp_replace(c.phone, '\D', '', 'g')
+				)
+				OR EXISTS (
+					SELECT 1 FROM contact_channel_consents consent
+					WHERE consent.contact_id = c.id AND consent.channel = 'whatsapp'
+					  AND consent.purpose = 'marketing'
+					  AND consent.status IN ('revoked', 'denied', 'opted_out')
+				)
+			  )
+		`, campaignID)
 
 		var campaignContactID, contactID, name, phone, email, companyName string
 		err := svc.DB.QueryRow(`
@@ -1236,15 +1827,16 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 		`, campaignID, companyID).Scan(&campaignContactID, &contactID, &name, &phone, &email, &companyName)
 		if err == sql.ErrNoRows {
 			if campaignHasPendingRetry(svc.DB, campaignID) {
-				time.Sleep(delay)
+				if !waitForCampaign(ctx, delay) {
+					return ctx.Err()
+				}
 				continue
 			}
 			break
 		}
 		if err != nil {
 			log.Printf("[CAMPAIGN] failed to load next recipient for %s: %v", campaignID, err)
-			time.Sleep(delay)
-			continue
+			return err
 		}
 
 		_, _ = svc.DB.Exec("UPDATE campaign_contacts SET locked_at = NOW(), last_attempt_at = NOW() WHERE id = $1", campaignContactID)
@@ -1262,10 +1854,24 @@ func runCampaignSender(svc *services.Container, campaignID, companyID, instanceN
 			`, campaignContactID)
 		}
 		refreshCampaignCounters(svc.DB, campaignID)
-		time.Sleep(delay)
+		if !waitForCampaign(ctx, delay) {
+			return ctx.Err()
+		}
 	}
 
 	finalizeCampaignIfDone(svc.DB, campaignID)
+	return nil
+}
+
+func waitForCampaign(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func campaignHasPendingRetry(db *sql.DB, campaignID string) bool {
@@ -1347,6 +1953,9 @@ func publicCampaignMediaURL(svc *services.Container, mediaURL string) string {
 	}
 	publicURL := svc.Config.EvolutionWebhookURL
 	baseURL := strings.TrimSuffix(publicURL, "/api/webhooks/evolution")
+	if strings.HasPrefix(mediaURL, "/uploads/") {
+		return signedUploadURL(baseURL, filepath.Base(mediaURL), svc.Config.JWTSecret, time.Now().Add(10*time.Minute))
+	}
 	return strings.TrimRight(baseURL, "/") + "/" + strings.TrimLeft(mediaURL, "/")
 }
 
@@ -1404,11 +2013,21 @@ func renderCampaignMessage(template, name, phone, email, companyName string) str
 }
 
 type emailCampaignRecipient struct {
-	ID          string
-	Name        string
-	Phone       string
-	Email       string
-	CompanyName string
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Phone       string `json:"phone"`
+	Email       string `json:"email"`
+	CompanyName string `json:"company_name"`
+}
+
+type emailCampaignJobPayload struct {
+	JobKey    string                 `json:"job_key"`
+	CompanyID string                 `json:"company_id"`
+	UserID    string                 `json:"user_id"`
+	ChannelID string                 `json:"channel_id"`
+	Subject   string                 `json:"subject"`
+	Content   string                 `json:"content"`
+	Recipient emailCampaignRecipient `json:"recipient"`
 }
 
 func SendEmailCampaign(svc *services.Container) fiber.Handler {
@@ -1457,12 +2076,21 @@ func SendEmailCampaign(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Nenhum contato com e-mail válido encontrado"})
 		}
 
+		batchID := uuid.New().String()
 		failures := make([]fiber.Map, 0)
-		sentCount := 0
+		queuedCount := 0
 		for _, recipient := range recipients {
 			subject := renderCampaignMessage(body.Subject, recipient.Name, recipient.Phone, recipient.Email, recipient.CompanyName)
 			content := renderCampaignMessage(body.Content, recipient.Name, recipient.Phone, recipient.Email, recipient.CompanyName)
-			externalID, err := svc.Email.SendMarketingEmail(companyID, body.ChannelID, recipient.Email, subject, content)
+			content += fmt.Sprintf(
+				`<hr style="margin-top:32px;border:0;border-top:1px solid #e5e7eb"><p style="font-size:12px;color:#6b7280">Não deseja mais receber estes e-mails? <a href="%s">Cancelar inscrição</a>.</p>`,
+				unsubscribeURL(svc, companyID, recipient.ID),
+			)
+			jobKey := batchID + ":" + recipient.ID
+			_, err := svc.Jobs.Enqueue(companyID, "campaign.email.send", jobKey, emailCampaignJobPayload{
+				JobKey: jobKey, CompanyID: companyID, UserID: userID, ChannelID: body.ChannelID,
+				Subject: subject, Content: content, Recipient: recipient,
+			}, time.Now())
 			if err != nil {
 				failures = append(failures, fiber.Map{
 					"contact_id": recipient.ID,
@@ -1472,17 +2100,17 @@ func SendEmailCampaign(svc *services.Container) fiber.Handler {
 				})
 				continue
 			}
-			sentCount++
-			if err := recordEmailCampaignMessage(svc.DB, companyID, body.ChannelID, userID, recipient, subject, content, externalID); err != nil {
-				log.Printf("[EMAIL_CAMPAIGN] failed to record sent email for contact %s: %v", recipient.ID, err)
-			}
-			logAuditEvent(svc.DB, c, "message.email_campaign.send", "contact", recipient.ID, fiber.Map{"channel_id": body.ChannelID, "subject": subject, "external_id": externalID})
+			queuedCount++
 		}
-		logAuditEvent(svc.DB, c, "campaign.email.send", "campaign", "", fiber.Map{"total": len(recipients), "sent_count": sentCount, "failed_count": len(failures), "channel_id": body.ChannelID})
+		logAuditEvent(svc.DB, c, "campaign.email.queue", "campaign", "", fiber.Map{
+			"batch_id": batchID, "total": len(recipients), "queued_count": queuedCount,
+			"failed_count": len(failures), "channel_id": body.ChannelID,
+		})
 
 		return c.JSON(fiber.Map{
 			"total":        len(recipients),
-			"sent_count":   sentCount,
+			"queued_count": queuedCount,
+			"sent_count":   0,
 			"failed_count": len(failures),
 			"failures":     failures,
 		})
@@ -1503,6 +2131,19 @@ func loadEmailCampaignRecipients(db *sql.DB, companyID string, sendToAll bool, c
 		  AND NULLIF(TRIM(c.email), '') IS NOT NULL
 		  AND COALESCE(c.is_opted_out, false) = false
 		  AND COALESCE(c.is_blocked, false) = false
+		  AND NOT EXISTS (
+			SELECT 1 FROM campaign_suppressions suppression
+			WHERE suppression.company_id = c.company_id
+			  AND suppression.channel = 'email'
+			  AND LOWER(TRIM(suppression.destination)) = LOWER(TRIM(c.email))
+		  )
+		  AND NOT EXISTS (
+			SELECT 1 FROM contact_channel_consents consent
+			WHERE consent.contact_id = c.id
+			  AND consent.channel IN ('email', 'marketing')
+			  AND consent.purpose = 'marketing'
+			  AND consent.status IN ('revoked', 'denied', 'opted_out')
+		  )
 		  %s
 		ORDER BY LOWER(COALESCE(NULLIF(c.name, ''), c.email)), c.email
 	`, filter), args...)
@@ -1525,7 +2166,7 @@ func loadEmailCampaignRecipients(db *sql.DB, companyID string, sendToAll bool, c
 	return recipients, rows.Err()
 }
 
-func recordEmailCampaignMessage(db *sql.DB, companyID, channelID, userID string, recipient emailCampaignRecipient, subject, content, externalID string) error {
+func recordEmailCampaignMessage(db *sql.DB, companyID, channelID, userID string, recipient emailCampaignRecipient, subject, content, externalID, bulkJobID string) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -1551,10 +2192,11 @@ func recordEmailCampaignMessage(db *sql.DB, companyID, channelID, userID string,
 		return err
 	}
 
+	metadata, _ := json.Marshal(fiber.Map{"source": "email_campaign", "subject": subject, "bulk_job_id": bulkJobID})
 	_, err = tx.Exec(`
 		INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, external_id, status, metadata, created_at)
 		VALUES ($1, $2, $3, 'user', NULLIF($4, '')::uuid, $5, 'email', NULLIF($6, ''), 'sent', $7::jsonb, NOW())
-	`, uuid.New().String(), conversationID, companyID, userID, content, externalID, fmt.Sprintf(`{"source":"email_campaign","subject":%q}`, subject))
+	`, uuid.New().String(), conversationID, companyID, userID, content, externalID, metadata)
 	if err != nil {
 		return err
 	}
@@ -1984,6 +2626,11 @@ func SendWidgetMessage(svc *services.Container) fiber.Handler {
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
+		sessionToken := c.Get("X-Widget-Session")
+		if svc.Auth.HasWidgetSession(widgetID, conversationID, body.VisitorID) &&
+			!svc.Auth.ValidateWidgetSession(widgetID, conversationID, body.VisitorID, sessionToken) {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Sessão do widget inválida ou expirada"})
+		}
 
 		messageID := uuid.New().String()
 		_, err = svc.DB.Exec(`
@@ -2014,7 +2661,16 @@ func SendWidgetMessage(svc *services.Container) fiber.Handler {
 		// Trigger bot automation (same as WhatsApp incoming messages)
 		go svc.Bot.TriggerBot(companyID, conversationID, contactID, channelID, body.Message, "", "")
 
-		return c.JSON(fiber.Map{"conversation_id": conversationID, "visitor_id": body.VisitorID, "message_id": messageID})
+		if !svc.Auth.ValidateWidgetSession(widgetID, conversationID, body.VisitorID, sessionToken) {
+			sessionToken, err = svc.Auth.CreateWidgetSession(widgetID, conversationID, body.VisitorID)
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Não foi possível criar a sessão segura"})
+			}
+		}
+		return c.JSON(fiber.Map{
+			"conversation_id": conversationID, "visitor_id": body.VisitorID,
+			"message_id": messageID, "session_token": sessionToken,
+		})
 	}
 }
 
@@ -2027,6 +2683,9 @@ func CloseWidgetConversation(svc *services.Container) fiber.Handler {
 		}
 		if err := c.BodyParser(&body); err != nil || body.ConversationID == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "conversation_id required"})
+		}
+		if !svc.Auth.ValidateWidgetSession(widgetID, body.ConversationID, body.VisitorID, c.Get("X-Widget-Session")) {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Sessão do widget inválida ou expirada"})
 		}
 
 		var companyID string
@@ -2044,6 +2703,7 @@ func CloseWidgetConversation(svc *services.Container) fiber.Handler {
 		if err := svc.Message.CloseConversation(body.ConversationID, companyID); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
+		_ = svc.Auth.RevokeWidgetSession(widgetID, body.ConversationID, body.VisitorID)
 
 		// Notify other widget connections and the CRM
 		svc.WSHub.BroadcastToRoom("widget:"+body.ConversationID, "conversation_closed", map[string]interface{}{
@@ -2060,6 +2720,10 @@ func GetWidgetMessages(svc *services.Container) fiber.Handler {
 		conversationID := c.Query("conversation_id")
 		if conversationID == "" {
 			return c.JSON(fiber.Map{"messages": []fiber.Map{}})
+		}
+		visitorID := c.Query("visitor_id")
+		if !svc.Auth.ValidateWidgetSession(widgetID, conversationID, visitorID, c.Get("X-Widget-Session")) {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Sessão do widget inválida ou expirada"})
 		}
 		var companyID string
 		err := svc.DB.QueryRow("SELECT company_id FROM widgets WHERE id = $1 AND is_active = true", widgetID).Scan(&companyID)
@@ -2190,6 +2854,7 @@ func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
   var wsBase=apiBase.replace(/^http/,"ws");
   var visitorId=localStorage.getItem("vgon_wv")||""; if(!visitorId){visitorId=Date.now()+"-"+Math.random().toString(16).slice(2);localStorage.setItem("vgon_wv",visitorId);}
   var conversationId=localStorage.getItem("vgon_wc")||"";
+  var sessionToken=localStorage.getItem("vgon_ws")||"";
   var savedName=localStorage.getItem("vgon_wn")||"";
   var savedContact=localStorage.getItem("vgon_we")||"";
   var seen={}, ws=null, pollTimer=null, typingTimer=null, unread=0, panelOpen=false;
@@ -2248,7 +2913,7 @@ func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
   function connectWS(){
     if(!conversationId||ws&&ws.readyState<2)return;
     try{
-      ws=new WebSocket(wsBase+"/ws/widget?conversation_id="+encodeURIComponent(conversationId));
+      ws=new WebSocket(wsBase+"/ws/widget?conversation_id="+encodeURIComponent(conversationId)+"&visitor_id="+encodeURIComponent(visitorId)+"&session_token="+encodeURIComponent(sessionToken));
       ws.onmessage=function(evt){try{
         var msg=JSON.parse(evt.data);
         if(msg.event==="new_message"){
@@ -2264,7 +2929,7 @@ func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
   }
   function poll(){
     if(!conversationId)return;
-    fetch(apiBase+"/api/widget/"+widgetId+"/messages?conversation_id="+encodeURIComponent(conversationId)).then(function(r){return r.json();}).then(function(data){
+    fetch(apiBase+"/api/widget/"+widgetId+"/messages?conversation_id="+encodeURIComponent(conversationId)+"&visitor_id="+encodeURIComponent(visitorId),{headers:{"X-Widget-Session":sessionToken}}).then(function(r){return r.json();}).then(function(data){
       if(data.status==="resolved"){handleConversationClosed();return;}
       var log=document.getElementById("vgon-log");if(!log)return;
       (data.messages||[]).forEach(function(m){appendMsg(log,m.content,m.sender_type==="contact",window.__vgonColor||"#4452f2",m.id,m.sender_name||"",m.sender_avatar||"",m.created_at,m.message_type,m.media_url);});
@@ -2275,7 +2940,8 @@ func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
     var name=savedName, contact=savedContact;
     var log=document.getElementById("vgon-log");
     var tempId="t-"+Date.now();appendMsg(log,msg,true,window.__vgonColor||"#4452f2",tempId);
-    fetch(apiBase+"/api/widget/"+widgetId+"/message",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({visitor_id:visitorId,name:name,email:contact.indexOf("@")>=0?contact:"",phone:contact.indexOf("@")>=0?"":contact,message:msg,page_url:location.href})}).then(function(r){return r.json();}).then(function(data){
+    fetch(apiBase+"/api/widget/"+widgetId+"/message",{method:"POST",headers:{"Content-Type":"application/json","X-Widget-Session":sessionToken},body:JSON.stringify({visitor_id:visitorId,name:name,email:contact.indexOf("@")>=0?contact:"",phone:contact.indexOf("@")>=0?"":contact,message:msg,page_url:location.href})}).then(function(r){return r.json();}).then(function(data){
+      if(data.session_token){sessionToken=data.session_token;localStorage.setItem("vgon_ws",sessionToken);}
       if(data.conversation_id){conversationId=data.conversation_id;localStorage.setItem("vgon_wc",conversationId);connectWS();setScreen("chat");}
       if(data.message_id)seen[data.message_id]=true;
     }).catch(function(){});
@@ -2299,7 +2965,7 @@ func GetWidgetEmbedScript(svc *services.Container) fiber.Handler {
     panel.querySelector("#vgon-end-btn").onclick=function(){
       if(!conversationId){minimizePanel();return;}
       if(!confirm("Deseja encerrar esta conversa?"))return;
-      fetch(apiBase+"/api/widget/"+widgetId+"/close",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({conversation_id:conversationId,visitor_id:visitorId})}).then(function(){handleConversationClosed();}).catch(function(){handleConversationClosed();});
+      fetch(apiBase+"/api/widget/"+widgetId+"/close",{method:"POST",headers:{"Content-Type":"application/json","X-Widget-Session":sessionToken},body:JSON.stringify({conversation_id:conversationId,visitor_id:visitorId})}).then(function(){sessionToken="";localStorage.removeItem("vgon_ws");handleConversationClosed();}).catch(function(){handleConversationClosed();});
     };
     panel.querySelector("#vgon-start").onclick=function(){
       var nameEl=panel.querySelector("#vgon-name"), emailEl=panel.querySelector("#vgon-email"), err=document.getElementById("vgon-error");
