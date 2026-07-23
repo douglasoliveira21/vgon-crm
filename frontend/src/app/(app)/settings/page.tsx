@@ -5,16 +5,19 @@ import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { Bell, Building, MessageSquare, Monitor, Moon, Play, Sun, Tag, Volume2 } from 'lucide-react'
 import { useAppearanceStore } from '@/store/appearance'
+import { useAuthStore } from '@/store/auth'
 
 export default function SettingsPage() {
   const { theme, setTheme, sidebarPinned, setSidebarPinned } = useAppearanceStore()
+	const { user } = useAuthStore()
+	const hasRestrictedSettings = user?.role_slug === 'agent' || user?.role_slug === 'supervisor'
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-8">Configurações do sistema</h1>
 
       <div className="space-y-6">
-        <div className="card p-6">
+		<div className="card p-6">
           <div className="flex items-center gap-3 mb-4">
             <Monitor size={20} className="text-gray-400" />
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Aparência</h2>
@@ -55,9 +58,9 @@ export default function SettingsPage() {
               className="rounded border-gray-300"
             />
           </label>
-        </div>
+		</div>
 
-        <div className="card p-6">
+		{!hasRestrictedSettings && <div className="card p-6">
           <div className="flex items-center gap-3 mb-4">
             <Building size={20} className="text-gray-400" />
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Empresa</h2>
@@ -73,9 +76,9 @@ export default function SettingsPage() {
               <input type="text" className="input" placeholder="00.000.000/0001-00" />
             </div>
           </div>
-        </div>
+		</div>}
 
-        <div className="card p-6">
+		<div className="card p-6">
           <div className="flex items-center gap-3 mb-4">
             <Bell size={20} className="text-gray-400" />
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Notificações</h2>
@@ -87,12 +90,12 @@ export default function SettingsPage() {
             <Toggle label="Menção com @nome" defaultChecked />
             <Toggle label="Recados internos" defaultChecked />
           </div>
-        </div>
+		</div>
 
         <NotificationSoundSettings />
         <NotificationAlertEvents />
 
-        <div className="card p-6">
+		{!hasRestrictedSettings && <div className="card p-6">
           <div className="flex items-center gap-3 mb-4">
             <MessageSquare size={20} className="text-gray-400" />
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">WhatsApp / Canais</h2>
@@ -122,7 +125,7 @@ export default function SettingsPage() {
             <Toggle label="Ignorar mensagens de status/stories" description="Não receber atualizações de status do WhatsApp" defaultChecked />
             <Toggle label="Enviar confirmação de leitura" description="Marcar mensagens como lidas ao visualizar no CRM" defaultChecked />
           </div>
-        </div>
+		</div>}
 
         <TagsManager />
       </div>
