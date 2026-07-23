@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/evocrm/backend/internal/services"
@@ -348,6 +349,7 @@ func DeleteTenant(svc *services.Container) fiber.Handler {
 		}
 
 		if err = cleanupForeignKeyReferences(tx, "companies", tenantID); err != nil {
+			log.Printf("[ADMIN] failed to clean references for tenant %s: %v", tenantID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error":   "Failed to clean tenant references",
 				"details": err.Error(),
@@ -355,6 +357,7 @@ func DeleteTenant(svc *services.Container) fiber.Handler {
 		}
 
 		if _, err = tx.Exec("DELETE FROM companies WHERE id = $1", tenantID); err != nil {
+			log.Printf("[ADMIN] failed to delete tenant %s: %v", tenantID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error":   "Failed to delete tenant data",
 				"details": err.Error(),
@@ -463,28 +466,44 @@ func cleanupForeignKeyReferences(tx *sql.Tx, referencedTable string, referencedI
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 
+	type foreignKeyReference struct {
+		schemaName string
+		tableName  string
+		columnName string
+		isNullable bool
+	}
+	var references []foreignKeyReference
 	for rows.Next() {
-		var schemaName, tableName, columnName string
-		var isNullable bool
-		if err := rows.Scan(&schemaName, &tableName, &columnName, &isNullable); err != nil {
+		var reference foreignKeyReference
+		if err := rows.Scan(&reference.schemaName, &reference.tableName, &reference.columnName, &reference.isNullable); err != nil {
+			rows.Close()
 			return err
 		}
+		references = append(references, reference)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
 
-		qualifiedTable := quoteIdentifier(schemaName) + "." + quoteIdentifier(tableName)
-		quotedColumn := quoteIdentifier(columnName)
-		if isNullable {
+	for _, reference := range references {
+		qualifiedTable := quoteIdentifier(reference.schemaName) + "." + quoteIdentifier(reference.tableName)
+		quotedColumn := quoteIdentifier(reference.columnName)
+		if reference.isNullable {
 			_, err = tx.Exec("UPDATE "+qualifiedTable+" SET "+quotedColumn+" = NULL WHERE "+quotedColumn+" = $1", referencedID)
 		} else {
 			_, err = tx.Exec("DELETE FROM "+qualifiedTable+" WHERE "+quotedColumn+" = $1", referencedID)
 		}
 		if err != nil {
-			return fmt.Errorf("%s.%s.%s: %w", schemaName, tableName, columnName, err)
+			return fmt.Errorf("%s.%s.%s: %w", reference.schemaName, reference.tableName, reference.columnName, err)
 		}
 	}
 
-	return rows.Err()
+	return nil
 }
 
 func cleanupUserReferences(tx *sql.Tx, userID string) error {
@@ -768,6 +787,7 @@ func AdminDeleteUser(svc *services.Container) fiber.Handler {
 		}
 
 		if err = cleanupUserReferences(tx, userID); err != nil {
+			log.Printf("[ADMIN] failed to clean references for user %s in company %s: %v", userID, companyID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error":   "Failed to clean user references",
 				"details": err.Error(),
@@ -776,6 +796,7 @@ func AdminDeleteUser(svc *services.Container) fiber.Handler {
 
 		result, err := tx.Exec("DELETE FROM users WHERE id = $1", userID)
 		if err != nil {
+			log.Printf("[ADMIN] failed to delete user %s in company %s: %v", userID, companyID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error":   "Failed to delete user",
 				"details": err.Error(),
