@@ -288,7 +288,21 @@ export default function ConversationsPage() {
   }, [conversationFilter, conversations, selectedConv?.id])
 
   useEffect(() => {
-    const handleNewMessage = (data: Message) => {
+    const handleNewMessage = async (data: Message) => {
+      if (user?.role_slug === 'agent' || user?.role_slug === 'supervisor') {
+        try {
+          await api.get(`/conversations/${data.conversation_id}`)
+        } catch {
+          setConversations((prev) => prev.filter((conversation) => conversation.id !== data.conversation_id))
+          if (selectedConv?.id === data.conversation_id) {
+            setSelectedConv(null)
+            setMessages([])
+          }
+          fetchTabUnreadCounts()
+          return
+        }
+      }
+
       if (selectedConv && data.conversation_id === selectedConv.id) {
         // User is viewing this chat - add message and don't count as unread
         if (data.sender_type === 'user' && data.sender_id === user?.id) {
@@ -368,7 +382,7 @@ export default function ConversationsPage() {
       wsService.off('message_status', handleMessageStatus)
       wsService.off('typing', handleTyping)
     }
-  }, [selectedConv])
+  }, [selectedConv, user?.id, user?.role_slug])
 
   const fetchConversations = async (showLoader = true) => {
     conversationsAbortRef.current?.abort()
