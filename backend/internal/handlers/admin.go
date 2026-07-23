@@ -348,7 +348,7 @@ func DeleteTenant(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to load tenant"})
 		}
 
-		if err = cleanupForeignKeyReferences(tx, "companies", tenantID); err != nil {
+		if err = cleanupTenantReferences(tx, tenantID); err != nil {
 			log.Printf("[ADMIN] failed to clean references for tenant %s: %v", tenantID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error":   "Failed to clean tenant references",
@@ -438,7 +438,14 @@ func quoteIdentifier(identifier string) string {
 	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
 }
 
-func cleanupForeignKeyReferences(tx *sql.Tx, referencedTable string, referencedID string) error {
+type foreignKeyReference struct {
+	schemaName string
+	tableName  string
+	columnName string
+	isNullable bool
+}
+
+func listForeignKeyReferences(tx *sql.Tx, referencedTable string) ([]foreignKeyReference, error) {
 	rows, err := tx.Query(`
 		SELECT
 			kcu.table_schema,
@@ -464,32 +471,33 @@ func cleanupForeignKeyReferences(tx *sql.Tx, referencedTable string, referencedI
 			AND NOT (kcu.table_schema = 'public' AND kcu.table_name = $1)
 	`, referencedTable)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	type foreignKeyReference struct {
-		schemaName string
-		tableName  string
-		columnName string
-		isNullable bool
-	}
 	var references []foreignKeyReference
 	for rows.Next() {
 		var reference foreignKeyReference
 		if err := rows.Scan(&reference.schemaName, &reference.tableName, &reference.columnName, &reference.isNullable); err != nil {
 			rows.Close()
-			return err
+			return nil, err
 		}
 		references = append(references, reference)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return err
+		return nil, err
 	}
 	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return references, nil
+}
+
+func cleanupForeignKeyReferences(tx *sql.Tx, referencedTable string, referencedID string) error {
+	references, err := listForeignKeyReferences(tx, referencedTable)
+	if err != nil {
 		return err
 	}
-
 	for _, reference := range references {
 		qualifiedTable := quoteIdentifier(reference.schemaName) + "." + quoteIdentifier(reference.tableName)
 		quotedColumn := quoteIdentifier(reference.columnName)
@@ -503,6 +511,77 @@ func cleanupForeignKeyReferences(tx *sql.Tx, referencedTable string, referencedI
 		}
 	}
 
+	return nil
+}
+
+func cleanupTenantReferences(tx *sql.Tx, tenantID string) error {
+	visited := make(map[string]bool)
+	return cleanupOwnedForeignKeyReferences(tx, "companies", tenantID, true, visited)
+}
+
+func cleanupOwnedForeignKeyReferences(tx *sql.Tx, referencedTable, referencedID string, deleteNullable bool, visited map[string]bool) error {
+	visitKey := referencedTable + ":" + referencedID
+	if visited[visitKey] {
+		return nil
+	}
+	visited[visitKey] = true
+
+	references, err := listForeignKeyReferences(tx, referencedTable)
+	if err != nil {
+		return err
+	}
+
+	for _, reference := range references {
+		qualifiedTable := quoteIdentifier(reference.schemaName) + "." + quoteIdentifier(reference.tableName)
+		quotedColumn := quoteIdentifier(reference.columnName)
+		if reference.isNullable && !deleteNullable {
+			if _, err = tx.Exec("UPDATE "+qualifiedTable+" SET "+quotedColumn+" = NULL WHERE "+quotedColumn+" = $1", referencedID); err != nil {
+				return fmt.Errorf("%s.%s.%s: %w", reference.schemaName, reference.tableName, reference.columnName, err)
+			}
+			continue
+		}
+
+		var hasID bool
+		if err = tx.QueryRow(`
+			SELECT EXISTS (
+				SELECT 1 FROM information_schema.columns
+				WHERE table_schema = $1 AND table_name = $2 AND column_name = 'id'
+			)
+		`, reference.schemaName, reference.tableName).Scan(&hasID); err != nil {
+			return err
+		}
+		if hasID {
+			childRows, queryErr := tx.Query("SELECT id::text FROM "+qualifiedTable+" WHERE "+quotedColumn+" = $1", referencedID)
+			if queryErr != nil {
+				return fmt.Errorf("%s.%s.%s: %w", reference.schemaName, reference.tableName, reference.columnName, queryErr)
+			}
+			var childIDs []string
+			for childRows.Next() {
+				var childID string
+				if scanErr := childRows.Scan(&childID); scanErr != nil {
+					childRows.Close()
+					return scanErr
+				}
+				childIDs = append(childIDs, childID)
+			}
+			if rowsErr := childRows.Err(); rowsErr != nil {
+				childRows.Close()
+				return rowsErr
+			}
+			if closeErr := childRows.Close(); closeErr != nil {
+				return closeErr
+			}
+			for _, childID := range childIDs {
+				if err = cleanupOwnedForeignKeyReferences(tx, reference.tableName, childID, false, visited); err != nil {
+					return err
+				}
+			}
+		}
+
+		if _, err = tx.Exec("DELETE FROM "+qualifiedTable+" WHERE "+quotedColumn+" = $1", referencedID); err != nil {
+			return fmt.Errorf("%s.%s.%s: %w", reference.schemaName, reference.tableName, reference.columnName, err)
+		}
+	}
 	return nil
 }
 
