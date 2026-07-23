@@ -317,10 +317,3 @@ func RestoreTenant(svc *services.Container) fiber.Handler {
 		return c.JSON(fiber.Map{"message": "Tenant restaurado"})
 	}
 }
-
-func nullableTimeValue(value sql.NullTime) interface{} {
-	if value.Valid {
-		return value.Time
-	}
-	return nil
-}
