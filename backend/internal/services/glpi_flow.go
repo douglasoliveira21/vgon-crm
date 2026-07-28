@@ -15,7 +15,8 @@ import (
 // GLPIFlowState tracks the multi-step GLPI ticket creation flow per conversation
 type GLPIFlowState struct {
 	Step         string `json:"step"`          // current step
-	EntitySearch string `json:"entity_search"` // entity name searched
+	EntitySearch string `json:"entity_search"` // legacy entity name search
+	EntityCNPJ   string `json:"entity_cnpj"`   // normalized CNPJ searched
 	EntityID     int    `json:"entity_id"`     // confirmed entity ID
 	EntityName   string `json:"entity_name"`   // confirmed entity name
 	FullName     string `json:"full_name"`     // requester name
@@ -71,7 +72,7 @@ func (e *GLPIFlowEngine) StartGLPIFlow(companyID, conversationID, contactID, ins
 	e.saveState(conversationID, state)
 
 	e.sendBotMessage(companyID, conversationID, instanceName, phone,
-		"🎫 *Abertura de Chamado*\n\nPara abrir um chamado, preciso de algumas informações.\n\nPrimeiro, me diga o *nome da empresa* (entidade):")
+		"🎫 *Abertura de Chamado*\n\nPara abrir um chamado, preciso de algumas informações.\n\nPrimeiro, digite o *CNPJ da empresa* (com ou sem pontuação):")
 }
 
 // HandleGLPIMessage processes user responses during the GLPI flow
@@ -143,9 +144,13 @@ func (e *GLPIFlowEngine) CancelFlow(conversationID string) {
 // --- Step handlers ---
 
 func (e *GLPIFlowEngine) handleAskEntity(companyID, conversationID, instanceName, phone, message string, state *GLPIFlowState) bool {
-	state.EntitySearch = strings.TrimSpace(message)
+	state.EntityCNPJ = onlyDigits(message)
+	if len(state.EntityCNPJ) != 14 {
+		e.sendBotMessage(companyID, conversationID, instanceName, phone,
+			"❌ CNPJ inválido. Digite os *14 números do CNPJ*, com ou sem pontuação:")
+		return true
+	}
 
-	// Search GLPI entities
 	sessionToken, err := e.glpi.InitSession(e.cfg.UserToken)
 	if err != nil {
 		e.sendBotMessage(companyID, conversationID, instanceName, phone,
@@ -155,36 +160,29 @@ func (e *GLPIFlowEngine) handleAskEntity(companyID, conversationID, instanceName
 	}
 	defer e.glpi.KillSession(sessionToken)
 
-	entities, err := e.glpi.GetEntities(sessionToken)
+	matches, err := e.glpi.FindEntitiesByCNPJ(sessionToken, state.EntityCNPJ)
 	if err != nil {
+		log.Printf("[GLPI-FLOW] Failed to search entity by CNPJ: %v", err)
 		e.sendBotMessage(companyID, conversationID, instanceName, phone,
-			"❌ Erro ao buscar entidades. Tente novamente mais tarde.")
-		e.CancelFlow(conversationID)
+			"❌ Não consegui consultar o CNPJ no GLPI. Verifique se o campo *CNPJ* está disponível para pesquisa e tente novamente:")
 		return true
-	}
-
-	// Filter entities that match the search
-	searchLower := strings.ToLower(state.EntitySearch)
-	var matches []GLPIEntity
-	for _, ent := range entities {
-		nameLower := strings.ToLower(ent.Name)
-		completeLower := strings.ToLower(ent.CompleteName)
-		if strings.Contains(nameLower, searchLower) || strings.Contains(completeLower, searchLower) {
-			matches = append(matches, ent)
-		}
 	}
 
 	if len(matches) == 0 {
 		e.sendBotMessage(companyID, conversationID, instanceName, phone,
-			fmt.Sprintf("❌ Nenhuma empresa encontrada com o nome *\"%s\"*.\n\nPor favor, digite novamente o nome da empresa:", state.EntitySearch))
+			fmt.Sprintf("❌ Nenhuma empresa encontrada com o CNPJ *%s*.\n\nConfira os números e digite novamente:", formatCNPJ(state.EntityCNPJ)))
 		return true
 	}
 
+	if len(matches) == 1 {
+		return e.confirmEntityAndAskName(companyID, conversationID, instanceName, phone, state, matches[0])
+	}
+
 	// Build options message
-	msg := fmt.Sprintf("🏢 Encontrei %d resultado(s) para *\"%s\"*:\n", len(matches), state.EntitySearch)
+	msg := fmt.Sprintf("🏢 Encontrei %d entidades com o CNPJ *%s*:\n", len(matches), formatCNPJ(state.EntityCNPJ))
 	for i, ent := range matches {
 		if i >= 5 {
-			msg += fmt.Sprintf("\n... e mais %d resultados. Seja mais específico.", len(matches)-5)
+			msg += fmt.Sprintf("\n... e mais %d resultados.", len(matches)-5)
 			break
 		}
 		displayName := ent.Name
@@ -230,7 +228,7 @@ func (e *GLPIFlowEngine) handleConfirmEntity(companyID, conversationID, instance
 		state.Step = "ask_entity"
 		e.saveState(conversationID, state)
 		e.sendBotMessage(companyID, conversationID, instanceName, phone,
-			"Ok! Digite novamente o *nome da empresa*:")
+			"Ok! Digite novamente o *CNPJ da empresa*:")
 		return true
 	}
 
@@ -256,13 +254,22 @@ func (e *GLPIFlowEngine) handleConfirmEntity(companyID, conversationID, instance
 	entityID := int(matchIDsRaw[idx-1].(float64))
 	entityName := matchNamesRaw[idx-1].(string)
 
-	state.EntityID = entityID
+	return e.confirmEntityAndAskName(companyID, conversationID, instanceName, phone, state, GLPIEntity{
+		ID: entityID, Name: entityName, CompleteName: entityName,
+	})
+}
+
+func (e *GLPIFlowEngine) confirmEntityAndAskName(companyID, conversationID, instanceName, phone string, state *GLPIFlowState, entity GLPIEntity) bool {
+	entityName := entity.CompleteName
+	if entityName == "" {
+		entityName = entity.Name
+	}
+	state.EntityID = entity.ID
 	state.EntityName = entityName
 	state.Step = "ask_full_name"
 	e.saveState(conversationID, state)
-
 	e.sendBotMessage(companyID, conversationID, instanceName, phone,
-		fmt.Sprintf("✅ Empresa confirmada: *%s*\n\nAgora, informe seu *nome completo*:", entityName))
+		fmt.Sprintf("✅ Empresa identificada: *%s*\nCNPJ: *%s*\n\nAgora, informe seu *nome completo*:", entityName, formatCNPJ(state.EntityCNPJ)))
 	return true
 }
 
@@ -526,4 +533,12 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func formatCNPJ(cnpj string) string {
+	cnpj = onlyDigits(cnpj)
+	if len(cnpj) != 14 {
+		return cnpj
+	}
+	return fmt.Sprintf("%s.%s.%s/%s-%s", cnpj[0:2], cnpj[2:5], cnpj[5:8], cnpj[8:12], cnpj[12:14])
 }

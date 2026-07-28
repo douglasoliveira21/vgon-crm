@@ -1352,14 +1352,14 @@ function NodeConfigPanel({
           Este bloco inicia um fluxo conversacional com o cliente para abertura de chamado no GLPI.
           <br/><br/>
           O bot irá perguntar automaticamente:
-          <br/>1. Nome da empresa (busca entidade no GLPI)
+          <br/>1. CNPJ da empresa (busca exata no campo CNPJ da entidade no GLPI)
           <br/>2. Confirmação da entidade
           <br/>3. Nome completo
           <br/>4. E-mail de contato
           <br/>5. Título do problema
           <br/>6. Descrição detalhada
           <br/><br/>
-          Após coletar todas as informações, o chamado será aberto no GLPI e o número do ticket retornado ao cliente.
+          O CNPJ pode ser informado com ou sem pontuação. Após coletar todas as informações, o chamado será aberto no GLPI e o número do ticket retornado ao cliente.
           <br/><br/>
           📞 O telefone é capturado automaticamente do WhatsApp.
         </div>

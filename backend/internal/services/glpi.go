@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -35,6 +38,15 @@ type GLPIEntity struct {
 	ID           int    `json:"id"`
 	Name         string `json:"name"`
 	CompleteName string `json:"completename"`
+}
+
+type GLPISearchOption struct {
+	Name string `json:"name"`
+	UID  string `json:"uid"`
+}
+
+type glpiSearchResponse struct {
+	Data []map[string]interface{} `json:"data"`
 }
 
 func NewGLPIService(baseURL, appToken string) *GLPIService {
@@ -78,12 +90,12 @@ func (g *GLPIService) InitSession(userToken string) (string, error) {
 func (g *GLPIService) CreateTicket(sessionToken string, title, content string, entityID, ticketType, priority int) (*GLPITicket, error) {
 	payload := map[string]interface{}{
 		"input": map[string]interface{}{
-			"name":         title,
-			"content":      content,
-			"entities_id":  entityID,
-			"type":         ticketType,
-			"priority":     priority,
-			"status":       1, // New
+			"name":        title,
+			"content":     content,
+			"entities_id": entityID,
+			"type":        ticketType,
+			"priority":    priority,
+			"status":      1, // New
 		},
 	}
 
@@ -203,6 +215,160 @@ func (g *GLPIService) GetEntity(sessionToken string, entityID int) (*GLPIEntity,
 		return nil, err
 	}
 	return &entity, nil
+}
+
+func (g *GLPIService) FindEntitiesByCNPJ(sessionToken, cnpj string) ([]GLPIEntity, error) {
+	cnpj = onlyDigits(cnpj)
+	if len(cnpj) != 14 {
+		return nil, fmt.Errorf("CNPJ deve conter 14 dígitos")
+	}
+
+	options, err := g.listSearchOptions(sessionToken, "Entity")
+	if err != nil {
+		return nil, err
+	}
+	cnpjField := findSearchOption(options, "cnpj")
+	if cnpjField == "" {
+		return nil, fmt.Errorf("campo CNPJ não encontrado nas opções de pesquisa da entidade no GLPI")
+	}
+	idField := findEntityIDSearchOption(options)
+	if idField == "" {
+		return nil, fmt.Errorf("campo ID da entidade não encontrado nas opções de pesquisa do GLPI")
+	}
+
+	query := url.Values{}
+	query.Set("criteria[0][field]", cnpjField)
+	query.Set("criteria[0][searchtype]", "contains")
+	query.Set("criteria[0][value]", "^"+cnpj+"$")
+	query.Set("forcedisplay[0]", idField)
+	query.Set("forcedisplay[1]", cnpjField)
+	query.Set("range", "0-49")
+	searchURL := g.baseURL + "/search/Entity?" + query.Encode()
+
+	var result glpiSearchResponse
+	if err := g.getJSON(sessionToken, searchURL, &result); err != nil {
+		return nil, fmt.Errorf("falha ao pesquisar CNPJ nas entidades: %w", err)
+	}
+
+	entityIDs := map[int]struct{}{}
+	for _, row := range result.Data {
+		if rawCNPJ, exists := row[cnpjField]; exists && onlyDigits(fmt.Sprint(rawCNPJ)) != cnpj {
+			continue
+		}
+		entityID, ok := interfaceToInt(row[idField])
+		if !ok {
+			entityID, ok = interfaceToInt(row["2"])
+		}
+		if ok && entityID > 0 {
+			entityIDs[entityID] = struct{}{}
+		}
+	}
+
+	ids := make([]int, 0, len(entityIDs))
+	for id := range entityIDs {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+
+	entities := make([]GLPIEntity, 0, len(ids))
+	for _, id := range ids {
+		entity, err := g.GetEntity(sessionToken, id)
+		if err != nil {
+			return nil, err
+		}
+		entities = append(entities, *entity)
+	}
+	return entities, nil
+}
+
+func (g *GLPIService) listSearchOptions(sessionToken, itemType string) (map[string]GLPISearchOption, error) {
+	var options map[string]GLPISearchOption
+	if err := g.getJSON(sessionToken, g.baseURL+"/listSearchOptions/"+url.PathEscape(itemType), &options); err != nil {
+		return nil, fmt.Errorf("falha ao consultar campos pesquisáveis do GLPI: %w", err)
+	}
+	return options, nil
+}
+
+func (g *GLPIService) getJSON(sessionToken, requestURL string, target interface{}) error {
+	req, err := http.NewRequest(http.MethodGet, requestURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("App-Token", g.appToken)
+	req.Header.Set("Session-Token", sessionToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("GLPI retornou %d: %s", resp.StatusCode, string(body))
+	}
+	return json.NewDecoder(resp.Body).Decode(target)
+}
+
+func findSearchOption(options map[string]GLPISearchOption, needle string) string {
+	needle = strings.ToLower(strings.TrimSpace(needle))
+	keys := make([]string, 0, len(options))
+	for key := range options {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		option := options[key]
+		if strings.EqualFold(strings.TrimSpace(option.Name), needle) {
+			return key
+		}
+	}
+	for _, key := range keys {
+		option := options[key]
+		text := strings.ToLower(option.Name + " " + option.UID)
+		if strings.Contains(text, needle) {
+			return key
+		}
+	}
+	return ""
+}
+
+func findEntityIDSearchOption(options map[string]GLPISearchOption) string {
+	for key, option := range options {
+		if strings.EqualFold(strings.TrimSpace(option.UID), "Entity.id") {
+			return key
+		}
+	}
+	for key, option := range options {
+		if strings.EqualFold(strings.TrimSpace(option.Name), "ID") {
+			return key
+		}
+	}
+	return ""
+}
+
+func interfaceToInt(value interface{}) (int, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return int(typed), true
+	case int:
+		return typed, true
+	case string:
+		number, err := strconv.Atoi(strings.TrimSpace(typed))
+		return number, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func onlyDigits(value string) string {
+	var result strings.Builder
+	for _, char := range value {
+		if char >= '0' && char <= '9' {
+			result.WriteRune(char)
+		}
+	}
+	return result.String()
 }
 
 // KillSession ends a GLPI session
