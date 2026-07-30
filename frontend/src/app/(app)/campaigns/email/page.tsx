@@ -337,6 +337,9 @@ export default function EmailCampaignPage() {
               <div className="mt-4 rounded-lg bg-yellow-50 p-3 text-xs text-yellow-700">
                 Envie apenas para contatos que autorizaram receber comunicação por e-mail.
               </div>
+              <div className="mt-3 rounded-lg bg-blue-50 p-3 text-xs text-blue-700">
+                Os e-mails são enviados automaticamente com intervalo fixo de 2 minutos entre cada contato.
+              </div>
             </div>
 
             {result && (

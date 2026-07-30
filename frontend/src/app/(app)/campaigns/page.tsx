@@ -27,7 +27,6 @@ interface Campaign {
   message_type: string
   media_url?: string
   content_items?: CampaignContentItem[]
-  send_speed?: number
   total_contacts: number
   sent_count: number
   delivered_count: number
@@ -299,7 +298,6 @@ function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campa
   const [contentItems, setContentItems] = useState<CampaignContentItem[]>(
     initialItems.map((item, index) => ({ ...item, client_id: `${Date.now()}-${index}` }))
   )
-  const [sendSpeed, setSendSpeed] = useState(campaign?.send_speed || 30)
   const [frequencyCapDays, setFrequencyCapDays] = useState(campaign?.frequency_cap_days || 0)
   const [scheduledAt, setScheduledAt] = useState(
     campaign?.scheduled_at ? new Date(campaign.scheduled_at).toISOString().slice(0, 16) : ''
@@ -423,7 +421,6 @@ function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campa
         message_type: firstItem.type,
         media_url: firstItem.media_url,
         content_items: validItems.map(({ client_id, ...item }) => item),
-        send_speed: sendSpeed,
         frequency_cap_days: frequencyCapDays,
         scheduled_at: !campaign && scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo',
@@ -672,18 +669,8 @@ function CreateCampaignModal({ campaign, onClose, onCreated }: { campaign: Campa
             </div>
           )}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Velocidade de envio</label>
-            <select
-              value={sendSpeed}
-              onChange={(e) => setSendSpeed(parseInt(e.target.value))}
-              className="input"
-            >
-              <option value={10}>10 msg/min (seguro)</option>
-              <option value={20}>20 msg/min</option>
-              <option value={30}>30 msg/min</option>
-              <option value={60}>60 msg/min (risco)</option>
-            </select>
+          <div className="rounded-lg bg-blue-50 p-3 text-xs text-blue-700">
+            Os envios são realizados automaticamente com intervalo fixo de 2 minutos entre cada contato.
           </div>
 
           <div className="p-3 bg-yellow-50 rounded-lg text-xs text-yellow-700">

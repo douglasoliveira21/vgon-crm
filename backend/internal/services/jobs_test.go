@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"regexp"
 	"testing"
 	"time"
@@ -52,5 +53,28 @@ func TestRetryDeadLetterRequeuesOriginalJobAtomically(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCampaignJobHasNoFixedExecutionDeadline(t *testing.T) {
+	ctx, cancel := jobExecutionContext(context.Background(), "campaign.send")
+	defer cancel()
+
+	if _, hasDeadline := ctx.Deadline(); hasDeadline {
+		t.Fatal("campaign.send should run until completion, pause, or server shutdown")
+	}
+}
+
+func TestRegularJobKeepsExecutionDeadline(t *testing.T) {
+	ctx, cancel := jobExecutionContext(context.Background(), "campaign.email.send")
+	defer cancel()
+
+	deadline, hasDeadline := ctx.Deadline()
+	if !hasDeadline {
+		t.Fatal("regular jobs should keep a bounded execution time")
+	}
+	remaining := time.Until(deadline)
+	if remaining < 14*time.Minute || remaining > 15*time.Minute {
+		t.Fatalf("unexpected regular job timeout: %s", remaining)
 	}
 }

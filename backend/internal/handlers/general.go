@@ -15,6 +15,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const campaignMessageDelay = 2 * time.Minute
+
 // ============================================
 // TEAMS
 // ============================================
@@ -1264,7 +1266,6 @@ func CreateCampaign(svc *services.Container) fiber.Handler {
 			ScheduledAt      string                `json:"scheduled_at"`
 			Timezone         string                `json:"timezone"`
 			FrequencyCapDays int                   `json:"frequency_cap_days"`
-			SendSpeed        int                   `json:"send_speed"`
 			TotalContacts    int                   `json:"total_contacts"`
 			FilterTag        string                `json:"filter_tag"`
 			ContactIDs       []string              `json:"contact_ids"`
@@ -1274,9 +1275,6 @@ func CreateCampaign(svc *services.Container) fiber.Handler {
 		}
 		if strings.TrimSpace(body.Name) == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Nome da campanha é obrigatório"})
-		}
-		if body.SendSpeed == 0 {
-			body.SendSpeed = 30
 		}
 		if body.MessageType == "" {
 			body.MessageType = "text"
@@ -1309,12 +1307,12 @@ func CreateCampaign(svc *services.Container) fiber.Handler {
 		_, err = tx.Exec(`
 			INSERT INTO campaigns
 				(id, company_id, channel_id, name, message_content, message_type, media_url,
-				 variables, send_speed, total_contacts, created_by, scheduled_at, timezone,
+				 variables, total_contacts, created_by, scheduled_at, timezone,
 				 frequency_cap_days, approval_status, status)
 			VALUES ($1, $2, NULLIF($3, '')::uuid, $4, $5, $6, NULLIF($7, ''),
-				$8::jsonb, $9, $10, $11, $12, $13, $14, 'draft', 'draft')
+				$8::jsonb, $9, $10, $11, $12, $13, 'draft', 'draft')
 		`, id, companyID, body.ChannelID, body.Name, body.MessageContent, body.MessageType,
-			body.MediaURL, string(contentItemsJSON), body.SendSpeed, body.TotalContacts,
+			body.MediaURL, string(contentItemsJSON), body.TotalContacts,
 			userID, scheduledAt, body.Timezone, body.FrequencyCapDays)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -1349,7 +1347,6 @@ func UpdateCampaign(svc *services.Container) fiber.Handler {
 			MediaBase64      string                `json:"media_base64"`
 			MediaFileName    string                `json:"media_filename"`
 			ContentItems     []campaignMessageItem `json:"content_items"`
-			SendSpeed        int                   `json:"send_speed"`
 			FrequencyCapDays int                   `json:"frequency_cap_days"`
 		}
 		if err := c.BodyParser(&body); err != nil {
@@ -1357,9 +1354,6 @@ func UpdateCampaign(svc *services.Container) fiber.Handler {
 		}
 		if strings.TrimSpace(body.Name) == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Nome da campanha é obrigatório"})
-		}
-		if body.SendSpeed <= 0 {
-			body.SendSpeed = 30
 		}
 		contentItems, err := normalizeCampaignItems(body.ContentItems, body.MessageContent, body.MessageType, body.MediaURL, body.MediaBase64, body.MediaFileName, true, svc.Config.ClamAVAddr)
 		if err != nil {
@@ -1371,10 +1365,10 @@ func UpdateCampaign(svc *services.Container) fiber.Handler {
 		res, err := svc.DB.Exec(`
 			UPDATE campaigns
 			SET name = $1, message_content = $2, message_type = $3, media_url = NULLIF($4, ''),
-				variables = $5::jsonb, send_speed = $6, frequency_cap_days = $7,
+				variables = $5::jsonb, frequency_cap_days = $6,
 				approval_status = 'draft', approved_by = NULL, approved_at = NULL, updated_at = NOW()
-			WHERE id = $8 AND company_id = $9 AND status IN ('draft', 'paused')
-		`, body.Name, body.MessageContent, body.MessageType, body.MediaURL, string(contentItemsJSON), body.SendSpeed, body.FrequencyCapDays, campaignID, companyID)
+			WHERE id = $7 AND company_id = $8 AND status IN ('draft', 'paused')
+		`, body.Name, body.MessageContent, body.MessageType, body.MediaURL, string(contentItemsJSON), body.FrequencyCapDays, campaignID, companyID)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -1760,23 +1754,15 @@ func runCampaignSender(ctx context.Context, svc *services.Container, campaignID,
 	var message, messageType string
 	var mediaURL sql.NullString
 	var variables []byte
-	var sendSpeed int
 	if err := svc.DB.QueryRow(`
-		SELECT COALESCE(message_content, ''), COALESCE(message_type, 'text'), media_url, COALESCE(variables, '[]'::jsonb), COALESCE(send_speed, 30)
+		SELECT COALESCE(message_content, ''), COALESCE(message_type, 'text'), media_url, COALESCE(variables, '[]'::jsonb)
 		FROM campaigns
 		WHERE id = $1 AND company_id = $2
-	`, campaignID, companyID).Scan(&message, &messageType, &mediaURL, &variables, &sendSpeed); err != nil {
+	`, campaignID, companyID).Scan(&message, &messageType, &mediaURL, &variables); err != nil {
 		log.Printf("[CAMPAIGN] failed to load campaign %s: %v", campaignID, err)
 		return err
 	}
 	items := campaignItemsFromStored(json.RawMessage(variables), message, messageType, mediaURL.String)
-	if sendSpeed <= 0 {
-		sendSpeed = 30
-	}
-	delay := time.Minute / time.Duration(sendSpeed)
-	if delay < time.Second {
-		delay = time.Second
-	}
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -1827,7 +1813,7 @@ func runCampaignSender(ctx context.Context, svc *services.Container, campaignID,
 		`, campaignID, companyID).Scan(&campaignContactID, &contactID, &name, &phone, &email, &companyName)
 		if err == sql.ErrNoRows {
 			if campaignHasPendingRetry(svc.DB, campaignID) {
-				if !waitForCampaign(ctx, delay) {
+				if !waitForCampaign(ctx, campaignMessageDelay) {
 					return ctx.Err()
 				}
 				continue
@@ -1854,7 +1840,7 @@ func runCampaignSender(ctx context.Context, svc *services.Container, campaignID,
 			`, campaignContactID)
 		}
 		refreshCampaignCounters(svc.DB, campaignID)
-		if !waitForCampaign(ctx, delay) {
+		if !waitForCampaign(ctx, campaignMessageDelay) {
 			return ctx.Err()
 		}
 	}
@@ -2079,7 +2065,8 @@ func SendEmailCampaign(svc *services.Container) fiber.Handler {
 		batchID := uuid.New().String()
 		failures := make([]fiber.Map, 0)
 		queuedCount := 0
-		for _, recipient := range recipients {
+		queueStartedAt := time.Now()
+		for recipientIndex, recipient := range recipients {
 			subject := renderCampaignMessage(body.Subject, recipient.Name, recipient.Phone, recipient.Email, recipient.CompanyName)
 			content := renderCampaignMessage(body.Content, recipient.Name, recipient.Phone, recipient.Email, recipient.CompanyName)
 			content += fmt.Sprintf(
@@ -2090,7 +2077,7 @@ func SendEmailCampaign(svc *services.Container) fiber.Handler {
 			_, err := svc.Jobs.Enqueue(companyID, "campaign.email.send", jobKey, emailCampaignJobPayload{
 				JobKey: jobKey, CompanyID: companyID, UserID: userID, ChannelID: body.ChannelID,
 				Subject: subject, Content: content, Recipient: recipient,
-			}, time.Now())
+			}, queueStartedAt.Add(time.Duration(recipientIndex)*campaignMessageDelay))
 			if err != nil {
 				failures = append(failures, fiber.Map{
 					"contact_id": recipient.ID,

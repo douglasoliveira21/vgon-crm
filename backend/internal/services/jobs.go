@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -149,18 +150,42 @@ func (q *JobQueue) processOne(ctx context.Context) error {
 	if handler == nil {
 		return q.failJob(id, jobType, payload, attempts+1, maxAttempts, fmt.Errorf("no handler registered"))
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	runCtx, cancel := jobExecutionContext(ctx, jobType)
 	defer cancel()
 	heartbeatDone := make(chan struct{})
 	go q.heartbeatJob(runCtx, id, heartbeatDone)
 	if err := handler(runCtx, payload); err != nil {
 		close(heartbeatDone)
+		if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			return q.requeueInterruptedJob(id)
+		}
 		return q.failJob(id, jobType, payload, attempts+1, maxAttempts, err)
 	}
 	close(heartbeatDone)
 	_, err = q.db.ExecContext(ctx, `
 		UPDATE durable_jobs SET status = 'completed', completed_at = NOW(),
 			locked_at = NULL, locked_by = NULL, last_error = NULL, updated_at = NOW()
+		WHERE id = $1
+	`, id)
+	return err
+}
+
+func jobExecutionContext(parent context.Context, jobType string) (context.Context, context.CancelFunc) {
+	if jobType == "campaign.send" {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, 15*time.Minute)
+}
+
+func (q *JobQueue) requeueInterruptedJob(id string) error {
+	_, err := q.db.Exec(`
+		UPDATE durable_jobs
+		SET status = 'pending',
+			attempts = GREATEST(attempts - 1, 0),
+			available_at = NOW(),
+			locked_at = NULL,
+			locked_by = NULL,
+			updated_at = NOW()
 		WHERE id = $1
 	`, id)
 	return err
