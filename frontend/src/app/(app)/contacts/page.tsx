@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { Search, Plus, Edit2, Trash2, MapPin, MessageSquare, X, ShieldCheck, Download, History, GitMerge } from 'lucide-react'
+import { Search, Plus, Edit2, Trash2, MapPin, MessageSquare, X, ShieldCheck, Download, History, GitMerge, Tag } from 'lucide-react'
 import { SafeImage } from '@/components/safe-image'
 
 const PAGE_SIZE = 25
@@ -46,6 +46,12 @@ interface Channel {
   type: string
   status: string
   is_active: boolean
+}
+
+interface ContactTag {
+  id: string
+  name: string
+  color: string
 }
 
 export default function ContactsPage() {
@@ -813,6 +819,59 @@ function ContactFormModal({
     consent_text: contact?.consent_text || '',
   })
   const [saving, setSaving] = useState(false)
+  const [tags, setTags] = useState<ContactTag[]>([])
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>(contact?.tags?.map((tag) => tag.id) || [])
+  const [newTagName, setNewTagName] = useState('')
+  const [loadingTags, setLoadingTags] = useState(Boolean(contact))
+  const [tagsLoaded, setTagsLoaded] = useState(false)
+  const [creatingTag, setCreatingTag] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    const loadTags = async () => {
+      try {
+        const [tagsResponse, contactResponse] = await Promise.all([
+          api.get('/tags'),
+          contact ? api.get(`/contacts/${contact.id}`) : Promise.resolve(null),
+        ])
+        if (!active) return
+        setTags(tagsResponse.data.tags || [])
+        if (contactResponse) {
+          setSelectedTagIds((contactResponse.data.tags || []).map((tag: ContactTag) => tag.id))
+        }
+        setTagsLoaded(true)
+      } catch {
+        if (active) toast.error('Não foi possível carregar as tags')
+      } finally {
+        if (active) setLoadingTags(false)
+      }
+    }
+    loadTags()
+    return () => { active = false }
+  }, [contact])
+
+  const toggleTag = (tagID: string) => {
+    setSelectedTagIds((current) =>
+      current.includes(tagID) ? current.filter((id) => id !== tagID) : [...current, tagID]
+    )
+  }
+
+  const createTag = async () => {
+    const name = newTagName.trim()
+    if (!name) return
+    setCreatingTag(true)
+    try {
+      const response = await api.post('/tags', { name, color: '#3B82F6' })
+      const createdTag = response.data as ContactTag
+      setTags((current) => [...current, createdTag].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')))
+      setSelectedTagIds((current) => [...current, createdTag.id])
+      setNewTagName('')
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao criar tag')
+    } finally {
+      setCreatingTag(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -820,7 +879,10 @@ function ContactFormModal({
 
     try {
       if (contact) {
-        await api.put(`/contacts/${contact.id}`, form)
+        await api.put(`/contacts/${contact.id}`, {
+          ...form,
+          ...(tagsLoaded ? { tag_ids: selectedTagIds } : {}),
+        })
         toast.success('Contato atualizado')
       } else {
         await api.post('/contacts', form)
@@ -967,11 +1029,72 @@ function ContactFormModal({
             </div>
           </div>
 
+          {contact && (
+            <div className="rounded-xl border border-gray-200 p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <Tag size={16} className="text-primary-600" />
+                <p className="text-sm font-medium text-gray-900">Tags do contato</p>
+              </div>
+
+              {loadingTags ? (
+                <p className="text-sm text-gray-500">Carregando tags...</p>
+              ) : (
+                <>
+                  <div className="flex max-h-36 flex-wrap gap-2 overflow-y-auto">
+                    {tags.map((tag) => {
+                      const selected = selectedTagIds.includes(tag.id)
+                      return (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() => toggleTag(tag.id)}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                            selected ? 'border-transparent text-white' : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                          }`}
+                          style={selected ? { backgroundColor: tag.color } : undefined}
+                          aria-pressed={selected}
+                        >
+                          {tag.name}
+                        </button>
+                      )
+                    })}
+                    {tags.length === 0 && <p className="text-sm text-gray-500">Nenhuma tag cadastrada.</p>}
+                  </div>
+
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      type="text"
+                      value={newTagName}
+                      onChange={(event) => setNewTagName(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          createTag()
+                        }
+                      }}
+                      className="input"
+                      placeholder="Nome da nova tag"
+                    />
+                    <button
+                      type="button"
+                      onClick={createTag}
+                      disabled={creatingTag || !newTagName.trim()}
+                      className="btn-secondary shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Plus size={16} />
+                      {creatingTag ? 'Criando...' : 'Criar'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           <div className="flex gap-3 pt-4">
             <button type="button" onClick={onClose} className="btn-secondary flex-1">
               Cancelar
             </button>
-            <button type="submit" disabled={saving} className="btn-primary flex-1">
+            <button type="submit" disabled={saving || Boolean(contact && loadingTags)} className="btn-primary flex-1">
               {saving ? 'Salvando...' : 'Salvar'}
             </button>
           </div>

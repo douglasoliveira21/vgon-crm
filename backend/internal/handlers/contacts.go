@@ -267,6 +267,26 @@ func UpdateContact(svc *services.Container) fiber.Handler {
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
+		if req.TagIDs != nil {
+			uniqueTagIDs := make([]string, 0, len(*req.TagIDs))
+			seen := make(map[string]struct{}, len(*req.TagIDs))
+			for _, tagID := range *req.TagIDs {
+				if _, err := uuid.Parse(tagID); err != nil {
+					return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Tag inválida"})
+				}
+				if _, exists := seen[tagID]; !exists {
+					seen[tagID] = struct{}{}
+					uniqueTagIDs = append(uniqueTagIDs, tagID)
+				}
+			}
+			if err := svc.Contact.ReplaceContactTags(contactID, companyID, uniqueTagIDs); err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+			}
+			contact, err = svc.Contact.GetContactByID(contactID, companyID)
+			if err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+			}
+		}
 		logAuditEvent(svc.DB, c, "contact.update", "contact", contactID, fiber.Map{"name": contact.Name, "email": contact.Email, "phone": contact.Phone})
 		if req.ConsentStatus != nil && *req.ConsentStatus != "" {
 			recordContactConsent(svc.DB, companyID, contactID, c.Locals("user_id").(string), *req.ConsentStatus, stringPtrValue(req.ConsentSource), stringPtrValue(req.OptOutReason), stringPtrValue(req.ConsentText), c.IP(), c.Get("User-Agent"))
@@ -381,6 +401,7 @@ func ExportContactData(svc *services.Container) fiber.Handler {
 
 func AddContactTag(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
 		contactID := c.Params("id")
 
 		var body struct {
@@ -390,7 +411,10 @@ func AddContactTag(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
 		}
 
-		if err := svc.Contact.AddTagToContact(contactID, body.TagID); err != nil {
+		if _, err := uuid.Parse(body.TagID); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Tag inválida"})
+		}
+		if err := svc.Contact.AddTagToContact(contactID, body.TagID, companyID); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
@@ -400,10 +424,11 @@ func AddContactTag(svc *services.Container) fiber.Handler {
 
 func RemoveContactTag(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
 		contactID := c.Params("id")
 		tagID := c.Params("tagId")
 
-		if err := svc.Contact.RemoveTagFromContact(contactID, tagID); err != nil {
+		if err := svc.Contact.RemoveTagFromContact(contactID, tagID, companyID); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 

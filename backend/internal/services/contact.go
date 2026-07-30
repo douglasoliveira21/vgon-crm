@@ -3,6 +3,7 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/evocrm/backend/internal/models"
 	"github.com/google/uuid"
@@ -33,23 +34,24 @@ type CreateContactRequest struct {
 }
 
 type UpdateContactRequest struct {
-	Name              *string `json:"name"`
-	Phone             *string `json:"phone"`
-	Email             *string `json:"email"`
-	CustomerCompanyID *string `json:"customer_company_id"`
-	CompanyName       *string `json:"company_name"`
-	Position          *string `json:"position"`
-	City              *string `json:"city"`
-	State             *string `json:"state"`
-	Origin            *string `json:"origin"`
-	Notes             *string `json:"notes"`
-	AssignedTo        *string `json:"assigned_to"`
-	IsOptedOut        *bool   `json:"is_opted_out"`
-	OptOutReason      *string `json:"opt_out_reason"`
-	OptOutSource      *string `json:"opt_out_source"`
-	ConsentStatus     *string `json:"consent_status"`
-	ConsentSource     *string `json:"consent_source"`
-	ConsentText       *string `json:"consent_text"`
+	Name              *string   `json:"name"`
+	Phone             *string   `json:"phone"`
+	Email             *string   `json:"email"`
+	CustomerCompanyID *string   `json:"customer_company_id"`
+	CompanyName       *string   `json:"company_name"`
+	Position          *string   `json:"position"`
+	City              *string   `json:"city"`
+	State             *string   `json:"state"`
+	Origin            *string   `json:"origin"`
+	Notes             *string   `json:"notes"`
+	AssignedTo        *string   `json:"assigned_to"`
+	IsOptedOut        *bool     `json:"is_opted_out"`
+	OptOutReason      *string   `json:"opt_out_reason"`
+	OptOutSource      *string   `json:"opt_out_source"`
+	ConsentStatus     *string   `json:"consent_status"`
+	ConsentSource     *string   `json:"consent_source"`
+	ConsentText       *string   `json:"consent_text"`
+	TagIDs            *[]string `json:"tag_ids"`
 }
 
 // GetContacts returns contacts for a company
@@ -250,18 +252,90 @@ func (s *ContactService) DeleteContact(contactID, companyID string) error {
 	return err
 }
 
-// AddTagToContact adds a tag to a contact
-func (s *ContactService) AddTagToContact(contactID, tagID string) error {
+// AddTagToContact adds a tag to a contact in the same company.
+func (s *ContactService) AddTagToContact(contactID, tagID, companyID string) error {
+	result, err := s.db.Exec(`
+		INSERT INTO contact_tags (contact_id, tag_id)
+		SELECT c.id, t.id
+		FROM contacts c
+		JOIN tags t ON t.id = $2 AND t.company_id = $3
+		WHERE c.id = $1 AND c.company_id = $3
+		ON CONFLICT DO NOTHING
+	`, contactID, tagID, companyID)
+	if err != nil {
+		return err
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		var validAssociation bool
+		err = s.db.QueryRow(`
+			SELECT EXISTS(
+				SELECT 1
+				FROM contacts c
+				JOIN tags t ON t.id = $2 AND t.company_id = $3
+				WHERE c.id = $1 AND c.company_id = $3
+			)
+		`, contactID, tagID, companyID).Scan(&validAssociation)
+		if err != nil {
+			return err
+		}
+		if !validAssociation {
+			return fmt.Errorf("contact or tag not found")
+		}
+	}
+	return nil
+}
+
+// RemoveTagFromContact removes a tag from a contact in the same company.
+func (s *ContactService) RemoveTagFromContact(contactID, tagID, companyID string) error {
 	_, err := s.db.Exec(`
-		INSERT INTO contact_tags (contact_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING
-	`, contactID, tagID)
+		DELETE FROM contact_tags ct
+		USING contacts c, tags t
+		WHERE ct.contact_id = c.id AND ct.tag_id = t.id
+		  AND c.id = $1 AND t.id = $2
+		  AND c.company_id = $3 AND t.company_id = $3
+	`, contactID, tagID, companyID)
 	return err
 }
 
-// RemoveTagFromContact removes a tag from a contact
-func (s *ContactService) RemoveTagFromContact(contactID, tagID string) error {
-	_, err := s.db.Exec("DELETE FROM contact_tags WHERE contact_id = $1 AND tag_id = $2", contactID, tagID)
-	return err
+// ReplaceContactTags replaces all tags while validating contact and tag ownership.
+func (s *ContactService) ReplaceContactTags(contactID, companyID string, tagIDs []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var contactExists bool
+	if err := tx.QueryRow(
+		"SELECT EXISTS(SELECT 1 FROM contacts WHERE id = $1 AND company_id = $2)",
+		contactID, companyID,
+	).Scan(&contactExists); err != nil {
+		return err
+	}
+	if !contactExists {
+		return fmt.Errorf("contact not found")
+	}
+
+	if _, err := tx.Exec("DELETE FROM contact_tags WHERE contact_id = $1", contactID); err != nil {
+		return err
+	}
+	if len(tagIDs) > 0 {
+		result, err := tx.Exec(`
+			INSERT INTO contact_tags (contact_id, tag_id)
+			SELECT $1, id FROM tags
+			WHERE company_id = $2 AND id = ANY($3::uuid[])
+			ON CONFLICT DO NOTHING
+		`, contactID, companyID, "{"+strings.Join(tagIDs, ",")+"}")
+		if err != nil {
+			return err
+		}
+		affected, _ := result.RowsAffected()
+		if affected != int64(len(tagIDs)) {
+			return fmt.Errorf("one or more tags are invalid")
+		}
+	}
+	return tx.Commit()
 }
 
 func stringPtrValue(value *string) string {
