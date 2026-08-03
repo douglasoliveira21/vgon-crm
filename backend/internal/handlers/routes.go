@@ -96,6 +96,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 
 	// Conversations
 	conversations := protected.Group("/conversations", middleware.RBACMiddleware("conversations.own"))
+	conversations.Get("/counts", GetConversationCounts(svc))
 	conversations.Get("/", GetConversations(svc))
 	conversations.Get("/assigned-to-me", GetMyConversations(svc))
 	conversations.Post("/start", middleware.RBACMiddleware("conversations.create"), StartConversation(svc))

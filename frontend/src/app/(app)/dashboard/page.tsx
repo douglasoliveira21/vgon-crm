@@ -67,6 +67,7 @@ export default function DashboardPage() {
   const { user } = useAuthStore()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [period, setPeriod] = useState('today')
   const [teamId, setTeamId] = useState('')
@@ -86,8 +87,10 @@ export default function DashboardPage() {
       })
       setData(response.data)
       setLastUpdated(new Date())
+      setError(false)
     } catch (error) {
       console.error('Failed to fetch dashboard:', error)
+      setError(true)
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -112,6 +115,17 @@ export default function DashboardPage() {
         <div className="h-8 bg-gray-200 dark:bg-gray-800 rounded w-64 mb-6" />
       <div className="mb-6 grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-4 lg:gap-4">
           {[1, 2, 3, 4].map((i) => <div key={i} className="h-28 bg-gray-200 dark:bg-gray-800 rounded-xl" />)}
+        </div>
+      </div>
+    )
+  }
+
+  if (error && !data) {
+    return (
+      <div className="p-6">
+        <div className="card p-12 text-center">
+          <p className="text-red-500">Erro ao carregar dashboard</p>
+          <button onClick={() => fetchDashboard()} className="btn-primary mt-4">Tentar novamente</button>
         </div>
       </div>
     )

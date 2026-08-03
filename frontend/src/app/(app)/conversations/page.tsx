@@ -349,6 +349,7 @@ export default function ConversationsPage() {
         })
 
         // GlobalNotifications handles browser/toast/sound alerts for all app pages.
+        fetchTabUnreadCounts()
       }
     }
 
@@ -460,20 +461,12 @@ export default function ConversationsPage() {
     const requestId = ++tabCountsRequestRef.current
 
     try {
-      const [mineRes, unassignedRes, allRes] = await Promise.all([
-        api.get('/conversations', { params: { assigned_to: user?.id, status: 'open,in_progress,pending', channel: channelFilter || undefined }, signal: controller.signal }),
-        api.get('/conversations', { params: { unassigned: 'true', status: 'open,in_progress,pending', channel: channelFilter || undefined }, signal: controller.signal }),
-        api.get('/conversations', { params: { status: 'open,in_progress,pending', channel: channelFilter || undefined }, signal: controller.signal }),
-      ])
+      const res = await api.get('/conversations/counts', { signal: controller.signal })
       if (requestId !== tabCountsRequestRef.current) return
-      const mineConvs: Conversation[] = mineRes.data.conversations || []
-      const unassignedConvs: Conversation[] = unassignedRes.data.conversations || []
-      const allConvs: Conversation[] = allRes.data.conversations || []
-
       setTabUnreadCounts({
-        mine: mineConvs.reduce((sum, c) => sum + (c.unread_count || 0), 0),
-        unassigned: unassignedConvs.reduce((sum, c) => sum + (c.unread_count || 0), 0),
-        all: allConvs.reduce((sum, c) => sum + (c.unread_count || 0), 0),
+        mine: res.data.mine || 0,
+        unassigned: res.data.unassigned || 0,
+        all: res.data.all || 0,
       })
     } catch (error: any) {
       if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') return

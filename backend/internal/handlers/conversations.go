@@ -29,6 +29,26 @@ func normalizeOutgoingWhatsAppLinks(message string) string {
 	})
 }
 
+// GET /api/conversations/counts - Lightweight endpoint for tab unread counts
+func GetConversationCounts(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
+
+		var mineUnread, unassignedUnread, allUnread int
+
+		svc.DB.QueryRow(`SELECT COALESCE(SUM(unread_count), 0) FROM conversations WHERE company_id = $1 AND assigned_to = $2 AND status IN ('open','in_progress','pending')`, companyID, userID).Scan(&mineUnread)
+		svc.DB.QueryRow(`SELECT COALESCE(SUM(unread_count), 0) FROM conversations WHERE company_id = $1 AND assigned_to IS NULL AND status IN ('open','in_progress','pending')`, companyID).Scan(&unassignedUnread)
+		svc.DB.QueryRow(`SELECT COALESCE(SUM(unread_count), 0) FROM conversations WHERE company_id = $1 AND status IN ('open','in_progress','pending')`, companyID).Scan(&allUnread)
+
+		return c.JSON(fiber.Map{
+			"mine":       mineUnread,
+			"unassigned": unassignedUnread,
+			"all":        allUnread,
+		})
+	}
+}
+
 func StartConversation(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)

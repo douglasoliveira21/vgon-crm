@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/evocrm/backend/internal/config"
 	"github.com/evocrm/backend/internal/middleware"
@@ -72,11 +73,23 @@ func WebSocketHandler(hub *ws.Hub, cfg *config.Config, svc *services.Container) 
 			}
 		}()
 
-		// Write pump
+		// Write pump with heartbeat
 		go func() {
-			for msg := range client.Send {
-				if err := c.WriteMessage(websocket.TextMessage, msg); err != nil {
-					break
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case msg, ok := <-client.Send:
+					if !ok {
+						return
+					}
+					if err := c.WriteMessage(websocket.TextMessage, msg); err != nil {
+						return
+					}
+				case <-ticker.C:
+					if err := c.WriteMessage(websocket.PingMessage, nil); err != nil {
+						return
+					}
 				}
 			}
 		}()

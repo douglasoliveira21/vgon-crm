@@ -4,7 +4,7 @@ class WebSocketService {
   private ws: WebSocket | null = null
   private handlers: Map<string, WSEventHandler[]> = new Map()
   private reconnectAttempts = 0
-  private maxReconnectAttempts = 5
+  private maxReconnectAttempts = Infinity
   private reconnectDelay = 5000
   private intentionalClose = false
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -130,6 +130,15 @@ class WebSocketService {
     }
     this.reconnectAttempts = 0
     this.reconnectPausedUntil = 0
+  }
+
+  resetReconnect() {
+    this.reconnectAttempts = 0
+    this.reconnectPausedUntil = 0
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
   }
 }
 
