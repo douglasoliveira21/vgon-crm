@@ -188,6 +188,9 @@ export default function ConversationsPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading] = useState(true)
   const [messagesLoading, setMessagesLoading] = useState(false)
+  const [messagesOffset, setMessagesOffset] = useState(0)
+  const [hasMoreMessages, setHasMoreMessages] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [failedMediaIds, setFailedMediaIds] = useState<Record<string, boolean>>({})
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -603,7 +606,10 @@ export default function ConversationsPage() {
       const response = await api.get(`/conversations/${conv.id}/messages`, { params: { limit: 80 }, signal: controller.signal })
       if (requestId !== messagesRequestRef.current) return
       messagesErrorUntilRef.current = 0
-      setMessages(response.data.messages || [])
+      const fetchedMessages: Message[] = response.data.messages || []
+      setMessages(fetchedMessages)
+      setMessagesOffset(0)
+      setHasMoreMessages(fetchedMessages.length === 80)
       scrollToBottom()
     } catch (error: any) {
       if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') return
@@ -616,6 +622,25 @@ export default function ConversationsPage() {
       if (requestId === messagesRequestRef.current) {
         setMessagesLoading(false)
       }
+    }
+  }
+
+  const loadOlderMessages = async () => {
+    if (!selectedConv || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const newOffset = messagesOffset + 80
+      const response = await api.get(`/conversations/${selectedConv.id}/messages`, { params: { limit: 80, offset: newOffset } })
+      const olderMessages: Message[] = response.data.messages || []
+      if (olderMessages.length > 0) {
+        setMessages((prev) => [...olderMessages, ...prev])
+        setMessagesOffset(newOffset)
+      }
+      if (olderMessages.length < 80) {
+        setHasMoreMessages(false)
+      }
+    } catch {} finally {
+      setLoadingMore(false)
     }
   }
 
@@ -799,12 +824,15 @@ export default function ConversationsPage() {
   // Assign to me
   const assignToMe = async () => {
     if (!selectedConv) return
+    // Optimistic update
+    const prevConv = selectedConv
+    setSelectedConv((prev) => prev ? { ...prev, assigned_to: user?.id, assigned_to_name: user?.name, status: 'in_progress' } : null)
     try {
       await api.post(`/conversations/${selectedConv.id}/assign`, { user_id: user?.id })
       toast.success('Conversa atribuída a você')
-      setSelectedConv({ ...selectedConv, assigned_to: user?.id, assigned_to_name: user?.name, status: 'in_progress' })
       fetchConversations()
     } catch {
+      setSelectedConv(prevConv)
       toast.error('Erro ao atribuir')
     }
   }
@@ -812,12 +840,15 @@ export default function ConversationsPage() {
   // Unassign conversation
   const unassignConversation = async () => {
     if (!selectedConv) return
+    // Optimistic update
+    const prevConv = selectedConv
+    setSelectedConv((prev) => prev ? { ...prev, assigned_to: undefined, assigned_to_name: undefined, status: 'open' } : null)
     try {
       await api.post(`/conversations/${selectedConv.id}/unassign`)
       toast.success('Conversa desatribuída')
-      setSelectedConv({ ...selectedConv, assigned_to: undefined, assigned_to_name: undefined, status: 'open' })
       fetchConversations()
     } catch {
+      setSelectedConv(prevConv)
       toast.error('Erro ao desatribuir')
     }
   }
@@ -825,12 +856,15 @@ export default function ConversationsPage() {
   // Resolve conversation
   const resolveConversation = async () => {
     if (!selectedConv) return
+    // Optimistic update
+    const prevConv = selectedConv
+    setSelectedConv((prev) => prev ? { ...prev, status: 'resolved' } : null)
     try {
       await api.post(`/conversations/${selectedConv.id}/close`)
       toast.success('Conversa resolvida')
-      setSelectedConv({ ...selectedConv, status: 'resolved' })
       fetchConversations()
     } catch {
+      setSelectedConv(prevConv)
       toast.error('Erro ao resolver')
     }
   }
@@ -1408,6 +1442,13 @@ export default function ConversationsPage() {
               <LoadingState label="Carregando conversa..." />
             ) : (
               <>
+            {hasMoreMessages && (
+              <div className="text-center py-2">
+                <button onClick={loadOlderMessages} disabled={loadingMore} className="text-xs text-primary-600 hover:text-primary-700 font-medium px-3 py-1.5 rounded-lg hover:bg-primary-50 transition-colors">
+                  {loadingMore ? 'Carregando...' : '↑ Carregar mensagens anteriores'}
+                </button>
+              </div>
+            )}
             {messages.map((msg) => (
               <div
                 key={msg.id}
