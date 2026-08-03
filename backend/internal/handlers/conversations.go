@@ -53,6 +53,13 @@ func StartConversation(svc *services.Container) fiber.Handler {
 		if err != nil {
 			contactID = uuid.New().String()
 			svc.DB.Exec("INSERT INTO contacts (id, company_id, name, phone, origin) VALUES ($1, $2, $3, $4, 'manual')", contactID, companyID, body.Phone, body.Phone)
+		} else {
+			// Check if contact is blocked
+			var isBlocked bool
+			svc.DB.QueryRow("SELECT COALESCE(is_blocked, false) FROM contacts WHERE id = $1", contactID).Scan(&isBlocked)
+			if isBlocked {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Este contato está bloqueado"})
+			}
 		}
 
 		channelID := body.ChannelID
@@ -380,22 +387,17 @@ func MarkConversationUnread(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 		conversationID := c.Params("id")
 
+		// Set unread_count to 1 (mark as unread) — not the total historical count
 		_, err := svc.DB.Exec(`
 			UPDATE conversations
-			SET unread_count = (
-				SELECT COUNT(*) FROM messages
-				WHERE conversation_id = $1 AND company_id = $2 AND sender_type = 'contact' AND is_private = false
-			), updated_at = NOW()
+			SET unread_count = GREATEST(1, unread_count), updated_at = NOW()
 			WHERE id = $1 AND company_id = $2
 		`, conversationID, companyID)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
 
-		var unreadCount int
-		_ = svc.DB.QueryRow("SELECT unread_count FROM conversations WHERE id = $1 AND company_id = $2", conversationID, companyID).Scan(&unreadCount)
-
-		return c.JSON(fiber.Map{"message": "Marked as unread", "unread_count": unreadCount})
+		return c.JSON(fiber.Map{"message": "Marked as unread", "unread_count": 1})
 	}
 }
 
@@ -745,7 +747,18 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 func DeleteMessage(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
+		userID := c.Locals("user_id").(string)
+		roleSlug, _ := c.Locals("role_slug").(string)
 		msgID := c.Params("msgId")
+
+		// Only allow deleting own messages (unless admin/supervisor)
+		if roleSlug != "admin" && roleSlug != "super-admin" && roleSlug != "supervisor" {
+			var senderID *string
+			svc.DB.QueryRow("SELECT sender_id FROM messages WHERE id = $1 AND company_id = $2", msgID, companyID).Scan(&senderID)
+			if senderID == nil || *senderID != userID {
+				return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Você só pode apagar suas próprias mensagens"})
+			}
+		}
 
 		_, err := svc.DB.Exec("DELETE FROM messages WHERE id = $1 AND company_id = $2", msgID, companyID)
 		if err != nil {

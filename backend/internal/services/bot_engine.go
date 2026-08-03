@@ -718,7 +718,6 @@ func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, 
 			if stopOnMatch {
 				return
 			}
-			return
 		}
 	}
 }
@@ -996,6 +995,9 @@ func (e *BotEngine) executeFlowFrom(flowID, triggerType, companyID, conversation
 	visited := map[string]bool{}
 	steps := 0
 	maxSteps := len(nodes) + len(edges) + 5
+	if maxSteps > 500 {
+		maxSteps = 500 // Absolute safety limit
+	}
 
 	for current != nil && steps < maxSteps {
 		steps++
