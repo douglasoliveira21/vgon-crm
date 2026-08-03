@@ -1483,24 +1483,16 @@ export default function ConversationsPage() {
 
                   {(msg.message_type === 'image' || msg.message_type === 'gif' || msg.message_type === 'sticker') && msg.media_url && (
                     <div className="mb-2">
-                      {msg.media_url.startsWith('/api/media/') ? (
-                        <SafeImage
-                          src={`${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`}
-                          alt={msg.message_type === 'gif' ? 'GIF' : msg.message_type === 'sticker' ? 'Figurinha' : 'Imagem'}
-                          className="max-w-full rounded-lg max-h-60 object-cover cursor-pointer"
-                          onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`, '_blank')}
-                          fallback={<div className="flex min-h-24 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 text-xs text-gray-500"><ImageOff size={18} /> Imagem indisponível</div>}
-                        />
-                      ) : msg.media_url === 'sent' ? (
+                      {msg.media_url === 'sent' ? (
                         <div className="flex items-center gap-2 text-xs opacity-70">
                           <Camera size={16} /> {msg.message_type === 'gif' ? 'GIF enviado' : msg.message_type === 'sticker' ? 'Figurinha enviada' : 'Imagem enviada'}
                         </div>
                       ) : (
                         <SafeImage
-                          src={`${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`}
+                          src={msg.media_url.startsWith('/uploads/') ? `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}` : `${process.env.NEXT_PUBLIC_API_URL}/api/media/${msg.id}`}
                           alt={msg.message_type === 'gif' ? 'GIF' : msg.message_type === 'sticker' ? 'Figurinha' : 'Imagem'}
                           className="max-w-full rounded-lg max-h-60 object-cover cursor-pointer"
-                          onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`, '_blank')}
+                          onClick={() => window.open(msg.media_url?.startsWith('/uploads/') ? `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}` : `${process.env.NEXT_PUBLIC_API_URL}/api/media/${msg.id}`, '_blank')}
                           fallback={<div className="flex min-h-24 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 text-xs text-gray-500"><ImageOff size={18} /> Imagem indisponível</div>}
                         />
                       )}
