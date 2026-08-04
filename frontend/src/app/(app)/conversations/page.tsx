@@ -1523,10 +1523,10 @@ export default function ConversationsPage() {
                         </div>
                       ) : (
                         <SafeImage
-                          src={msg.media_url.startsWith('/uploads/') ? `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}` : `${process.env.NEXT_PUBLIC_API_URL}/api/media/${msg.id}`}
+                          src={msg.media_url.startsWith('data:') ? msg.media_url : `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`}
                           alt={msg.message_type === 'gif' ? 'GIF' : msg.message_type === 'sticker' ? 'Figurinha' : 'Imagem'}
                           className="max-w-full rounded-lg max-h-60 object-cover cursor-pointer"
-                          onClick={() => window.open(msg.media_url?.startsWith('/uploads/') ? `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}` : `${process.env.NEXT_PUBLIC_API_URL}/api/media/${msg.id}`, '_blank')}
+                          onClick={() => window.open(msg.media_url?.startsWith('data:') ? msg.media_url : `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`, '_blank')}
                           fallback={<div className="flex min-h-24 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 text-xs text-gray-500"><ImageOff size={18} /> Imagem indisponível</div>}
                         />
                       )}
