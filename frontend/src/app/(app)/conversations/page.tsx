@@ -1546,7 +1546,7 @@ export default function ConversationsPage() {
                       ) : (
                         <div className="flex items-center gap-2">
                           <audio id={`audio-${msg.id}`} controls className="max-w-full h-10 flex-1" preload="metadata" onError={() => setFailedMediaIds((current) => ({ ...current, [msg.id]: true }))}>
-                            <source src={msg.media_url.startsWith('/api/media/') ? `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}` : `${process.env.NEXT_PUBLIC_API_URL}/api/media/${msg.id}`} />
+                            <source src={msg.media_url.startsWith('data:') ? msg.media_url : `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`} />
                           </audio>
                           <div className="flex gap-1">
                             {[1, 1.5, 2].map((speed) => (
@@ -1578,7 +1578,7 @@ export default function ConversationsPage() {
                         <div className="flex min-h-24 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 text-xs text-gray-500"><Video size={18} /> Vídeo indisponível</div>
                       ) : (
                         <video controls className="max-w-full rounded-lg max-h-60" onError={() => setFailedMediaIds((current) => ({ ...current, [msg.id]: true }))}>
-                          <source src={msg.media_url.startsWith('/api/media/') ? `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}` : `${process.env.NEXT_PUBLIC_API_URL}/api/media/${msg.id}`} />
+                          <source src={msg.media_url.startsWith('data:') ? msg.media_url : `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`} />
                         </video>
                       )}
                     </div>
@@ -1588,7 +1588,7 @@ export default function ConversationsPage() {
                     <div className="flex items-center gap-2 mb-1 p-2 bg-gray-50 rounded-lg">
                       <FileText size={20} className="text-gray-500" />
                       <a
-                        href={msg.media_url?.startsWith('/api/media/') ? `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}` : `${process.env.NEXT_PUBLIC_API_URL}/api/media/${msg.id}`}
+                        href={msg.media_url?.startsWith('data:') ? msg.media_url : `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-sm text-primary-600 underline truncate"
