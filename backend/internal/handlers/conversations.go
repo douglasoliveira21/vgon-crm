@@ -140,6 +140,8 @@ func StartConversation(svc *services.Container) fiber.Handler {
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create conversation"})
 			}
 			applyConversationSLA(svc.DB, companyID, conversationID)
+		} else if err := svc.Message.AutoAssignIfUnassigned(conversationID, userID, companyID); err != nil {
+			log.Printf("[CONVERSATIONS] failed to auto-assign conversation %s: %v", conversationID, err)
 		}
 
 		// If message provided, send it
