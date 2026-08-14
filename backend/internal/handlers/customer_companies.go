@@ -301,7 +301,7 @@ func scanCustomerCompany(rows *sql.Rows) (fiber.Map, error) {
 }
 
 func refreshOpenConversationSLA(db *sql.DB, tenantID, customerCompanyID string) {
-	db.Exec(`
+	if _, err := db.Exec(`
 		UPDATE conversations conv
 		SET customer_company_id = cc.id,
 		    first_response_due_at = conv.created_at + (cc.initial_response_sla_minutes || ' minutes')::interval,
@@ -318,7 +318,9 @@ func refreshOpenConversationSLA(db *sql.DB, tenantID, customerCompanyID string) 
 		      WHERE ct.id = conv.contact_id AND ct.customer_company_id = cc.id
 		    )
 		  )
-	`, tenantID, customerCompanyID)
+	`, tenantID, customerCompanyID); err != nil {
+		log.Printf("[CUSTOMER_COMPANIES] failed to refresh SLA for company %s customer_company %s: %v", tenantID, customerCompanyID, err)
+	}
 }
 
 func coalesceString(values ...interface{}) string {

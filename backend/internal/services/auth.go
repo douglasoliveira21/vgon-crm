@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"log"
 	"net/smtp"
 	"strings"
 	"time"
@@ -181,10 +182,12 @@ func (s *AuthService) Register(req *RegisterRequest) (*AuthResponse, error) {
 	}
 
 	// Save refresh token (hashed)
-	s.db.Exec(`
+	if _, err := s.db.Exec(`
 		INSERT INTO refresh_tokens (id, user_id, token, expires_at, session_id)
 		VALUES ($1, $2, $3, $4, $5)
-	`, uuid.New().String(), userID, hashToken(refreshToken), time.Now().Add(s.cfg.JWTRefreshExpiry), sessionID)
+	`, uuid.New().String(), userID, hashToken(refreshToken), time.Now().Add(s.cfg.JWTRefreshExpiry), sessionID); err != nil {
+		return nil, fmt.Errorf("failed to save refresh token: %w", err)
+	}
 
 	user := &models.User{
 		ID:        userID,
@@ -229,7 +232,9 @@ func (s *AuthService) RefreshToken(refreshTokenStr string) (*AuthResponse, error
 	}
 
 	// Delete old refresh token
-	s.db.Exec("DELETE FROM refresh_tokens WHERE id = $1", tokenID)
+	if _, err := s.db.Exec("DELETE FROM refresh_tokens WHERE id = $1", tokenID); err != nil {
+		log.Printf("[AUTH] failed to delete rotated refresh token %s: %v", tokenID, err)
+	}
 
 	// Generate new tokens
 	accessToken, newRefreshToken, err := middleware.GenerateTokensForSession(
@@ -240,10 +245,12 @@ func (s *AuthService) RefreshToken(refreshTokenStr string) (*AuthResponse, error
 	}
 
 	// Save new refresh token (hashed)
-	s.db.Exec(`
+	if _, err := s.db.Exec(`
 		INSERT INTO refresh_tokens (id, user_id, token, expires_at, session_id)
 		VALUES ($1, $2, $3, $4, $5)
-	`, uuid.New().String(), claims.UserID, hashToken(newRefreshToken), time.Now().Add(s.cfg.JWTRefreshExpiry), sessionID)
+	`, uuid.New().String(), claims.UserID, hashToken(newRefreshToken), time.Now().Add(s.cfg.JWTRefreshExpiry), sessionID); err != nil {
+		return nil, fmt.Errorf("failed to save refresh token: %w", err)
+	}
 
 	return &AuthResponse{
 		AccessToken:  accessToken,

@@ -249,8 +249,12 @@ func (s *EvolutionService) GetQRCode(instanceName string) (string, error) {
 
 	base64 := extractEvolutionQRCode(result)
 	if base64 != "" {
-		s.db.Exec("UPDATE whatsapp_instances SET qrcode = $1, status = 'qr_code', updated_at = NOW() WHERE instance_name = $2", base64, instanceName)
-		s.db.Exec("UPDATE channels SET status = 'connecting', updated_at = NOW() WHERE id = (SELECT channel_id FROM whatsapp_instances WHERE instance_name = $1)", instanceName)
+		if _, err := s.db.Exec("UPDATE whatsapp_instances SET qrcode = $1, status = 'qr_code', updated_at = NOW() WHERE instance_name = $2", base64, instanceName); err != nil {
+			log.Printf("[EVOLUTION] failed to save QR code for instance %s: %v", instanceName, err)
+		}
+		if _, err := s.db.Exec("UPDATE channels SET status = 'connecting', updated_at = NOW() WHERE id = (SELECT channel_id FROM whatsapp_instances WHERE instance_name = $1)", instanceName); err != nil {
+			log.Printf("[EVOLUTION] failed to update channel status for instance %s: %v", instanceName, err)
+		}
 		return base64, nil
 	}
 
@@ -289,8 +293,12 @@ func (s *EvolutionService) GetConnectionStatus(instanceName string) (string, err
 			if status == "" {
 				return s.getStoredInstanceStatus(instanceName), nil
 			}
-			s.db.Exec("UPDATE whatsapp_instances SET status = $1, updated_at = NOW() WHERE instance_name = $2", status, instanceName)
-			s.db.Exec("UPDATE channels SET status = $1, updated_at = NOW() WHERE id = (SELECT channel_id FROM whatsapp_instances WHERE instance_name = $2)", status, instanceName)
+			if _, err := s.db.Exec("UPDATE whatsapp_instances SET status = $1, updated_at = NOW() WHERE instance_name = $2", status, instanceName); err != nil {
+				log.Printf("[EVOLUTION] failed to update instance %s status: %v", instanceName, err)
+			}
+			if _, err := s.db.Exec("UPDATE channels SET status = $1, updated_at = NOW() WHERE id = (SELECT channel_id FROM whatsapp_instances WHERE instance_name = $2)", status, instanceName); err != nil {
+				log.Printf("[EVOLUTION] failed to update channel status for instance %s: %v", instanceName, err)
+			}
 			return status, nil
 		}
 	}
@@ -394,8 +402,12 @@ func (s *EvolutionService) DisconnectInstance(instanceName string) error {
 	}
 	defer resp.Body.Close()
 
-	s.db.Exec("UPDATE whatsapp_instances SET status = 'disconnected', qrcode = NULL, updated_at = NOW() WHERE instance_name = $1", instanceName)
-	s.db.Exec("UPDATE channels SET status = 'disconnected', updated_at = NOW() WHERE id = (SELECT channel_id FROM whatsapp_instances WHERE instance_name = $1)", instanceName)
+	if _, err := s.db.Exec("UPDATE whatsapp_instances SET status = 'disconnected', qrcode = NULL, updated_at = NOW() WHERE instance_name = $1", instanceName); err != nil {
+		log.Printf("[EVOLUTION] failed to mark instance %s disconnected: %v", instanceName, err)
+	}
+	if _, err := s.db.Exec("UPDATE channels SET status = 'disconnected', updated_at = NOW() WHERE id = (SELECT channel_id FROM whatsapp_instances WHERE instance_name = $1)", instanceName); err != nil {
+		log.Printf("[EVOLUTION] failed to mark channel disconnected for instance %s: %v", instanceName, err)
+	}
 
 	return nil
 }
@@ -416,7 +428,9 @@ func (s *EvolutionService) DeleteInstance(instanceName string) error {
 	defer resp.Body.Close()
 
 	// Remove from database
-	s.db.Exec("DELETE FROM whatsapp_instances WHERE instance_name = $1", instanceName)
+	if _, err := s.db.Exec("DELETE FROM whatsapp_instances WHERE instance_name = $1", instanceName); err != nil {
+		log.Printf("[EVOLUTION] failed to delete instance %s: %v", instanceName, err)
+	}
 
 	return nil
 }
@@ -677,11 +691,17 @@ func (s *EvolutionService) handleConnectionUpdate(instanceName string, event map
 		return
 	}
 
-	s.db.Exec("UPDATE whatsapp_instances SET status = $1, updated_at = NOW() WHERE instance_name = $2", status, instanceName)
-	s.db.Exec("UPDATE channels SET status = $1, updated_at = NOW() WHERE id = (SELECT channel_id FROM whatsapp_instances WHERE instance_name = $2)", status, instanceName)
+	if _, err := s.db.Exec("UPDATE whatsapp_instances SET status = $1, updated_at = NOW() WHERE instance_name = $2", status, instanceName); err != nil {
+		log.Printf("[EVOLUTION] failed to update instance %s status: %v", instanceName, err)
+	}
+	if _, err := s.db.Exec("UPDATE channels SET status = $1, updated_at = NOW() WHERE id = (SELECT channel_id FROM whatsapp_instances WHERE instance_name = $2)", status, instanceName); err != nil {
+		log.Printf("[EVOLUTION] failed to update channel status for instance %s: %v", instanceName, err)
+	}
 
 	if status == "connected" {
-		s.db.Exec("UPDATE whatsapp_instances SET connected_at = NOW(), qrcode = NULL WHERE instance_name = $1", instanceName)
+		if _, err := s.db.Exec("UPDATE whatsapp_instances SET connected_at = NOW(), qrcode = NULL WHERE instance_name = $1", instanceName); err != nil {
+			log.Printf("[EVOLUTION] failed to set connected_at for instance %s: %v", instanceName, err)
+		}
 	}
 
 	// Get company ID for WebSocket notification
@@ -738,6 +758,10 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 
 	// Get or create contact
 	contactID := s.getOrCreateContact(instance.CompanyID, phone, data, instanceName)
+	if contactID == "" {
+		log.Printf("[WEBHOOK] Skipping message: failed to get or create contact for phone %s", phone)
+		return
+	}
 	var isBlocked bool
 	if err := s.db.QueryRow("SELECT is_blocked FROM contacts WHERE id = $1 AND company_id = $2", contactID, instance.CompanyID).Scan(&isBlocked); err == nil && isBlocked {
 		log.Printf("[WEBHOOK] Ignoring message from blocked contact %s", contactID)
@@ -746,6 +770,10 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 
 	// Get or create conversation
 	conversationID := s.getOrCreateConversation(instance.CompanyID, contactID, instance.ChannelID)
+	if conversationID == "" {
+		log.Printf("[WEBHOOK] Skipping message: failed to get or create conversation for contact %s", contactID)
+		return
+	}
 
 	// Extract message content
 	message, _ := data["message"].(map[string]interface{})
@@ -768,10 +796,12 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	if len(preview) > 100 {
 		preview = preview[:100]
 	}
-	s.db.Exec(`
+	if _, err := s.db.Exec(`
 		UPDATE conversations SET last_message_at = NOW(), last_message_preview = $1, unread_count = unread_count + 1, updated_at = NOW()
 		WHERE id = $2
-	`, preview, conversationID)
+	`, preview, conversationID); err != nil {
+		log.Printf("[EVOLUTION] failed to update conversation %s preview: %v", conversationID, err)
+	}
 
 	// Broadcast via WebSocket
 	s.wsHub.BroadcastToCompany(instance.CompanyID, websocket.EventNewMessage, map[string]interface{}{
@@ -891,7 +921,9 @@ func (s *EvolutionService) handleMessageUpdate(instanceName string, event map[st
 	log.Printf("[WEBHOOK] Message status update: %s -> %s", messageID, status)
 
 	// Update in database
-	s.db.Exec("UPDATE messages SET status = $1 WHERE external_id = $2", status, messageID)
+	if _, err := s.db.Exec("UPDATE messages SET status = $1 WHERE external_id = $2", status, messageID); err != nil {
+		log.Printf("[EVOLUTION] failed to update message %s status: %v", messageID, err)
+	}
 	s.updateCampaignMessageStatus(messageID, status)
 
 	// Broadcast status update via WebSocket
@@ -986,7 +1018,9 @@ func (s *EvolutionService) handleQRCodeUpdate(instanceName string, event map[str
 		return
 	}
 
-	s.db.Exec("UPDATE whatsapp_instances SET qrcode = $1, status = 'qr_code', updated_at = NOW() WHERE instance_name = $2", base64, instanceName)
+	if _, err := s.db.Exec("UPDATE whatsapp_instances SET qrcode = $1, status = 'qr_code', updated_at = NOW() WHERE instance_name = $2", base64, instanceName); err != nil {
+		log.Printf("[EVOLUTION] failed to save QR code for instance %s: %v", instanceName, err)
+	}
 
 	var companyID string
 	s.db.QueryRow("SELECT company_id FROM whatsapp_instances WHERE instance_name = $1", instanceName).Scan(&companyID)
@@ -1062,10 +1096,13 @@ func (s *EvolutionService) getOrCreateContact(companyID, phone string, data map[
 	}
 
 	contactID = uuid.New().String()
-	s.db.Exec(`
+	if _, err := s.db.Exec(`
 		INSERT INTO contacts (id, company_id, name, phone, origin)
 		VALUES ($1, $2, $3, $4, 'whatsapp')
-	`, contactID, companyID, pushName, phone)
+	`, contactID, companyID, pushName, phone); err != nil {
+		log.Printf("[CONTACT] failed to create contact for phone %s: %v", phone, err)
+		return ""
+	}
 
 	log.Printf("[CONTACT] Created new contact %s for phone %s", contactID, phone)
 
@@ -1122,16 +1159,21 @@ func (s *EvolutionService) getOrCreateConversation(companyID, contactID string, 
 
 	// No active conversation found, create a new one
 	conversationID = uuid.New().String()
+	var err error
 	if channelID != nil {
-		s.db.Exec(`
+		_, err = s.db.Exec(`
 			INSERT INTO conversations (id, company_id, contact_id, channel_id, status, last_message_at)
 			VALUES ($1, $2, $3, $4, 'open', NOW())
 		`, conversationID, companyID, contactID, *channelID)
 	} else {
-		s.db.Exec(`
+		_, err = s.db.Exec(`
 			INSERT INTO conversations (id, company_id, contact_id, status, last_message_at)
 			VALUES ($1, $2, $3, 'open', NOW())
 		`, conversationID, companyID, contactID)
+	}
+	if err != nil {
+		log.Printf("[CONVERSATION] failed to create conversation for contact %s: %v", contactID, err)
+		return ""
 	}
 
 	log.Printf("[CONVERSATION] Created new conversation %s for contact %s", conversationID, contactID)

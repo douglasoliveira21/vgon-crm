@@ -64,12 +64,16 @@ func WebSocketHandler(hub *ws.Hub, cfg *config.Config, svc *services.Container) 
 
 		hub.Register(client)
 		if svc != nil && svc.DB != nil {
-			svc.DB.Exec("UPDATE users SET is_online = true, last_seen_at = NOW(), updated_at = NOW() WHERE id = $1", claims.UserID)
+			if _, err := svc.DB.Exec("UPDATE users SET is_online = true, last_seen_at = NOW(), updated_at = NOW() WHERE id = $1", claims.UserID); err != nil {
+				log.Printf("[WEBSOCKET] failed to mark user %s online: %v", claims.UserID, err)
+			}
 		}
 		defer func() {
 			hub.Unregister(client)
 			if svc != nil && svc.DB != nil && !hub.HasOtherUserConnection(claims.UserID, clientID) {
-				svc.DB.Exec("UPDATE users SET is_online = false, last_seen_at = NOW(), updated_at = NOW() WHERE id = $1", claims.UserID)
+				if _, err := svc.DB.Exec("UPDATE users SET is_online = false, last_seen_at = NOW(), updated_at = NOW() WHERE id = $1", claims.UserID); err != nil {
+					log.Printf("[WEBSOCKET] failed to mark user %s offline: %v", claims.UserID, err)
+				}
 			}
 		}()
 

@@ -180,6 +180,7 @@ export default function ConversationsPage() {
   const { user } = useAuthStore()
   const searchParams = useSearchParams()
   const [conversations, setConversations] = useState<Conversation[]>([])
+  const conversationsRef = useRef<Conversation[]>([])
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [newMessage, setNewMessage] = useState('')
@@ -294,18 +295,31 @@ export default function ConversationsPage() {
   }, [conversationFilter, conversations, selectedConv?.id])
 
   useEffect(() => {
+    conversationsRef.current = conversations
+  }, [conversations])
+
+  useEffect(() => {
     const handleNewMessage = async (data: Message) => {
       if (user?.role_slug === 'agent' || user?.role_slug === 'supervisor') {
-        try {
-          await api.get(`/conversations/${data.conversation_id}`)
-        } catch {
-          setConversations((prev) => prev.filter((conversation) => conversation.id !== data.conversation_id))
-          if (selectedConv?.id === data.conversation_id) {
-            setSelectedConv(null)
-            setMessages([])
+        // The conversation is already visible to this agent/supervisor if it's already
+        // loaded locally (the initial list fetch already applied visibility rules) —
+        // skip the round-trip and only hit the API for a conversation we don't know yet.
+        const knownLocally =
+          selectedConv?.id === data.conversation_id ||
+          conversationsRef.current.some((conversation) => conversation.id === data.conversation_id)
+
+        if (!knownLocally) {
+          try {
+            await api.get(`/conversations/${data.conversation_id}`)
+          } catch {
+            setConversations((prev) => prev.filter((conversation) => conversation.id !== data.conversation_id))
+            if (selectedConv?.id === data.conversation_id) {
+              setSelectedConv(null)
+              setMessages([])
+            }
+            fetchTabUnreadCounts()
+            return
           }
-          fetchTabUnreadCounts()
-          return
         }
       }
 

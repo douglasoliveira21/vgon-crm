@@ -137,8 +137,11 @@ func (s *EvolutionService) SyncContacts(instanceName, companyID string) (int, er
 		err := s.db.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, phone).Scan(&existingID)
 		if err == nil {
 			// Update name if it was just the phone
-			s.db.Exec("UPDATE contacts SET name = CASE WHEN name = phone THEN $1 ELSE name END, updated_at = NOW() WHERE id = $2", name, existingID)
-			synced++
+			if _, updErr := s.db.Exec("UPDATE contacts SET name = CASE WHEN name = phone THEN $1 ELSE name END, updated_at = NOW() WHERE id = $2", name, existingID); updErr != nil {
+				log.Printf("[SYNC] Failed to update contact %s name: %v", existingID, updErr)
+			} else {
+				synced++
+			}
 			continue
 		}
 
@@ -210,12 +213,16 @@ func (s *EvolutionService) SyncContactPhoto(instanceName, phone, contactID strin
 	localPath, err := s.downloadAndSaveAvatar(pictureURL, contactID)
 	if err != nil {
 		// Fallback: save the external URL
-		s.db.Exec("UPDATE contacts SET avatar_url = $1, updated_at = NOW() WHERE id = $2", pictureURL, contactID)
+		if _, dbErr := s.db.Exec("UPDATE contacts SET avatar_url = $1, updated_at = NOW() WHERE id = $2", pictureURL, contactID); dbErr != nil {
+			log.Printf("[SYNC] Failed to save fallback avatar URL for contact %s: %v", contactID, dbErr)
+		}
 		return pictureURL, nil
 	}
 
 	// Save local path in database
-	s.db.Exec("UPDATE contacts SET avatar_url = $1, updated_at = NOW() WHERE id = $2", localPath, contactID)
+	if _, dbErr := s.db.Exec("UPDATE contacts SET avatar_url = $1, updated_at = NOW() WHERE id = $2", localPath, contactID); dbErr != nil {
+		log.Printf("[SYNC] Failed to save local avatar path for contact %s: %v", contactID, dbErr)
+	}
 
 	return localPath, nil
 }

@@ -72,7 +72,10 @@ func StartConversation(svc *services.Container) fiber.Handler {
 		err := svc.DB.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, body.Phone).Scan(&contactID)
 		if err != nil {
 			contactID = uuid.New().String()
-			svc.DB.Exec("INSERT INTO contacts (id, company_id, name, phone, origin) VALUES ($1, $2, $3, $4, 'manual')", contactID, companyID, body.Phone, body.Phone)
+			if _, err := svc.DB.Exec("INSERT INTO contacts (id, company_id, name, phone, origin) VALUES ($1, $2, $3, $4, 'manual')", contactID, companyID, body.Phone, body.Phone); err != nil {
+				log.Printf("[CONVERSATIONS] failed to create contact for company %s phone %s: %v", companyID, body.Phone, err)
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create contact"})
+			}
 		} else {
 			// Check if contact is blocked
 			var isBlocked bool
@@ -131,8 +134,11 @@ func StartConversation(svc *services.Container) fiber.Handler {
 		`, companyID, contactID, channelID).Scan(&conversationID)
 		if err != nil {
 			conversationID = uuid.New().String()
-			svc.DB.Exec("INSERT INTO conversations (id, company_id, contact_id, channel_id, assigned_to, status, last_message_at, customer_company_id) VALUES ($1, $2, $3, $4, $5, 'in_progress', NOW(), (SELECT customer_company_id FROM contacts WHERE id = $3))",
-				conversationID, companyID, contactID, channelID, userID)
+			if _, err := svc.DB.Exec("INSERT INTO conversations (id, company_id, contact_id, channel_id, assigned_to, status, last_message_at, customer_company_id) VALUES ($1, $2, $3, $4, $5, 'in_progress', NOW(), (SELECT customer_company_id FROM contacts WHERE id = $3))",
+				conversationID, companyID, contactID, channelID, userID); err != nil {
+				log.Printf("[CONVERSATIONS] failed to create conversation for company %s contact %s: %v", companyID, contactID, err)
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create conversation"})
+			}
 			applyConversationSLA(svc.DB, companyID, conversationID)
 		}
 
@@ -156,8 +162,11 @@ func StartConversation(svc *services.Container) fiber.Handler {
 				if sendErr != nil {
 					status = "failed"
 				}
-				svc.DB.Exec(`INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, external_id, status) VALUES ($1, $2, $3, 'user', $4, $5, 'text', $6, $7)`,
-					msgID, conversationID, companyID, userID, body.Message, externalID, status)
+				if _, err := svc.DB.Exec(`INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, external_id, status) VALUES ($1, $2, $3, 'user', $4, $5, 'text', $6, $7)`,
+					msgID, conversationID, companyID, userID, body.Message, externalID, status); err != nil {
+					log.Printf("[CONVERSATIONS] failed to save message for conversation %s: %v", conversationID, err)
+					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save message"})
+				}
 				if sendErr != nil {
 					return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": sendErr.Error()})
 				}
@@ -169,7 +178,7 @@ func StartConversation(svc *services.Container) fiber.Handler {
 }
 
 func applyConversationSLA(db *sql.DB, companyID, conversationID string) {
-	db.Exec(`
+	if _, err := db.Exec(`
 		WITH conversation_company AS (
 			SELECT conv.id, COALESCE(conv.customer_company_id, ct.customer_company_id) AS effective_company_id
 			FROM conversations conv
@@ -189,7 +198,9 @@ func applyConversationSLA(db *sql.DB, companyID, conversationID string) {
 		FROM conversation_company
 		LEFT JOIN customer_companies cc ON cc.id = conversation_company.effective_company_id
 		WHERE conv.id = conversation_company.id
-	`, conversationID, companyID)
+	`, conversationID, companyID); err != nil {
+		log.Printf("[CONVERSATIONS] failed to apply SLA for conversation %s company %s: %v", conversationID, companyID, err)
+	}
 }
 
 func GetConversations(svc *services.Container) fiber.Handler {
@@ -396,7 +407,10 @@ func MarkConversationRead(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 		conversationID := c.Params("id")
 
-		svc.DB.Exec("UPDATE conversations SET unread_count = 0 WHERE id = $1 AND company_id = $2", conversationID, companyID)
+		if _, err := svc.DB.Exec("UPDATE conversations SET unread_count = 0 WHERE id = $1 AND company_id = $2", conversationID, companyID); err != nil {
+			log.Printf("[CONVERSATIONS] failed to mark conversation %s as read: %v", conversationID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to mark as read"})
+		}
 
 		return c.JSON(fiber.Map{"message": "Marked as read"})
 	}
@@ -480,10 +494,17 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		svc.DB.Exec(`
+		if !body.IsPrivate {
+			if err := svc.Message.AutoAssignIfUnassigned(conversationID, userID, companyID); err != nil {
+				log.Printf("[CONVERSATIONS] failed to auto-assign conversation %s: %v", conversationID, err)
+			}
+		}
+		if _, err := svc.DB.Exec(`
 			UPDATE conversations SET first_response_at = COALESCE(first_response_at, NOW())
 			WHERE id = $1 AND company_id = $2
-		`, conversationID, companyID)
+		`, conversationID, companyID); err != nil {
+			log.Printf("[CONVERSATIONS] failed to update first_response_at for conversation %s: %v", conversationID, err)
+		}
 
 		// If not private, send through the conversation channel
 		if !body.IsPrivate {
@@ -498,11 +519,15 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 			if channelType == "email" {
 				externalID, err := svc.Email.SendReply(companyID, conversationID, body.Content)
 				if err != nil {
-					svc.DB.Exec("UPDATE messages SET status = 'failed' WHERE id = $1 AND company_id = $2", msg.ID, companyID)
+					if _, dbErr := svc.DB.Exec("UPDATE messages SET status = 'failed' WHERE id = $1 AND company_id = $2", msg.ID, companyID); dbErr != nil {
+						log.Printf("[CONVERSATIONS] failed to mark message %s as failed: %v", msg.ID, dbErr)
+					}
 					return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 				}
 				if externalID != "" {
-					svc.DB.Exec("UPDATE messages SET external_id = $1, status = 'sent' WHERE id = $2 AND company_id = $3", externalID, msg.ID, companyID)
+					if _, dbErr := svc.DB.Exec("UPDATE messages SET external_id = $1, status = 'sent' WHERE id = $2 AND company_id = $3", externalID, msg.ID, companyID); dbErr != nil {
+						log.Printf("[CONVERSATIONS] failed to update message %s external_id: %v", msg.ID, dbErr)
+					}
 				}
 			}
 
@@ -536,11 +561,15 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 
 				externalID, err := svc.Evolution.SendTextMessageWithQuote(instanceName, phone, normalizeOutgoingWhatsAppLinks(messageToSend), quotedExternalID)
 				if err != nil {
-					svc.DB.Exec("UPDATE messages SET status = 'failed' WHERE id = $1 AND company_id = $2", msg.ID, companyID)
+					if _, dbErr := svc.DB.Exec("UPDATE messages SET status = 'failed' WHERE id = $1 AND company_id = $2", msg.ID, companyID); dbErr != nil {
+						log.Printf("[CONVERSATIONS] failed to mark message %s as failed: %v", msg.ID, dbErr)
+					}
 					return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 				}
 				if externalID != "" {
-					svc.DB.Exec("UPDATE messages SET external_id = $1 WHERE id = $2", externalID, msg.ID)
+					if _, dbErr := svc.DB.Exec("UPDATE messages SET external_id = $1 WHERE id = $2", externalID, msg.ID); dbErr != nil {
+						log.Printf("[CONVERSATIONS] failed to update message %s external_id: %v", msg.ID, dbErr)
+					}
 				}
 			}
 		}
@@ -557,8 +586,10 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 				WHERE m.id = $1
 			`, *body.ReplyToID).Scan(&replyContent, &replySender)
 
-			svc.DB.Exec("UPDATE messages SET reply_to_id = $1, reply_to_content = $2, reply_to_sender = $3 WHERE id = $4",
-				*body.ReplyToID, replyContent, replySender, msg.ID)
+			if _, err := svc.DB.Exec("UPDATE messages SET reply_to_id = $1, reply_to_content = $2, reply_to_sender = $3 WHERE id = $4",
+				*body.ReplyToID, replyContent, replySender, msg.ID); err != nil {
+				log.Printf("[CONVERSATIONS] failed to save reply-to info for message %s: %v", msg.ID, err)
+			}
 		}
 
 		// Push agent message to the widget visitor in real-time (if this is not a private note)
@@ -659,13 +690,21 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 		}
 		mediaURL := "/uploads/" + savedFileName
 
-		svc.DB.Exec(`
+		if _, err := svc.DB.Exec(`
 			INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, media_url, media_filename, external_id, status)
 			VALUES ($1, $2, $3, 'user', $4, $5, $6, $7, $8, $9, 'sent')
-		`, msgID, conversationID, companyID, userID, content, body.MediaType, mediaURL, body.FileName, externalID)
+		`, msgID, conversationID, companyID, userID, content, body.MediaType, mediaURL, body.FileName, externalID); err != nil {
+			log.Printf("[CONVERSATIONS] failed to save media message for conversation %s: %v", conversationID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save message"})
+		}
 
-		svc.DB.Exec(`UPDATE conversations SET last_message_at = NOW(), last_message_preview = $1, updated_at = NOW() WHERE id = $2`,
-			"📎 "+body.FileName, conversationID)
+		if _, err := svc.DB.Exec(`UPDATE conversations SET last_message_at = NOW(), last_message_preview = $1, updated_at = NOW() WHERE id = $2`,
+			"📎 "+body.FileName, conversationID); err != nil {
+			log.Printf("[CONVERSATIONS] failed to update conversation %s preview: %v", conversationID, err)
+		}
+		if err := svc.Message.AutoAssignIfUnassigned(conversationID, userID, companyID); err != nil {
+			log.Printf("[CONVERSATIONS] failed to auto-assign conversation %s: %v", conversationID, err)
+		}
 
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 			"id":              msgID,
@@ -744,13 +783,21 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 		// Save message to DB with local file URL
 		msgID := uuid.New().String()
 		mediaURL := "/uploads/" + savedFileName
-		svc.DB.Exec(`
+		if _, err := svc.DB.Exec(`
 			INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, media_url, external_id, status)
 			VALUES ($1, $2, $3, 'user', $4, '🎵 Áudio', 'audio', $5, $6, 'sent')
-		`, msgID, conversationID, companyID, userID, mediaURL, externalID)
+		`, msgID, conversationID, companyID, userID, mediaURL, externalID); err != nil {
+			log.Printf("[CONVERSATIONS] failed to save audio message for conversation %s: %v", conversationID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save message"})
+		}
 
 		// Update conversation
-		svc.DB.Exec(`UPDATE conversations SET last_message_at = NOW(), last_message_preview = '🎵 Áudio', updated_at = NOW() WHERE id = $1`, conversationID)
+		if _, err := svc.DB.Exec(`UPDATE conversations SET last_message_at = NOW(), last_message_preview = '🎵 Áudio', updated_at = NOW() WHERE id = $1`, conversationID); err != nil {
+			log.Printf("[CONVERSATIONS] failed to update conversation %s preview: %v", conversationID, err)
+		}
+		if err := svc.Message.AutoAssignIfUnassigned(conversationID, userID, companyID); err != nil {
+			log.Printf("[CONVERSATIONS] failed to auto-assign conversation %s: %v", conversationID, err)
+		}
 
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 			"id":              msgID,

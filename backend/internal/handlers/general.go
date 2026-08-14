@@ -192,7 +192,10 @@ func RemoveTeamMember(svc *services.Container) fiber.Handler {
 		teamID := c.Params("id")
 		userID := c.Params("userId")
 
-		svc.DB.Exec("DELETE FROM team_users WHERE team_id = $1 AND user_id = $2", teamID, userID)
+		if _, err := svc.DB.Exec("DELETE FROM team_users WHERE team_id = $1 AND user_id = $2", teamID, userID); err != nil {
+			log.Printf("[TEAMS] failed to remove member %s from team %s: %v", userID, teamID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to remove member"})
+		}
 		return c.JSON(fiber.Map{"message": "Member removed"})
 	}
 }
@@ -352,10 +355,12 @@ func CreateFunnel(svc *services.Container) fiber.Handler {
 			if color == "" {
 				color = "#3B82F6"
 			}
-			svc.DB.Exec(`
+			if _, err := svc.DB.Exec(`
 				INSERT INTO funnel_stages (id, funnel_id, name, color, position, is_won, is_lost)
 				VALUES ($1, $2, $3, $4, $5, $6, $7)
-			`, uuid.New().String(), funnelID, stage.Name, color, i, stage.IsWon, stage.IsLost)
+			`, uuid.New().String(), funnelID, stage.Name, color, i, stage.IsWon, stage.IsLost); err != nil {
+				log.Printf("[FUNNELS] failed to create stage %q for funnel %s: %v", stage.Name, funnelID, err)
+			}
 		}
 
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"id": funnelID, "name": body.Name})
@@ -373,8 +378,11 @@ func UpdateFunnel(svc *services.Container) fiber.Handler {
 		}
 		c.BodyParser(&body)
 
-		svc.DB.Exec("UPDATE funnels SET name = $1, description = $2, updated_at = NOW() WHERE id = $3 AND company_id = $4",
-			body.Name, body.Description, funnelID, companyID)
+		if _, err := svc.DB.Exec("UPDATE funnels SET name = $1, description = $2, updated_at = NOW() WHERE id = $3 AND company_id = $4",
+			body.Name, body.Description, funnelID, companyID); err != nil {
+			log.Printf("[FUNNELS] failed to update funnel %s: %v", funnelID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update funnel"})
+		}
 
 		return c.JSON(fiber.Map{"message": "Funnel updated"})
 	}
@@ -385,7 +393,10 @@ func DeleteFunnel(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 		funnelID := c.Params("id")
 
-		svc.DB.Exec("DELETE FROM funnels WHERE id = $1 AND company_id = $2", funnelID, companyID)
+		if _, err := svc.DB.Exec("DELETE FROM funnels WHERE id = $1 AND company_id = $2", funnelID, companyID); err != nil {
+			log.Printf("[FUNNELS] failed to delete funnel %s: %v", funnelID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete funnel"})
+		}
 		return c.JSON(fiber.Map{"message": "Funnel deleted"})
 	}
 }
@@ -519,11 +530,14 @@ func UpdateDeal(svc *services.Container) fiber.Handler {
 		}
 		c.BodyParser(&body)
 
-		svc.DB.Exec(`
+		if _, err := svc.DB.Exec(`
 			UPDATE deals SET title = COALESCE(NULLIF($1, ''), title), value = COALESCE($2, value),
 			status = COALESCE(NULLIF($3, ''), status), loss_reason = NULLIF($4, ''), updated_at = NOW()
 			WHERE id = $5 AND company_id = $6
-		`, body.Title, body.Value, body.Status, body.LossReason, dealID, companyID)
+		`, body.Title, body.Value, body.Status, body.LossReason, dealID, companyID); err != nil {
+			log.Printf("[DEALS] failed to update deal %s: %v", dealID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update deal"})
+		}
 
 		return c.JSON(fiber.Map{"message": "Deal updated"})
 	}
@@ -539,8 +553,11 @@ func MoveDealStage(svc *services.Container) fiber.Handler {
 		}
 		c.BodyParser(&body)
 
-		svc.DB.Exec("UPDATE deals SET stage_id = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3",
-			body.StageID, dealID, companyID)
+		if _, err := svc.DB.Exec("UPDATE deals SET stage_id = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3",
+			body.StageID, dealID, companyID); err != nil {
+			log.Printf("[DEALS] failed to move deal %s: %v", dealID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to move deal"})
+		}
 
 		return c.JSON(fiber.Map{"message": "Deal moved"})
 	}
@@ -1037,7 +1054,10 @@ func DeleteBotFlow(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 		flowID := c.Params("id")
 
-		svc.DB.Exec("DELETE FROM bot_flows WHERE id = $1 AND company_id = $2", flowID, companyID)
+		if _, err := svc.DB.Exec("DELETE FROM bot_flows WHERE id = $1 AND company_id = $2", flowID, companyID); err != nil {
+			log.Printf("[BOT_FLOWS] failed to delete flow %s: %v", flowID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete flow"})
+		}
 		return c.JSON(fiber.Map{"message": "Flow deleted"})
 	}
 }
@@ -2207,8 +2227,11 @@ func PauseCampaign(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 		campaignID := c.Params("id")
 
-		svc.DB.Exec("UPDATE campaigns SET status = 'paused', updated_at = NOW() WHERE id = $1 AND company_id = $2",
-			campaignID, companyID)
+		if _, err := svc.DB.Exec("UPDATE campaigns SET status = 'paused', updated_at = NOW() WHERE id = $1 AND company_id = $2",
+			campaignID, companyID); err != nil {
+			log.Printf("[CAMPAIGNS] failed to pause campaign %s: %v", campaignID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to pause campaign"})
+		}
 
 		return c.JSON(fiber.Map{"message": "Campaign paused"})
 	}
@@ -2442,10 +2465,13 @@ func CreateAnnouncement(svc *services.Container) fiber.Handler {
 		}
 
 		id := uuid.New().String()
-		svc.DB.Exec(`
+		if _, err := svc.DB.Exec(`
 			INSERT INTO internal_announcements (id, company_id, author_id, title, content, priority, is_pinned)
 			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, id, companyID, userID, body.Title, body.Content, body.Priority, body.IsPinned)
+		`, id, companyID, userID, body.Title, body.Content, body.Priority, body.IsPinned); err != nil {
+			log.Printf("[ANNOUNCEMENTS] failed to create announcement: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create announcement"})
+		}
 
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"id": id})
 	}
@@ -2456,9 +2482,12 @@ func MarkAnnouncementRead(svc *services.Container) fiber.Handler {
 		userID := c.Locals("user_id").(string)
 		announcementID := c.Params("id")
 
-		svc.DB.Exec(`
+		if _, err := svc.DB.Exec(`
 			INSERT INTO announcement_reads (announcement_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING
-		`, announcementID, userID)
+		`, announcementID, userID); err != nil {
+			log.Printf("[ANNOUNCEMENTS] failed to mark announcement %s read for user %s: %v", announcementID, userID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to mark as read"})
+		}
 
 		return c.JSON(fiber.Map{"message": "Marked as read"})
 	}
@@ -2520,10 +2549,13 @@ func CreateWidget(svc *services.Container) fiber.Handler {
 		}
 
 		id := uuid.New().String()
-		svc.DB.Exec(`
+		if _, err := svc.DB.Exec(`
 			INSERT INTO widgets (id, company_id, name, primary_color, greeting_message, position)
 			VALUES ($1, $2, $3, $4, $5, $6)
-		`, id, companyID, body.Name, body.PrimaryColor, body.GreetingMessage, body.Position)
+		`, id, companyID, body.Name, body.PrimaryColor, body.GreetingMessage, body.Position); err != nil {
+			log.Printf("[WIDGETS] failed to create widget: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create widget"})
+		}
 
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"id": id})
 	}
@@ -2543,10 +2575,13 @@ func UpdateWidget(svc *services.Container) fiber.Handler {
 		}
 		c.BodyParser(&body)
 
-		svc.DB.Exec(`
+		if _, err := svc.DB.Exec(`
 			UPDATE widgets SET name = $1, primary_color = $2, greeting_message = $3, position = $4, is_active = $5, updated_at = NOW()
 			WHERE id = $6 AND company_id = $7
-		`, body.Name, body.PrimaryColor, body.GreetingMessage, body.Position, body.IsActive, widgetID, companyID)
+		`, body.Name, body.PrimaryColor, body.GreetingMessage, body.Position, body.IsActive, widgetID, companyID); err != nil {
+			log.Printf("[WIDGETS] failed to update widget %s: %v", widgetID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to update widget"})
+		}
 
 		return c.JSON(fiber.Map{"message": "Widget updated"})
 	}
@@ -3015,7 +3050,10 @@ func CreateTag(svc *services.Container) fiber.Handler {
 		}
 
 		id := uuid.New().String()
-		svc.DB.Exec("INSERT INTO tags (id, company_id, name, color) VALUES ($1, $2, $3, $4)", id, companyID, body.Name, body.Color)
+		if _, err := svc.DB.Exec("INSERT INTO tags (id, company_id, name, color) VALUES ($1, $2, $3, $4)", id, companyID, body.Name, body.Color); err != nil {
+			log.Printf("[TAGS] failed to create tag: %v", err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create tag"})
+		}
 
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"id": id, "name": body.Name, "color": body.Color})
 	}
@@ -3026,7 +3064,10 @@ func DeleteTag(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 		tagID := c.Params("id")
 
-		svc.DB.Exec("DELETE FROM tags WHERE id = $1 AND company_id = $2", tagID, companyID)
+		if _, err := svc.DB.Exec("DELETE FROM tags WHERE id = $1 AND company_id = $2", tagID, companyID); err != nil {
+			log.Printf("[TAGS] failed to delete tag %s: %v", tagID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete tag"})
+		}
 		return c.JSON(fiber.Map{"message": "Tag deleted"})
 	}
 }

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"strings"
 
 	"github.com/evocrm/backend/internal/services"
@@ -101,10 +102,18 @@ func DeleteEmailChannel(svc *services.Container) fiber.Handler {
 		channelID := c.Params("id")
 
 		// Remove channel reference from related tables (don't delete the data)
-		svc.DB.Exec("UPDATE conversations SET channel_id = NULL WHERE channel_id = $1 AND company_id = $2", channelID, companyID)
-		svc.DB.Exec("UPDATE whatsapp_instances SET channel_id = NULL WHERE channel_id = $1", channelID)
-		svc.DB.Exec("UPDATE bot_flows SET channel_id = NULL WHERE channel_id = $1", channelID)
-		svc.DB.Exec("UPDATE call_queues SET channel_id = NULL WHERE channel_id = $1", channelID)
+		if _, err := svc.DB.Exec("UPDATE conversations SET channel_id = NULL WHERE channel_id = $1 AND company_id = $2", channelID, companyID); err != nil {
+			log.Printf("[EMAIL_CHANNELS] failed to clear channel %s from conversations: %v", channelID, err)
+		}
+		if _, err := svc.DB.Exec("UPDATE whatsapp_instances SET channel_id = NULL WHERE channel_id = $1", channelID); err != nil {
+			log.Printf("[EMAIL_CHANNELS] failed to clear channel %s from whatsapp_instances: %v", channelID, err)
+		}
+		if _, err := svc.DB.Exec("UPDATE bot_flows SET channel_id = NULL WHERE channel_id = $1", channelID); err != nil {
+			log.Printf("[EMAIL_CHANNELS] failed to clear channel %s from bot_flows: %v", channelID, err)
+		}
+		if _, err := svc.DB.Exec("UPDATE call_queues SET channel_id = NULL WHERE channel_id = $1", channelID); err != nil {
+			log.Printf("[EMAIL_CHANNELS] failed to clear channel %s from call_queues: %v", channelID, err)
+		}
 
 		// Delete the channel
 		_, err := svc.DB.Exec("DELETE FROM channels WHERE id = $1 AND company_id = $2 AND type = 'email'", channelID, companyID)

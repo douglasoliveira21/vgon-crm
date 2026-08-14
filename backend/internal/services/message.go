@@ -3,6 +3,7 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -101,10 +102,12 @@ func (s *MessageService) SaveAndSendMessage(companyID, userID string, req *SendT
 	if len(preview) > 100 {
 		preview = preview[:100]
 	}
-	s.db.Exec(`
+	if _, err := s.db.Exec(`
 		UPDATE conversations SET last_message_at = NOW(), last_message_preview = $1, updated_at = NOW()
 		WHERE id = $2
-	`, preview, req.ConversationID)
+	`, preview, req.ConversationID); err != nil {
+		log.Printf("[MESSAGE] failed to update conversation %s preview: %v", req.ConversationID, err)
+	}
 
 	msg := &models.Message{
 		ID:             msgID,
@@ -276,6 +279,30 @@ func (s *MessageService) GetConversationByID(companyID, conversationID string) (
 		return nil, sql.ErrNoRows
 	}
 	return &conversations[0], nil
+}
+
+// AutoAssignIfUnassigned links the sending attendant to the conversation, but only
+// when it has no attendant linked yet (assigned_to IS NULL). It never reassigns a
+// conversation that already belongs to someone.
+func (s *MessageService) AutoAssignIfUnassigned(conversationID, userID, companyID string) error {
+	res, err := s.db.Exec(`
+		UPDATE conversations
+		SET assigned_to = $1, status = CASE WHEN status = 'open' THEN 'in_progress' ELSE status END, updated_at = NOW()
+		WHERE id = $2 AND company_id = $3 AND assigned_to IS NULL
+	`, userID, conversationID, companyID)
+	if err != nil {
+		return fmt.Errorf("failed to auto-assign conversation: %w", err)
+	}
+
+	rows, _ := res.RowsAffected()
+	if rows > 0 {
+		s.wsHub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
+			"id":          conversationID,
+			"assigned_to": userID,
+		})
+	}
+
+	return nil
 }
 
 // AssignConversation assigns a conversation to a user

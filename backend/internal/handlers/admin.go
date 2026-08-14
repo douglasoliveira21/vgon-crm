@@ -171,7 +171,9 @@ func CreateTenant(svc *services.Container) fiber.Handler {
 		`, userID, companyID, roleID, req.AdminName, strings.ToLower(req.AdminEmail), string(hashedPassword))
 		if err != nil {
 			// Rollback company creation
-			svc.DB.Exec("DELETE FROM companies WHERE id = $1", companyID)
+			if _, delErr := svc.DB.Exec("DELETE FROM companies WHERE id = $1", companyID); delErr != nil {
+				log.Printf("[ADMIN] failed to rollback company %s after user creation failure: %v", companyID, delErr)
+			}
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create admin user: " + err.Error()})
 		}
 

@@ -135,7 +135,9 @@ func (s *EmailService) SyncChannel(companyID, channelID string) (int, error) {
 		emails, lastUID, err = fetchInboxEmails(settings)
 	}
 	if err != nil {
-		s.db.Exec("UPDATE channels SET status = 'error', updated_at = NOW() WHERE id = $1 AND company_id = $2", channelID, companyID)
+		if _, dbErr := s.db.Exec("UPDATE channels SET status = 'error', updated_at = NOW() WHERE id = $1 AND company_id = $2", channelID, companyID); dbErr != nil {
+			log.Printf("[EMAIL] failed to mark channel %s as error: %v", channelID, dbErr)
+		}
 		return 0, err
 	}
 
@@ -158,11 +160,13 @@ func (s *EmailService) SyncChannel(companyID, channelID string) (int, error) {
 		settings.LastUID = lastUID
 	}
 	updatedSettings, _ := json.Marshal(settings)
-	s.db.Exec(`
+	if _, dbErr := s.db.Exec(`
 		UPDATE channels
 		SET settings = $1, status = 'connected', updated_at = NOW()
 		WHERE id = $2 AND company_id = $3
-	`, updatedSettings, channelID, companyID)
+	`, updatedSettings, channelID, companyID); dbErr != nil {
+		log.Printf("[EMAIL] failed to update channel %s settings/status: %v", channelID, dbErr)
+	}
 
 	return imported, nil
 }
