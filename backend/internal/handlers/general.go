@@ -1795,7 +1795,7 @@ func runCampaignSender(ctx context.Context, svc *services.Container, campaignID,
 		if status != "sending" {
 			return nil
 		}
-		_, _ = svc.DB.Exec(`
+		_, _ = svc.DB.ExecContext(ctx, `
 			UPDATE campaign_contacts cc SET status = 'failed', locked_at = NULL,
 				error_message = 'Contato bloqueado, sem consentimento ou em lista de supressão'
 			FROM contacts c
@@ -1817,7 +1817,7 @@ func runCampaignSender(ctx context.Context, svc *services.Container, campaignID,
 		`, campaignID)
 
 		var campaignContactID, contactID, name, phone, email, companyName string
-		err := svc.DB.QueryRow(`
+		err := svc.DB.QueryRowContext(ctx, `
 			SELECT cc.id, c.id, COALESCE(c.name, ''), c.phone, COALESCE(c.email, ''), COALESCE(c.company_name, '')
 			FROM campaign_contacts cc
 			JOIN contacts c ON c.id = cc.contact_id
@@ -1845,12 +1845,12 @@ func runCampaignSender(ctx context.Context, svc *services.Container, campaignID,
 			return err
 		}
 
-		_, _ = svc.DB.Exec("UPDATE campaign_contacts SET locked_at = NOW(), last_attempt_at = NOW() WHERE id = $1", campaignContactID)
+		_, _ = svc.DB.ExecContext(ctx, "UPDATE campaign_contacts SET locked_at = NOW(), last_attempt_at = NOW() WHERE id = $1", campaignContactID)
 		err = sendCampaignItems(svc, campaignID, campaignContactID, instanceName, phone, items, name, phone, email, companyName)
 		if err != nil {
 			requeueCampaignContact(svc.DB, campaignContactID, err)
 		} else {
-			_, _ = svc.DB.Exec(`
+			_, _ = svc.DB.ExecContext(ctx, `
 				UPDATE campaign_contacts
 				SET status = CASE WHEN status IN ('delivered', 'read', 'replied') THEN status ELSE 'sent' END,
 					sent_at = COALESCE(sent_at, NOW()),

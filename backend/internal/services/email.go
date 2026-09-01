@@ -33,6 +33,11 @@ type EmailService struct {
 	cfg   *config.Config
 }
 
+// emailHTTPClient bounds Gmail/Outlook API and OAuth calls so a slow provider
+// can't hold a request goroutine (or the periodic sync loop) open forever —
+// http.DefaultClient/http.PostForm have no timeout by default.
+var emailHTTPClient = &http.Client{Timeout: 20 * time.Second}
+
 type EmailChannelSettings struct {
 	Provider     string    `json:"provider,omitempty"`
 	IMAPHost     string    `json:"imap_host"`
@@ -88,10 +93,13 @@ func (s *EmailService) StartPeriodicSync() {
 }
 
 func (s *EmailService) syncActiveChannels() {
+	// Includes 'error' so a channel that dropped from a transient failure
+	// (network blip, IMAP timeout) self-heals on the next cycle instead of
+	// staying down until someone manually reconnects it.
 	rows, err := s.db.Query(`
 		SELECT id, company_id
 		FROM channels
-		WHERE type = 'email' AND is_active = true AND status = 'connected'
+		WHERE type = 'email' AND is_active = true AND status IN ('connected', 'error')
 	`)
 	if err != nil {
 		log.Printf("[EMAIL] failed to list email channels: %v", err)
@@ -128,19 +136,17 @@ func (s *EmailService) SyncChannel(companyID, channelID string) (int, error) {
 
 	var emails []fetchedEmail
 	var lastUID uint32
+	var fetchErr error
 	if settings.Provider == "gmail" || settings.Provider == "outlook" {
-		emails, err = s.fetchOAuthEmails(&settings)
+		emails, fetchErr = s.fetchOAuthEmails(&settings)
 		lastUID = settings.LastUID
 	} else {
-		emails, lastUID, err = fetchInboxEmails(settings)
-	}
-	if err != nil {
-		if _, dbErr := s.db.Exec("UPDATE channels SET status = 'error', updated_at = NOW() WHERE id = $1 AND company_id = $2", channelID, companyID); dbErr != nil {
-			log.Printf("[EMAIL] failed to mark channel %s as error: %v", channelID, dbErr)
-		}
-		return 0, err
+		emails, lastUID, fetchErr = fetchInboxEmails(settings)
 	}
 
+	// Even when fetchErr is set, IMAP may have returned some emails/lastUID
+	// before the failure (e.g. connection dropped mid-fetch). Save that
+	// partial progress so a retry resumes instead of redoing everything.
 	imported := 0
 	for _, item := range emails {
 		if item.UID > 0 && item.UID <= settings.LastUID {
@@ -160,14 +166,21 @@ func (s *EmailService) SyncChannel(companyID, channelID string) (int, error) {
 		settings.LastUID = lastUID
 	}
 	updatedSettings, _ := json.Marshal(settings)
+	newStatus := "connected"
+	if fetchErr != nil {
+		newStatus = "error"
+	}
 	if _, dbErr := s.db.Exec(`
 		UPDATE channels
-		SET settings = $1, status = 'connected', updated_at = NOW()
-		WHERE id = $2 AND company_id = $3
-	`, updatedSettings, channelID, companyID); dbErr != nil {
+		SET settings = $1, status = $2, updated_at = NOW()
+		WHERE id = $3 AND company_id = $4
+	`, updatedSettings, newStatus, channelID, companyID); dbErr != nil {
 		log.Printf("[EMAIL] failed to update channel %s settings/status: %v", channelID, dbErr)
 	}
 
+	if fetchErr != nil {
+		return imported, fetchErr
+	}
 	return imported, nil
 }
 
@@ -296,7 +309,7 @@ func (s *EmailService) sendGmailReply(settings *EmailChannelSettings, to, subjec
 	req, _ := http.NewRequest("POST", "https://gmail.googleapis.com/gmail/v1/users/me/messages/send", bytes.NewReader(payload))
 	req.Header.Set("Authorization", "Bearer "+settings.AccessToken)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := emailHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -335,7 +348,7 @@ func (s *EmailService) sendOutlookReply(settings *EmailChannelSettings, to, subj
 	req, _ := http.NewRequest("POST", "https://graph.microsoft.com/v1.0/me/sendMail", bytes.NewReader(payload))
 	req.Header.Set("Authorization", "Bearer "+settings.AccessToken)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := emailHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -475,7 +488,7 @@ func (s *EmailService) refreshOAuthToken(settings *EmailChannelSettings) error {
 		return fmt.Errorf("provedor inválido")
 	}
 
-	resp, err := http.PostForm(tokenURL, values)
+	resp, err := emailHTTPClient.PostForm(tokenURL, values)
 	if err != nil {
 		return err
 	}
@@ -513,7 +526,7 @@ func fetchGmailAPIEmails(settings *EmailChannelSettings) ([]fetchedEmail, error)
 	endpoint := fmt.Sprintf("https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=%d&q=in:inbox", maxResults)
 	req, _ := http.NewRequest("GET", endpoint, nil)
 	req.Header.Set("Authorization", "Bearer "+settings.AccessToken)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := emailHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -545,7 +558,7 @@ func fetchGmailAPIEmails(settings *EmailChannelSettings) ([]fetchedEmail, error)
 func fetchGmailMessage(accessToken, id string) (fetchedEmail, error) {
 	req, _ := http.NewRequest("GET", "https://gmail.googleapis.com/gmail/v1/users/me/messages/"+url.PathEscape(id)+"?format=full", nil)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := emailHTTPClient.Do(req)
 	if err != nil {
 		return fetchedEmail{}, err
 	}
@@ -603,7 +616,7 @@ func fetchOutlookAPIEmails(settings *EmailChannelSettings) ([]fetchedEmail, erro
 	endpoint := fmt.Sprintf("https://graph.microsoft.com/v1.0/me/messages?$top=%d&$select=id,subject,from,receivedDateTime,bodyPreview", top)
 	req, _ := http.NewRequest("GET", endpoint, nil)
 	req.Header.Set("Authorization", "Bearer "+settings.AccessToken)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := emailHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -857,6 +870,13 @@ func fetchInboxEmails(settings EmailChannelSettings) ([]fetchedEmail, uint32, er
 		return nil, settings.LastUID, err
 	}
 	defer conn.Close()
+
+	// Without a deadline, a server that stops responding mid-session leaves
+	// this blocked on ReadString forever — since periodic sync runs all
+	// channels sequentially in one goroutine, that hangs every future sync.
+	if err := conn.SetDeadline(time.Now().Add(90 * time.Second)); err != nil {
+		return nil, settings.LastUID, err
+	}
 
 	if _, err := readIMAPUntil(reader, ""); err != nil {
 		return nil, settings.LastUID, err

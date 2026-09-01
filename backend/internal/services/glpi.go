@@ -10,11 +10,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type GLPIService struct {
 	baseURL  string
 	appToken string
+	client   *http.Client
 }
 
 type GLPISession struct {
@@ -55,6 +57,7 @@ func NewGLPIService(baseURL, appToken string) *GLPIService {
 	return &GLPIService{
 		baseURL:  baseURL,
 		appToken: appToken,
+		client:   &http.Client{Timeout: 20 * time.Second},
 	}
 }
 
@@ -68,7 +71,7 @@ func (g *GLPIService) InitSession(userToken string) (string, error) {
 	req.Header.Set("App-Token", g.appToken)
 	req.Header.Set("Authorization", "user_token "+userToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := g.client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to GLPI: %w", err)
 	}
@@ -108,7 +111,7 @@ func (g *GLPIService) CreateTicket(sessionToken string, title, content string, e
 	req.Header.Set("App-Token", g.appToken)
 	req.Header.Set("Session-Token", sessionToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := g.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ticket: %w", err)
 	}
@@ -142,7 +145,7 @@ func (g *GLPIService) GetTicket(sessionToken string, ticketID int) (*GLPITicket,
 	req.Header.Set("App-Token", g.appToken)
 	req.Header.Set("Session-Token", sessionToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := g.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ticket: %w", err)
 	}
@@ -170,7 +173,7 @@ func (g *GLPIService) GetEntities(sessionToken string) ([]GLPIEntity, error) {
 	req.Header.Set("App-Token", g.appToken)
 	req.Header.Set("Session-Token", sessionToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := g.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get entities: %w", err)
 	}
@@ -199,7 +202,7 @@ func (g *GLPIService) GetEntity(sessionToken string, entityID int) (*GLPIEntity,
 	req.Header.Set("App-Token", g.appToken)
 	req.Header.Set("Session-Token", sessionToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := g.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get entity: %w", err)
 	}
@@ -298,7 +301,7 @@ func (g *GLPIService) getJSON(sessionToken, requestURL string, target interface{
 	req.Header.Set("App-Token", g.appToken)
 	req.Header.Set("Session-Token", sessionToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := g.client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -376,5 +379,5 @@ func (g *GLPIService) KillSession(sessionToken string) {
 	req, _ := http.NewRequest("GET", g.baseURL+"/killSession", nil)
 	req.Header.Set("App-Token", g.appToken)
 	req.Header.Set("Session-Token", sessionToken)
-	http.DefaultClient.Do(req)
+	g.client.Do(req)
 }

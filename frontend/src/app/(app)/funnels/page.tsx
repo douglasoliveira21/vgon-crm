@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { Plus, MoreVertical, DollarSign, Users, Edit2, Trash2, X, GripVertical } from 'lucide-react'
@@ -425,12 +425,15 @@ function CreateDealModal({ onClose, onCreated }: { onClose: () => void; onCreate
   const [selectedContact, setSelectedContact] = useState<{id: string; name: string; phone: string} | null>(null)
   const [contacts, setContacts] = useState<Array<{id: string; name: string; phone: string}>>([])
   const [showContactResults, setShowContactResults] = useState(false)
+  const contactSearchRequestRef = useRef(0)
 
   const searchContacts = async (query: string) => {
     setContactSearch(query)
     if (query.length < 2) { setContacts([]); setShowContactResults(false); return }
+    const requestId = ++contactSearchRequestRef.current
     try {
       const response = await api.get('/contacts', { params: { search: query, limit: 5 } })
+      if (requestId !== contactSearchRequestRef.current) return
       setContacts((response.data.contacts || []).map((c: any) => ({ id: c.id, name: c.name || c.phone, phone: c.phone })))
       setShowContactResults(true)
     } catch {}

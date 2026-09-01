@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { Ban, Loader2, Search, Unlock } from 'lucide-react'
@@ -15,15 +15,18 @@ export default function BlockedContactsPage() {
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const requestRef = useRef(0)
 
   const loadContacts = async () => {
+    const requestId = ++requestRef.current
     setLoading(true)
     try {
       const response = await api.get('/contacts', { params: { blocked: true, search, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE } })
+      if (requestId !== requestRef.current) return
       setContacts(response.data.contacts || [])
       setTotal(response.data.total || 0)
-    } catch { toast.error('Erro ao carregar contatos bloqueados') }
-    finally { setLoading(false) }
+    } catch { if (requestId === requestRef.current) toast.error('Erro ao carregar contatos bloqueados') }
+    finally { if (requestId === requestRef.current) setLoading(false) }
   }
 
   useEffect(() => { loadContacts() }, [search, page])

@@ -229,8 +229,10 @@ func (s *EvolutionService) SyncContactPhoto(instanceName, phone, contactID strin
 
 // downloadAndSaveAvatar downloads an image from URL and saves it to local storage
 func (s *EvolutionService) downloadAndSaveAvatar(imageURL, contactID string) (string, error) {
-	// Download image
-	resp, err := http.Get(imageURL)
+	// Download image using the shared client (has a timeout) instead of http.Get,
+	// which uses http.DefaultClient with no timeout and could hang the sequential
+	// photo-sync loop forever on a slow/unresponsive CDN.
+	resp, err := s.client.Get(imageURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to download avatar: %w", err)
 	}

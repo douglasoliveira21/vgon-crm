@@ -215,7 +215,10 @@ export default function Sidebar() {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
       wsService.off('new_message', handleNewMessage)
     }
-  }, [user?.id])
+    // Re-run (and rebuild fetchSidebarCounters' closure) whenever the fields
+    // it reads from `user` change, not just user.id — otherwise a profile
+    // rename/email change keeps computing @mentions against the stale name.
+  }, [user?.id, user?.name, user?.email])
 
   useEffect(() => {
     setMobileSidebarOpen(false)

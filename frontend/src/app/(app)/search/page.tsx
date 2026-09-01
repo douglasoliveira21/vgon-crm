@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import api from '@/lib/api'
@@ -19,6 +19,7 @@ export default function GlobalSearchPage() {
   const [results, setResults] = useState<GlobalSearchResponse>(emptyResults)
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
+  const searchRequestRef = useRef(0)
 
   const totalResults = useMemo(
     () => results.contacts.length + results.conversations.length + results.companies.length,
@@ -42,19 +43,21 @@ export default function GlobalSearchPage() {
 
   const runSearch = async (value = query.trim()) => {
     if (value.length < 2) return
+    const requestId = ++searchRequestRef.current
     setLoading(true)
     setSearched(true)
     try {
       const response = await api.get('/search', { params: { q: value } })
+      if (requestId !== searchRequestRef.current) return
       setResults({
         contacts: response.data.contacts || [],
         conversations: response.data.conversations || [],
         companies: response.data.companies || [],
       })
     } catch {
-      setResults(emptyResults)
+      if (requestId === searchRequestRef.current) setResults(emptyResults)
     } finally {
-      setLoading(false)
+      if (requestId === searchRequestRef.current) setLoading(false)
     }
   }
 

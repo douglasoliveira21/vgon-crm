@@ -1759,8 +1759,13 @@ export default function ConversationsPage() {
                           setSelectedQuickReplyIndex((prev) => Math.max(prev - 1, 0))
                         } else if (e.key === 'Enter' && !e.shiftKey && filtered.length > 0) {
                           e.preventDefault()
-                          setNewMessage(filtered[selectedQuickReplyIndex].content)
-                          setShowQuickReplies(false)
+                          // filtered can shrink (e.g. quick replies refetched) after the
+                          // index was set, so clamp instead of trusting the stale index.
+                          const reply = filtered[Math.min(selectedQuickReplyIndex, filtered.length - 1)]
+                          if (reply) {
+                            setNewMessage(reply.content)
+                            setShowQuickReplies(false)
+                          }
                         } else if (e.key === 'Escape') {
                           setShowQuickReplies(false)
                         }
@@ -2254,12 +2259,16 @@ function ContactPanel({
   const [showFunnelSelect, setShowFunnelSelect] = useState(false)
   const [showAssignUser, setShowAssignUser] = useState(false)
   const [showAssignTeam, setShowAssignTeam] = useState(false)
+  const contactPanelRequestRef = useRef(0)
 
   const loadContactPanelData = async () => {
+    const requestId = ++contactPanelRequestRef.current
     if (!conversation.contact_id) {
-      setContactTags([])
-      setContactDeals([])
-      setContactConversations([])
+      if (requestId === contactPanelRequestRef.current) {
+        setContactTags([])
+        setContactDeals([])
+        setContactConversations([])
+      }
       return
     }
 
@@ -2269,6 +2278,7 @@ function ContactPanel({
       api.get('/conversations', { params: { contact_id: conversation.contact_id, limit: 100 } }).catch(() => null),
     ])
 
+    if (requestId !== contactPanelRequestRef.current) return
     setContactTags(contactRes?.data?.tags || [])
     setContactDeals((dealsRes?.data?.deals || []).filter((deal: ContactDeal) => deal.status === 'open'))
     setContactConversations(conversationsRes?.data?.conversations || [])

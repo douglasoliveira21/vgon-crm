@@ -6,12 +6,31 @@ import (
 	"log"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/evocrm/backend/internal/models"
 	"github.com/evocrm/backend/internal/websocket"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
+
+// truncatePreview cuts s to at most maxBytes bytes without splitting a
+// multi-byte UTF-8 rune in half (common in PT-BR text with á, ã, ç, é, etc.),
+// which would otherwise store/broadcast an invalid byte sequence.
+func truncatePreview(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	b := s[:maxBytes]
+	for len(b) > 0 {
+		r, size := utf8.DecodeLastRuneInString(b)
+		if r != utf8.RuneError || size != 1 {
+			break
+		}
+		b = b[:len(b)-1]
+	}
+	return b
+}
 
 type MessageService struct {
 	db    *sql.DB
@@ -98,10 +117,7 @@ func (s *MessageService) SaveAndSendMessage(companyID, userID string, req *SendT
 	}
 
 	// Update conversation
-	preview := req.Content
-	if len(preview) > 100 {
-		preview = preview[:100]
-	}
+	preview := truncatePreview(req.Content, 100)
 	if _, err := s.db.Exec(`
 		UPDATE conversations SET last_message_at = NOW(), last_message_preview = $1, updated_at = NOW()
 		WHERE id = $2

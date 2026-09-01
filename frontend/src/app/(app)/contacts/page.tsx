@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
@@ -72,6 +72,7 @@ export default function ContactsPage() {
   const [startingConversation, setStartingConversation] = useState(false)
   const [companies, setCompanies] = useState<CustomerCompany[]>([])
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const contactsRequestRef = useRef(0)
 
   useEffect(() => {
     fetchContacts()
@@ -85,11 +86,13 @@ export default function ContactsPage() {
   }, [searchParams])
 
   const fetchContacts = async () => {
+    const requestId = ++contactsRequestRef.current
     setLoading(true)
     try {
       const response = await api.get('/contacts', {
         params: { search, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE },
       })
+      if (requestId !== contactsRequestRef.current) return
       const sortedContacts = [...(response.data.contacts || [])].sort((a, b) =>
         (a.name || a.phone || a.email || '').localeCompare(b.name || b.phone || b.email || '', 'pt-BR', {
           sensitivity: 'base',
@@ -100,7 +103,7 @@ export default function ContactsPage() {
     } catch (error) {
       console.error('Error:', error)
     } finally {
-      setLoading(false)
+      if (requestId === contactsRequestRef.current) setLoading(false)
     }
   }
 

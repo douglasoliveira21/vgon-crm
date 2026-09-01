@@ -51,11 +51,16 @@ export default function CampaignsPage() {
     fetchCampaigns()
   }, [])
 
+  const hasSendingCampaign = campaigns.some((campaign) => campaign.status === 'sending')
+
   useEffect(() => {
-    if (!campaigns.some((campaign) => campaign.status === 'sending')) return
+    if (!hasSendingCampaign) return
     const interval = setInterval(fetchCampaigns, 5000)
     return () => clearInterval(interval)
-  }, [campaigns])
+    // Only depends on whether a campaign is sending, not the whole `campaigns`
+    // array — otherwise every 5s poll (which updates `campaigns`) tore down
+    // and recreated this same interval instead of just letting it tick.
+  }, [hasSendingCampaign])
 
   const fetchCampaigns = async () => {
     try {

@@ -17,6 +17,11 @@ import (
 	"github.com/google/uuid"
 )
 
+// oauthHTTPClient bounds Gmail/Outlook OAuth calls so a slow provider can't
+// hold a request goroutine open indefinitely (http.DefaultClient/http.PostForm
+// have no timeout).
+var oauthHTTPClient = &http.Client{Timeout: 20 * time.Second}
+
 type emailOAuthState struct {
 	CompanyID string `json:"company_id"`
 	UserID    string `json:"user_id"`
@@ -159,7 +164,7 @@ func exchangeEmailOAuthCode(svc *services.Container, provider, code, redirectURI
 		values.Set("client_secret", svc.Config.MicrosoftClientSecret)
 	}
 
-	resp, err := http.PostForm(tokenURL, values)
+	resp, err := oauthHTTPClient.PostForm(tokenURL, values)
 	if err != nil {
 		return oauthTokenResponse{}, err
 	}
@@ -180,7 +185,7 @@ func fetchOAuthAccountEmail(provider, accessToken string) (string, error) {
 	}
 	req, _ := http.NewRequest("GET", endpoint, nil)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := oauthHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}

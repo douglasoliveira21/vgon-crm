@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useAuthStore } from '@/store/auth'
 import api from '@/lib/api'
 import {
@@ -73,8 +73,10 @@ export default function DashboardPage() {
   const [teamId, setTeamId] = useState('')
   const [channelId, setChannelId] = useState('')
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const dashboardRequestRef = useRef(0)
 
   const fetchDashboard = useCallback(async (silent = false) => {
+    const requestId = ++dashboardRequestRef.current
     if (silent) setRefreshing(true)
     else setLoading(true)
     try {
@@ -85,15 +87,18 @@ export default function DashboardPage() {
           channel_id: channelId || undefined,
         },
       })
+      if (requestId !== dashboardRequestRef.current) return
       setData(response.data)
       setLastUpdated(new Date())
       setError(false)
     } catch (error) {
       console.error('Failed to fetch dashboard:', error)
-      setError(true)
+      if (requestId === dashboardRequestRef.current) setError(true)
     } finally {
-      setLoading(false)
-      setRefreshing(false)
+      if (requestId === dashboardRequestRef.current) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [period, teamId, channelId])
 

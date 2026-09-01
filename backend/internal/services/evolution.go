@@ -792,10 +792,7 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	}
 
 	// Update conversation
-	preview := content
-	if len(preview) > 100 {
-		preview = preview[:100]
-	}
+	preview := truncatePreview(content, 100)
 	if _, err := s.db.Exec(`
 		UPDATE conversations SET last_message_at = NOW(), last_message_preview = $1, unread_count = unread_count + 1, updated_at = NOW()
 		WHERE id = $2
