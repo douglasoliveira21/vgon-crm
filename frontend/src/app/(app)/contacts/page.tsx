@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Search, Plus, Edit2, Trash2, MapPin, MessageSquare, X, ShieldCheck, Download, History, GitMerge, Tag } from 'lucide-react'
 import { SafeImage } from '@/components/safe-image'
@@ -57,9 +58,6 @@ interface ContactTag {
 export default function ContactsPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [contacts, setContacts] = useState<Contact[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [showForm, setShowForm] = useState(false)
@@ -67,73 +65,58 @@ export default function ContactsPage() {
   const [conversationContact, setConversationContact] = useState<Contact | null>(null)
   const [privacyContact, setPrivacyContact] = useState<Contact | null>(null)
   const [showDuplicates, setShowDuplicates] = useState(false)
-  const [channels, setChannels] = useState<Channel[]>([])
-  const [loadingChannels, setLoadingChannels] = useState(false)
   const [startingConversation, setStartingConversation] = useState(false)
-  const [companies, setCompanies] = useState<CustomerCompany[]>([])
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const contactsRequestRef = useRef(0)
 
-  useEffect(() => {
-    fetchContacts()
-  }, [search, page])
-
-  useEffect(() => {
-    const urlSearch = searchParams.get('search') || ''
-    if (urlSearch) setSearch(urlSearch)
-    fetchCompanies()
-    fetchChannels()
-  }, [searchParams])
-
-  const fetchContacts = async () => {
-    const requestId = ++contactsRequestRef.current
-    setLoading(true)
-    try {
+  const {
+    data: contactsData,
+    isLoading: loading,
+    refetch: fetchContacts,
+  } = useQuery({
+    queryKey: ['contacts', search, page],
+    queryFn: async () => {
       const response = await api.get('/contacts', {
         params: { search, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE },
       })
-      if (requestId !== contactsRequestRef.current) return
-      const sortedContacts = [...(response.data.contacts || [])].sort((a, b) =>
+      const sortedContacts = [...(response.data.contacts || [])].sort((a: Contact, b: Contact) =>
         (a.name || a.phone || a.email || '').localeCompare(b.name || b.phone || b.email || '', 'pt-BR', {
           sensitivity: 'base',
         })
       )
-      setContacts(sortedContacts)
-      setTotal(response.data.total || 0)
-    } catch (error) {
-      console.error('Error:', error)
-    } finally {
-      if (requestId === contactsRequestRef.current) setLoading(false)
-    }
-  }
+      return { contacts: sortedContacts as Contact[], total: response.data.total || 0 }
+    },
+  })
+  const contacts = contactsData?.contacts || []
+  const total = contactsData?.total || 0
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
-  const fetchCompanies = async () => {
-    try {
+  const { data: companies = [] } = useQuery({
+    queryKey: ['customer-companies'],
+    queryFn: async () => {
       const response = await api.get('/customer-companies')
-      setCompanies(response.data.companies || [])
-    } catch {}
-  }
+      return (response.data.companies || []) as CustomerCompany[]
+    },
+  })
 
-  const fetchChannels = async () => {
-    setLoadingChannels(true)
-    try {
+  const { data: channels = [], isLoading: loadingChannels, refetch: fetchChannels } = useQuery({
+    queryKey: ['whatsapp-channels'],
+    queryFn: async () => {
       const response = await api.get('/channels')
-      const availableChannels = (response.data.channels || []).filter((channel: Channel) =>
-        channel.type === 'whatsapp' && channel.status === 'connected' && channel.is_active
+      return ((response.data.channels || []) as Channel[]).filter(
+        (channel) => channel.type === 'whatsapp' && channel.status === 'connected' && channel.is_active
       )
-      setChannels(availableChannels)
-    } catch {
-      setChannels([])
-    } finally {
-      setLoadingChannels(false)
-    }
-  }
+    },
+  })
+
+  useEffect(() => {
+    const urlSearch = searchParams.get('search') || ''
+    if (urlSearch) setSearch(urlSearch)
+  }, [searchParams])
 
   const deleteContact = async (id: string) => {
     if (!confirm('Remover este contato?')) return
     try {
       await api.delete(`/contacts/${id}`)
-      setContacts((prev) => prev.filter((c) => c.id !== id))
+      fetchContacts()
       toast.success('Contato removido')
     } catch {
       toast.error('Erro ao remover')

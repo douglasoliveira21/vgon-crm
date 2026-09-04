@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import { Building2, Loader2, MessageSquare, Search, SearchX, Users } from 'lucide-react'
 
 interface GlobalSearchResponse {
@@ -16,50 +17,34 @@ const emptyResults: GlobalSearchResponse = { contacts: [], conversations: [], co
 
 export default function GlobalSearchPage() {
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState<GlobalSearchResponse>(emptyResults)
-  const [loading, setLoading] = useState(false)
-  const [searched, setSearched] = useState(false)
-  const searchRequestRef = useRef(0)
+  const [searchTerm, setSearchTerm] = useState('')
+
+  // Debounce typing into searchTerm; Enter (below) can also set it immediately.
+  useEffect(() => {
+    const trimmed = query.trim()
+    const timer = setTimeout(() => setSearchTerm(trimmed), 350)
+    return () => clearTimeout(timer)
+  }, [query])
+
+  const searched = searchTerm.length >= 2
+  const { data, isFetching: loading } = useQuery({
+    queryKey: ['global-search', searchTerm],
+    queryFn: async () => {
+      const response = await api.get('/search', { params: { q: searchTerm } })
+      return {
+        contacts: response.data.contacts || [],
+        conversations: response.data.conversations || [],
+        companies: response.data.companies || [],
+      } as GlobalSearchResponse
+    },
+    enabled: searched,
+  })
+  const results = data || emptyResults
 
   const totalResults = useMemo(
     () => results.contacts.length + results.conversations.length + results.companies.length,
     [results]
   )
-
-  useEffect(() => {
-    const trimmed = query.trim()
-    if (trimmed.length < 2) {
-      setResults(emptyResults)
-      setSearched(false)
-      return
-    }
-
-    const timer = setTimeout(() => {
-      runSearch(trimmed)
-    }, 350)
-
-    return () => clearTimeout(timer)
-  }, [query])
-
-  const runSearch = async (value = query.trim()) => {
-    if (value.length < 2) return
-    const requestId = ++searchRequestRef.current
-    setLoading(true)
-    setSearched(true)
-    try {
-      const response = await api.get('/search', { params: { q: value } })
-      if (requestId !== searchRequestRef.current) return
-      setResults({
-        contacts: response.data.contacts || [],
-        conversations: response.data.conversations || [],
-        companies: response.data.companies || [],
-      })
-    } catch {
-      if (requestId === searchRequestRef.current) setResults(emptyResults)
-    } finally {
-      if (requestId === searchRequestRef.current) setLoading(false)
-    }
-  }
 
   return (
     <div className="mx-auto max-w-6xl p-4 sm:p-6">
@@ -75,7 +60,7 @@ export default function GlobalSearchPage() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') runSearch()
+              if (event.key === 'Enter') setSearchTerm(query.trim())
             }}
             className="input pl-12 pr-12 text-base"
             autoFocus

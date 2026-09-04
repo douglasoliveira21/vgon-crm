@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import {
   MessageSquare,
@@ -29,57 +30,38 @@ interface AttendanceMetrics {
   avg_time_minutes: number
 }
 
+const emptyAttendance: AttendanceMetrics = { attended: 0, resolved: 0, total_time_minutes: 0, avg_time_minutes: 0 }
+
 export default function MetricsPage() {
-  const [metrics, setMetrics] = useState<any>({})
-  const [loading, setLoading] = useState(true)
-  const [users, setUsers] = useState<UserItem[]>([])
   const [selectedUser, setSelectedUser] = useState('')
-  const [attendance, setAttendance] = useState<AttendanceMetrics>({ attended: 0, resolved: 0, total_time_minutes: 0, avg_time_minutes: 0 })
-  const [loadingAttendance, setLoadingAttendance] = useState(true)
 
-  useEffect(() => {
-    fetchUsers()
-  }, [])
-
-  useEffect(() => {
-    fetchMetrics()
-    fetchAttendanceMetrics()
-  }, [selectedUser])
-
-  const fetchMetrics = async () => {
-    setLoading(true)
-    try {
+  const { data: metrics = {}, isLoading: loading } = useQuery({
+    queryKey: ['metrics', selectedUser],
+    queryFn: async () => {
       const params: any = {}
       if (selectedUser) params.assigned_to = selectedUser
       const response = await api.get('/metrics', { params })
-      setMetrics(response.data.metrics || {})
-    } catch (error) {
-      console.error('Error:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+      return response.data.metrics || {}
+    },
+  })
 
-  const fetchUsers = async () => {
-    try {
+  const { data: users = [] } = useQuery({
+    queryKey: ['metrics-users'],
+    queryFn: async () => {
       const response = await api.get('/users')
-      setUsers(response.data.users || [])
-    } catch {}
-  }
+      return (response.data.users || []) as UserItem[]
+    },
+  })
 
-  const fetchAttendanceMetrics = async () => {
-    setLoadingAttendance(true)
-    try {
+  const { data: attendance = emptyAttendance, isLoading: loadingAttendance } = useQuery({
+    queryKey: ['metrics-attendance', selectedUser],
+    queryFn: async () => {
       const params: any = {}
       if (selectedUser) params.assigned_to = selectedUser
       const response = await api.get('/metrics/attendance', { params })
-      setAttendance(response.data || { attended: 0, resolved: 0, total_time_minutes: 0, avg_time_minutes: 0 })
-    } catch {
-      setAttendance({ attended: 0, resolved: 0, total_time_minutes: 0, avg_time_minutes: 0 })
-    } finally {
-      setLoadingAttendance(false)
-    }
-  }
+      return (response.data || emptyAttendance) as AttendanceMetrics
+    },
+  })
 
   const formatTime = (minutes: number) => {
     if (minutes < 60) return `${Math.round(minutes)} min`

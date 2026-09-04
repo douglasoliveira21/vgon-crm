@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Building2, Edit2, FileDown, Plus, Search, Trash2 } from 'lucide-react'
 
@@ -48,24 +49,22 @@ function formatCNPJ(value: string) {
 
 export default function CompaniesPage() {
   const searchParams = useSearchParams()
-  const [companies, setCompanies] = useState<CustomerCompany[]>([])
   const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<CustomerCompany | null>(null)
 
-  useEffect(() => {
-    fetchCompanies()
-  }, [search])
+  const { data: companies = [], refetch: fetchCompanies } = useQuery({
+    queryKey: ['customer-companies-list', search],
+    queryFn: async () => {
+      const res = await api.get('/customer-companies', { params: { search } })
+      return (res.data.companies || []) as CustomerCompany[]
+    },
+  })
 
   useEffect(() => {
     const urlSearch = searchParams.get('search') || ''
     if (urlSearch) setSearch(urlSearch)
   }, [searchParams])
-
-  const fetchCompanies = async () => {
-    const res = await api.get('/customer-companies', { params: { search } })
-    setCompanies(res.data.companies || [])
-  }
 
   const removeCompany = async (id: string) => {
     if (!confirm('Remover esta empresa? Os contatos vinculados ficarão sem empresa.')) return

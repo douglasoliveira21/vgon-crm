@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Plus, Users, Edit2, Trash2, UserPlus, UserMinus, X, Shield, Settings } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
@@ -38,36 +39,31 @@ export default function TeamsPage() {
 	const isSupervisor = user?.role_slug === 'supervisor'
 	const canConfigureTeams = canManage && !isSupervisor
 	const canAddMembers = canManage
-  const [teams, setTeams] = useState<Team[]>([])
-  const [users, setUsers] = useState<UserItem[]>([])
-  const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingTeam, setEditingTeam] = useState<Team | null>(null)
   const [showMembers, setShowMembers] = useState<string | null>(null)
   const [members, setMembers] = useState<TeamMember[]>([])
 
-  useEffect(() => {
-    fetchTeams()
-	if (canManage) fetchUsers()
-  }, [canManage])
-
-  const fetchTeams = async () => {
-    try {
+  const {
+    data: teams = [],
+    isLoading: loading,
+    refetch: fetchTeams,
+  } = useQuery({
+    queryKey: ['teams'],
+    queryFn: async () => {
       const response = await api.get('/teams')
-      setTeams(response.data.teams || [])
-    } catch (error) {
-      console.error('Error:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+      return (response.data.teams || []) as Team[]
+    },
+  })
 
-  const fetchUsers = async () => {
-    try {
+  const { data: users = [] } = useQuery({
+    queryKey: ['users'],
+    queryFn: async () => {
       const response = await api.get('/users')
-      setUsers(response.data.users || [])
-    } catch {}
-  }
+      return (response.data.users || []) as UserItem[]
+    },
+    enabled: canManage,
+  })
 
   const createTeam = async (data: { name: string; description: string; distribution_rule: string }) => {
     try {
@@ -96,8 +92,8 @@ export default function TeamsPage() {
     if (!confirm('Remover este time? Todas as conversas serão desvinculadas.')) return
     try {
       await api.delete(`/teams/${id}`)
-      setTeams((prev) => prev.filter((t) => t.id !== id))
       toast.success('Time removido')
+      fetchTeams()
     } catch {
       toast.error('Erro ao remover')
     }

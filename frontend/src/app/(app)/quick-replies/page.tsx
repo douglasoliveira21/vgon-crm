@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Plus, Pencil, Trash2, Search, Zap, X } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
@@ -18,27 +19,27 @@ interface QuickReply {
 export default function QuickRepliesPage() {
 	const { user } = useAuthStore()
 	const canManage = !!user && user.role_slug !== 'agent'
-  const [replies, setReplies] = useState<QuickReply[]>([])
-  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [editingReply, setEditingReply] = useState<QuickReply | null>(null)
   const [form, setForm] = useState({ shortcut: '', title: '', content: '', category: '' })
 
-  useEffect(() => {
-    fetchReplies()
-  }, [])
-
-  const fetchReplies = async () => {
-    try {
-      const { data } = await api.get('/quick-replies')
-      setReplies(data.quick_replies || [])
-    } catch {
-      toast.error('Erro ao carregar respostas rápidas')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const {
+    data: replies = [],
+    isLoading: loading,
+    refetch: fetchReplies,
+  } = useQuery({
+    queryKey: ['quick-replies'],
+    queryFn: async () => {
+      try {
+        const { data } = await api.get('/quick-replies')
+        return (data.quick_replies || []) as QuickReply[]
+      } catch {
+        toast.error('Erro ao carregar respostas rápidas')
+        return [] as QuickReply[]
+      }
+    },
+  })
 
   const openCreate = () => {
     setEditingReply(null)
@@ -74,7 +75,7 @@ export default function QuickRepliesPage() {
         toast.success('Resposta rápida criada')
       }
       setShowModal(false)
-      fetchReplies()
+      await fetchReplies()
     } catch {
       toast.error('Erro ao salvar resposta rápida')
     }
@@ -86,7 +87,7 @@ export default function QuickRepliesPage() {
     try {
       await api.delete(`/quick-replies/${id}`)
       toast.success('Resposta rápida excluída')
-      fetchReplies()
+      await fetchReplies()
     } catch {
       toast.error('Erro ao excluir')
     }

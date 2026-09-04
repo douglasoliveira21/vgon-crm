@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import {
   ChevronRight,
 } from 'lucide-react'
@@ -25,23 +25,14 @@ interface InboxStats {
 
 export default function InboxPage() {
   const router = useRouter()
-  const [channels, setChannels] = useState<Channel[]>([])
-  const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    fetchChannels()
-  }, [])
-
-  const fetchChannels = async () => {
-    try {
+  const { data: channels = [], isLoading: loading } = useQuery({
+    queryKey: ['inbox-channels'],
+    queryFn: async () => {
       const response = await api.get('/channels')
-      setChannels(response.data.channels || [])
-    } catch (error) {
-      console.error('Error:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+      return (response.data.channels || []) as Channel[]
+    },
+  })
 
   const getChannelIcon = (type: string) => {
     return <ChannelIcon type={type} size={20} />

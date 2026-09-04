@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { ChannelIcon } from '@/components/channel-icon'
 import { Plus, Bot, Play, Pause, Edit2, Trash2, Zap, Ticket, Search, Building2, Link2, Eye, Copy } from 'lucide-react'
@@ -46,8 +47,17 @@ interface GLPITicketResult {
 
 export default function AutomationsPage() {
   const router = useRouter()
-  const [flows, setFlows] = useState<BotFlow[]>([])
-  const [loading, setLoading] = useState(true)
+  const {
+    data: flows = [],
+    isLoading: loading,
+    refetch: fetchFlows,
+  } = useQuery({
+    queryKey: ['bot-flows'],
+    queryFn: async () => {
+      const response = await api.get('/bot-flows')
+      return (response.data.flows || []) as BotFlow[]
+    },
+  })
   const [activeTab, setActiveTab] = useState<'bots' | 'glpi'>('bots')
   const [inspectingFlow, setInspectingFlow] = useState<BotFlow | null>(null)
 
@@ -60,21 +70,6 @@ export default function AutomationsPage() {
   const [searchTicketId, setSearchTicketId] = useState('')
   const [viewedTicket, setViewedTicket] = useState<GLPITicketResult | null>(null)
   const [createdTicketId, setCreatedTicketId] = useState<number | null>(null)
-
-  useEffect(() => {
-    fetchFlows()
-  }, [])
-
-  const fetchFlows = async () => {
-    try {
-      const response = await api.get('/bot-flows')
-      setFlows(response.data.flows || [])
-    } catch (error) {
-      console.error('Error:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const toggleFlow = async (flow: BotFlow) => {
     try {
@@ -90,8 +85,8 @@ export default function AutomationsPage() {
     if (!confirm('Remover este fluxo?')) return
     try {
       await api.delete(`/bot-flows/${id}`)
-      setFlows((prev) => prev.filter((f) => f.id !== id))
       toast.success('Fluxo removido')
+      fetchFlows()
     } catch {
       toast.error('Erro ao remover')
     }
@@ -589,7 +584,7 @@ function AutomationInspectionModal({
 }: {
   flow: BotFlow
   onClose: () => void
-  onChanged: () => Promise<void>
+  onChanged: () => Promise<unknown>
 }) {
   const [loading, setLoading] = useState(true)
   const [simulation, setSimulation] = useState<any>(null)

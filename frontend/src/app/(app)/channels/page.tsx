@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import wsService from '@/lib/websocket'
 import toast from 'react-hot-toast'
 import {
@@ -67,8 +68,17 @@ const defaultEmailForm = {
 
 export default function ChannelsPage() {
   const [instances, setInstances] = useState<WhatsAppInstance[]>([])
-  const [emailChannels, setEmailChannels] = useState<EmailChannel[]>([])
   const [loading, setLoading] = useState(true)
+  const {
+    data: emailChannels = [],
+    refetch: fetchEmailChannels,
+  } = useQuery({
+    queryKey: ['email-channels'],
+    queryFn: async () => {
+      const response = await api.get('/channels')
+      return ((response.data.channels || []) as EmailChannel[]).filter((channel) => channel.type === 'email')
+    },
+  })
   const [activeTab, setActiveTab] = useState('whatsapp')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showEmailModal, setShowEmailModal] = useState(false)
@@ -136,7 +146,6 @@ export default function ChannelsPage() {
 
   useEffect(() => {
     fetchInstances()
-    fetchEmailChannels()
 
     const handleStatus = (data: any) => {
       setInstances((prev) =>
@@ -193,15 +202,6 @@ export default function ChannelsPage() {
       console.error('Error fetching instances:', error)
     } finally {
       setLoading(false)
-    }
-  }
-
-  const fetchEmailChannels = async () => {
-    try {
-      const response = await api.get('/channels')
-      setEmailChannels((response.data.channels || []).filter((channel: EmailChannel) => channel.type === 'email'))
-    } catch (error) {
-      console.error('Error fetching email channels:', error)
     }
   }
 
@@ -336,8 +336,8 @@ export default function ChannelsPage() {
     if (!confirm('Tem certeza que deseja remover este canal de e-mail? As conversas importadas permanecerao no historico.')) return
     try {
       await api.delete(`/channels/email/${channelId}`)
-      setEmailChannels((prev) => prev.filter((channel) => channel.id !== channelId))
       toast.success('Canal de e-mail removido')
+      fetchEmailChannels()
     } catch {
       toast.error('Erro ao remover e-mail')
     }

@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import {
   Building2,
@@ -53,8 +54,6 @@ interface EditTenantForm {
 
 export default function TenantsPage() {
   const router = useRouter()
-  const [tenants, setTenants] = useState<Tenant[]>([])
-  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -79,24 +78,21 @@ export default function TenantsPage() {
   })
   const [submitting, setSubmitting] = useState(false)
 
-  const fetchTenants = useCallback(async () => {
-    try {
+  const {
+    data: tenants = [],
+    isLoading: loading,
+    refetch: fetchTenants,
+  } = useQuery({
+    queryKey: ['admin-tenants', search, statusFilter],
+    queryFn: async () => {
       const params = new URLSearchParams()
       if (search) params.append('search', search)
       if (statusFilter) params.append('status', statusFilter)
 
       const response = await api.get(`/admin/tenants?${params.toString()}`)
-      setTenants(response.data.tenants || [])
-    } catch (error) {
-      toast.error('Erro ao carregar empresas')
-    } finally {
-      setLoading(false)
-    }
-  }, [search, statusFilter])
-
-  useEffect(() => {
-    fetchTenants()
-  }, [fetchTenants])
+      return (response.data.tenants || []) as Tenant[]
+    },
+  })
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()

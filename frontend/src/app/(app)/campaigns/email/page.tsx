@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { ArrowLeft, CheckCircle2, Loader2, Mail, Search, Send, Users, XCircle } from 'lucide-react'
 import { ChannelIcon } from '@/components/channel-icon'
@@ -36,9 +37,6 @@ interface SendResult {
 }
 
 export default function EmailCampaignPage() {
-  const [channels, setChannels] = useState<EmailChannel[]>([])
-  const [contacts, setContacts] = useState<EmailContact[]>([])
-  const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
   const [targetType, setTargetType] = useState<'all' | 'selected'>('all')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -50,13 +48,14 @@ export default function EmailCampaignPage() {
     content: '',
   })
 
-  useEffect(() => {
-    loadData()
-  }, [])
-
-  const loadData = async () => {
-    setLoading(true)
-    try {
+  const {
+    data,
+    isLoading: loading,
+    isError,
+    refetch: loadData,
+  } = useQuery({
+    queryKey: ['email-campaign-data'],
+    queryFn: async () => {
       const [channelsResponse, contactsResponse] = await Promise.all([
         api.get('/channels'),
         loadAllContacts(),
@@ -64,18 +63,21 @@ export default function EmailCampaignPage() {
       const emailChannels = (channelsResponse.data.channels || []).filter(
         (channel: EmailChannel) => channel.type === 'email' && channel.status === 'connected'
       )
-      setChannels(emailChannels)
-      setContacts(contactsResponse)
-      if (emailChannels.length > 0) {
-        setForm((current) => ({ ...current, channel_id: current.channel_id || emailChannels[0].id }))
-      }
-    } catch (error) {
-      console.error('Error:', error)
-      toast.error('Erro ao carregar campanha por e-mail')
-    } finally {
-      setLoading(false)
-    }
-  }
+      return { channels: emailChannels as EmailChannel[], contacts: contactsResponse }
+    },
+  })
+  const channels = data?.channels || []
+  const contacts = data?.contacts || []
+
+  useEffect(() => {
+    if (isError) toast.error('Erro ao carregar campanha por e-mail')
+  }, [isError])
+
+  useEffect(() => {
+    if (!channels.length) return
+    setForm((current) => (current.channel_id ? current : { ...current, channel_id: channels[0].id }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data])
 
   const loadAllContacts = async () => {
     const pageSize = 500

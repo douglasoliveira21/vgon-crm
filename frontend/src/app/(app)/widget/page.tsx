@@ -2,23 +2,26 @@
 
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Plus, Globe, Code, Eye } from 'lucide-react'
 import { ChannelIcon } from '@/components/channel-icon'
 
 export default function WidgetPage() {
-  const [widgets, setWidgets] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
   const [showPreview, setShowPreview] = useState(false)
   const [previewColor, setPreviewColor] = useState('#3B82F6')
   const [position, setPosition] = useState('bottom-right')
   const [saving, setSaving] = useState(false)
-  const activeWidget = widgets[0]
   const [previewMessage, setPreviewMessage] = useState('Olá! Como podemos ajudar?')
 
-  useEffect(() => {
-    fetchWidgets()
-  }, [])
+  const { data: widgets = [], refetch: fetchWidgets } = useQuery({
+    queryKey: ['widgets'],
+    queryFn: async () => {
+      const response = await api.get('/widgets')
+      return (response.data.widgets || []) as any[]
+    },
+  })
+  const activeWidget = widgets[0]
 
   useEffect(() => {
     if (!activeWidget) return
@@ -26,17 +29,6 @@ export default function WidgetPage() {
     setPreviewMessage(activeWidget.greeting_message || 'Olá! Como podemos ajudar?')
     setPosition(activeWidget.position || 'bottom-right')
   }, [activeWidget?.id])
-
-  const fetchWidgets = async () => {
-    try {
-      const response = await api.get('/widgets')
-      setWidgets(response.data.widgets || [])
-    } catch (error) {
-      console.error('Error:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const getInstallScript = (widgetId: string) => {
     return `<script src="${process.env.NEXT_PUBLIC_API_URL}/widget/${widgetId}/embed.js"></script>`
@@ -52,7 +44,7 @@ export default function WidgetPage() {
         position,
       })
       toast.success('Widget criado')
-      fetchWidgets()
+      await fetchWidgets()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Erro ao criar widget')
     } finally {
@@ -75,7 +67,7 @@ export default function WidgetPage() {
         is_active: true,
       })
       toast.success('Widget salvo')
-      fetchWidgets()
+      await fetchWidgets()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Erro ao salvar widget')
     } finally {

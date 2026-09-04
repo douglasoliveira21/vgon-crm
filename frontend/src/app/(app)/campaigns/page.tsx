@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/auth'
 import { Plus, Send, Pause, Play, Users, Check, Eye, X, Trash2, AlertTriangle, FileText, Image, Video, Music, ArrowUp, ArrowDown, Mail, CalendarClock, ShieldCheck } from 'lucide-react'
@@ -42,44 +43,32 @@ interface Campaign {
 
 export default function CampaignsPage() {
   const { user } = useAuthStore()
-  const [campaigns, setCampaigns] = useState<Campaign[]>([])
-  const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null)
 
-  useEffect(() => {
-    fetchCampaigns()
-  }, [])
-
-  const hasSendingCampaign = campaigns.some((campaign) => campaign.status === 'sending')
-
-  useEffect(() => {
-    if (!hasSendingCampaign) return
-    const interval = setInterval(fetchCampaigns, 5000)
-    return () => clearInterval(interval)
-    // Only depends on whether a campaign is sending, not the whole `campaigns`
-    // array — otherwise every 5s poll (which updates `campaigns`) tore down
-    // and recreated this same interval instead of just letting it tick.
-  }, [hasSendingCampaign])
-
-  const fetchCampaigns = async () => {
-    try {
+  const {
+    data: campaigns = [],
+    isLoading: loading,
+    refetch: fetchCampaigns,
+  } = useQuery({
+    queryKey: ['campaigns'],
+    queryFn: async () => {
       const response = await api.get('/campaigns')
-      setCampaigns(response.data.campaigns || [])
-    } catch (error) {
-      console.error('Error:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+      return (response.data.campaigns || []) as Campaign[]
+    },
+    // Poll every 5s only while a campaign is actively sending — react-query
+    // recomputes this from the latest cached data on every tick, so it
+    // starts/stops cleanly without tearing down and recreating a timer.
+    refetchInterval: (query) => {
+      const data = query.state.data as Campaign[] | undefined
+      return data?.some((campaign) => campaign.status === 'sending') ? 5000 : false
+    },
+  })
 
   const startCampaign = async (id: string) => {
     try {
       const response = await api.post(`/campaigns/${id}/start`)
       const nextStatus = response.data?.status || 'sending'
-      setCampaigns((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, status: nextStatus } : c))
-      )
       toast.success(nextStatus === 'completed' ? 'Campanha concluída' : 'Campanha iniciada')
       fetchCampaigns()
     } catch (error: any) {
@@ -101,10 +90,8 @@ export default function CampaignsPage() {
   const pauseCampaign = async (id: string) => {
     try {
       await api.post(`/campaigns/${id}/pause`)
-      setCampaigns((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, status: 'paused' } : c))
-      )
       toast.success('Campanha pausada')
+      fetchCampaigns()
     } catch {
       toast.error('Erro ao pausar')
     }

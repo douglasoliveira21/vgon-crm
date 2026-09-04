@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef, type DragEvent, type MouseEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import ReactFlow, {
   Node,
@@ -218,8 +219,6 @@ export default function FlowEditorPage() {
   const [saving, setSaving] = useState(false)
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [showBlockPanel, setShowBlockPanel] = useState(true)
-  const [users, setUsers] = useState<AutomationUser[]>([])
-  const [teams, setTeams] = useState<AutomationTeam[]>([])
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null)
   const [contextMenu, setContextMenu] = useState<null | { x: number; y: number; type: 'node' | 'edge'; id: string }>(null)
   const canvasWrapperRef = useRef<HTMLDivElement | null>(null)
@@ -227,85 +226,86 @@ export default function FlowEditorPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
 
-  useEffect(() => {
-    if (!isNew) fetchFlow()
-    fetchAutomationOptions()
-  }, [flowId])
+  const { data: users = [] } = useQuery({
+    queryKey: ['automation-users'],
+    queryFn: async () => {
+      const response = await api.get('/users')
+      return ((response.data.users || []) as AutomationUser[]).filter((user) => user.is_active)
+    },
+  })
 
-  const fetchAutomationOptions = async () => {
-    try {
-      const [usersResponse, teamsResponse] = await Promise.all([
-        api.get('/users'),
-        api.get('/teams'),
-      ])
-      setUsers((usersResponse.data.users || []).filter((user: AutomationUser) => user.is_active))
-      setTeams((teamsResponse.data.teams || []).filter((team: AutomationTeam) => team.is_active))
-    } catch {
-      setUsers([])
-      setTeams([])
-    }
-  }
+  const { data: teams = [] } = useQuery({
+    queryKey: ['automation-teams'],
+    queryFn: async () => {
+      const response = await api.get('/teams')
+      return ((response.data.teams || []) as AutomationTeam[]).filter((team) => team.is_active)
+    },
+  })
 
-  const fetchFlow = async () => {
-    try {
+  const { data: flowData } = useQuery({
+    queryKey: ['bot-flow', flowId],
+    queryFn: async () => {
       const response = await api.get(`/bot-flows/${flowId}`)
-      const flow = response.data
-      if (flow) {
-        setName(flow.name || '')
-        setDescription(flow.description || '')
-        setBotName(flow.bot_name || 'Assistente')
-        setIsActive(flow.is_active || false)
-        setPriority(flow.priority ?? getDefaultFlowPriority(flow.trigger_type || 'trigger_new_conversation'))
-        setStopOnMatch(flow.stop_on_match ?? true)
+      return response.data
+    },
+    enabled: !isNew,
+  })
 
-        // Parse nodes - handle double-encoded strings
-        let parsedNodes: any[] = []
-        if (flow.nodes) {
-          let nodesData = flow.nodes
-          // If it's a string, parse it
-          if (typeof nodesData === 'string') {
-            try { nodesData = JSON.parse(nodesData) } catch {}
-          }
-          // If still a string (double encoded), parse again
-          if (typeof nodesData === 'string') {
-            try { nodesData = JSON.parse(nodesData) } catch {}
-          }
-          if (Array.isArray(nodesData)) {
-            parsedNodes = nodesData.map((n: any) => ({
-              ...n,
-              style: {
-                borderColor: getNodeColor(n.data?.nodeType || ''),
-                borderWidth: 2,
-                borderRadius: 12,
-                padding: 12,
-                fontSize: 13,
-                minWidth: 180,
-              },
-            }))
-          }
-        }
-        setNodes(parsedNodes)
+  useEffect(() => {
+    const flow = flowData
+    if (!flow) return
+    setName(flow.name || '')
+    setDescription(flow.description || '')
+    setBotName(flow.bot_name || 'Assistente')
+    setIsActive(flow.is_active || false)
+    setPriority(flow.priority ?? getDefaultFlowPriority(flow.trigger_type || 'trigger_new_conversation'))
+    setStopOnMatch(flow.stop_on_match ?? true)
 
-        // Parse edges
-        let parsedEdges: any[] = []
-        if (flow.edges) {
-          let edgesData = flow.edges
-          if (typeof edgesData === 'string') {
-            try { edgesData = JSON.parse(edgesData) } catch {}
-          }
-          if (typeof edgesData === 'string') {
-            try { edgesData = JSON.parse(edgesData) } catch {}
-          }
-          if (Array.isArray(edgesData)) {
-            parsedEdges = edgesData
-          }
-        }
-        setEdges(parsedEdges)
+    // Parse nodes - handle double-encoded strings
+    let parsedNodes: any[] = []
+    if (flow.nodes) {
+      let nodesData = flow.nodes
+      // If it's a string, parse it
+      if (typeof nodesData === 'string') {
+        try { nodesData = JSON.parse(nodesData) } catch {}
       }
-    } catch (err) {
-      console.error('Error loading flow:', err)
+      // If still a string (double encoded), parse again
+      if (typeof nodesData === 'string') {
+        try { nodesData = JSON.parse(nodesData) } catch {}
+      }
+      if (Array.isArray(nodesData)) {
+        parsedNodes = nodesData.map((n: any) => ({
+          ...n,
+          style: {
+            borderColor: getNodeColor(n.data?.nodeType || ''),
+            borderWidth: 2,
+            borderRadius: 12,
+            padding: 12,
+            fontSize: 13,
+            minWidth: 180,
+          },
+        }))
+      }
     }
-  }
+    setNodes(parsedNodes)
+
+    // Parse edges
+    let parsedEdges: any[] = []
+    if (flow.edges) {
+      let edgesData = flow.edges
+      if (typeof edgesData === 'string') {
+        try { edgesData = JSON.parse(edgesData) } catch {}
+      }
+      if (typeof edgesData === 'string') {
+        try { edgesData = JSON.parse(edgesData) } catch {}
+      }
+      if (Array.isArray(edgesData)) {
+        parsedEdges = edgesData
+      }
+    }
+    setEdges(parsedEdges)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flowData])
 
   const onConnect = useCallback((connection: Connection) => {
     const sourceNode = nodes.find((n) => n.id === connection.source)
@@ -797,11 +797,13 @@ function NodeConfigPanel({
 }) {
   const nodeType = node.data?.nodeType || ''
   const config = node.data?.config || {}
-  const [channels, setChannels] = useState<Array<{id: string; name: string; type: string; status: string}>>([])
-
-  useEffect(() => {
-    api.get('/channels').then(res => setChannels(res.data.channels || [])).catch(() => {})
-  }, [])
+  const { data: channels = [] } = useQuery({
+    queryKey: ['automation-node-channels'],
+    queryFn: async () => {
+      const response = await api.get('/channels')
+      return (response.data.channels || []) as Array<{ id: string; name: string; type: string; status: string }>
+    },
+  })
 
   // --- TRIGGER NODES ---
   if (nodeType === 'trigger_inbox_message') {

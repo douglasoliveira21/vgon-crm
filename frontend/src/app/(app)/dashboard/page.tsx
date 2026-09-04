@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '@/store/auth'
 import api from '@/lib/api'
 import {
@@ -65,21 +66,20 @@ const AUTO_REFRESH_MS = 60000
 
 export default function DashboardPage() {
   const { user } = useAuthStore()
-  const [data, setData] = useState<DashboardData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
   const [period, setPeriod] = useState('today')
   const [teamId, setTeamId] = useState('')
   const [channelId, setChannelId] = useState('')
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
-  const dashboardRequestRef = useRef(0)
 
-  const fetchDashboard = useCallback(async (silent = false) => {
-    const requestId = ++dashboardRequestRef.current
-    if (silent) setRefreshing(true)
-    else setLoading(true)
-    try {
+  const {
+    data,
+    isLoading: loading,
+    isError: error,
+    isFetching: refreshing,
+    dataUpdatedAt,
+    refetch,
+  } = useQuery({
+    queryKey: ['dashboard', period, teamId, channelId],
+    queryFn: async () => {
       const response = await api.get('/dashboard', {
         params: {
           period,
@@ -87,29 +87,12 @@ export default function DashboardPage() {
           channel_id: channelId || undefined,
         },
       })
-      if (requestId !== dashboardRequestRef.current) return
-      setData(response.data)
-      setLastUpdated(new Date())
-      setError(false)
-    } catch (error) {
-      console.error('Failed to fetch dashboard:', error)
-      if (requestId === dashboardRequestRef.current) setError(true)
-    } finally {
-      if (requestId === dashboardRequestRef.current) {
-        setLoading(false)
-        setRefreshing(false)
-      }
-    }
-  }, [period, teamId, channelId])
-
-  useEffect(() => {
-    fetchDashboard()
-  }, [fetchDashboard])
-
-  useEffect(() => {
-    const timer = setInterval(() => fetchDashboard(true), AUTO_REFRESH_MS)
-    return () => clearInterval(timer)
-  }, [fetchDashboard])
+      return response.data as DashboardData
+    },
+    refetchInterval: AUTO_REFRESH_MS,
+  })
+  const lastUpdated = dataUpdatedAt ? new Date(dataUpdatedAt) : null
+  const fetchDashboard = () => refetch()
 
   const maxPeak = useMemo(() => Math.max(...(data?.peak_hours || []).map((item) => item.total), 1), [data])
   const channelTotal = useMemo(() => (data?.channel_distribution || []).reduce((sum, item) => sum + item.total, 0), [data])
@@ -166,7 +149,7 @@ export default function DashboardPage() {
             <option value="">Todos os canais</option>
             {data?.channels?.map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}
           </select>
-          <button onClick={() => fetchDashboard(true)} className="btn-secondary">
+          <button onClick={() => fetchDashboard()} className="btn-secondary">
             <RefreshCw size={16} className={clsx(refreshing && 'animate-spin')} />
             Atualizar
           </button>

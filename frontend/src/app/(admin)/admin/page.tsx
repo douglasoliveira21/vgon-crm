@@ -1,8 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import api from '@/lib/api'
-import toast from 'react-hot-toast'
+import { useQuery } from '@tanstack/react-query'
 import {
   Building2,
   Users,
@@ -29,23 +28,13 @@ interface AdminStats {
 }
 
 export default function AdminDashboardPage() {
-  const [stats, setStats] = useState<AdminStats | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetchStats()
-  }, [])
-
-  const fetchStats = async () => {
-    try {
+  const { data: stats, isLoading: loading } = useQuery({
+    queryKey: ['admin-stats'],
+    queryFn: async () => {
       const response = await api.get('/admin/stats')
-      setStats(response.data)
-    } catch (error) {
-      toast.error('Erro ao carregar estatísticas')
-    } finally {
-      setLoading(false)
-    }
-  }
+      return response.data as AdminStats
+    },
+  })
 
   if (loading) {
     return (

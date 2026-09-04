@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Activity, AlertTriangle, CheckCircle2, LogOut, RefreshCw, ShieldAlert } from 'lucide-react'
 import { ChannelIcon } from '@/components/channel-icon'
@@ -23,18 +23,23 @@ type Security = { failed_logins_24h: number; super_admins: number; super_admins_
 type PlatformReadiness = { status: string; checks: Record<string, { status?: string; required?: boolean; pending?: number; processing?: number; dead?: number }> }
 type FailedJob = { id: string; tenant_name: string; job_type: string; attempts: number; last_error: string; failed_at: string }
 
-export default function OperationsPage() {
-  const [health, setHealth] = useState<Health[]>([])
-  const [incidents, setIncidents] = useState<Incident[]>([])
-  const [sessions, setSessions] = useState<Session[]>([])
-  const [security, setSecurity] = useState<Security | null>(null)
-  const [platformReadiness, setPlatformReadiness] = useState<PlatformReadiness | null>(null)
-  const [failedJobs, setFailedJobs] = useState<FailedJob[]>([])
-  const [loading, setLoading] = useState(true)
+type OperationsData = {
+  health: Health[]
+  incidents: Incident[]
+  sessions: Session[]
+  security: Security | null
+  platformReadiness: PlatformReadiness | null
+  failedJobs: FailedJob[]
+}
 
-  const load = async () => {
-    setLoading(true)
-    try {
+export default function OperationsPage() {
+  const {
+    data,
+    isLoading: loading,
+    refetch: load,
+  } = useQuery({
+    queryKey: ['admin-operations'],
+    queryFn: async () => {
       const [healthRes, incidentsRes, sessionsRes, securityRes, readinessRes, jobsRes] = await Promise.all([
         api.get('/admin/health'),
         api.get('/admin/incidents'),
@@ -43,27 +48,30 @@ export default function OperationsPage() {
         api.get('/health/ready'),
         api.get('/admin/jobs/dead-letter'),
       ])
-      setHealth(healthRes.data.tenants || [])
-      setIncidents(incidentsRes.data.incidents || [])
-      setSessions(sessionsRes.data.sessions || [])
-      setSecurity(securityRes.data)
-      setPlatformReadiness(readinessRes.data)
-      setFailedJobs(jobsRes.data.jobs || [])
-    } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Erro ao carregar operações')
-    } finally {
-      setLoading(false)
-    }
-  }
+      return {
+        health: healthRes.data.tenants || [],
+        incidents: incidentsRes.data.incidents || [],
+        sessions: sessionsRes.data.sessions || [],
+        security: securityRes.data,
+        platformReadiness: readinessRes.data,
+        failedJobs: jobsRes.data.jobs || [],
+      } as OperationsData
+    },
+  })
 
-  useEffect(() => { load() }, [])
+  const health = data?.health || []
+  const incidents = data?.incidents || []
+  const sessions = data?.sessions || []
+  const security = data?.security || null
+  const platformReadiness = data?.platformReadiness || null
+  const failedJobs = data?.failedJobs || []
 
   const revoke = async (id: string) => {
     if (!confirm('Encerrar esta sessão?')) return
     try {
       await api.delete(`/admin/sessions/${id}`)
-      setSessions((current) => current.filter((session) => session.id !== id))
       toast.success('Sessão revogada')
+      load()
     } catch {
       toast.error('Erro ao revogar sessão')
     }
@@ -98,7 +106,7 @@ export default function OperationsPage() {
           <h1 className="text-2xl font-bold text-white">Operações e Segurança</h1>
           <p className="mt-1 text-sm text-gray-400">Saúde dos tenants, incidentes e sessões ativas</p>
         </div>
-        <button onClick={load} disabled={loading} className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+        <button onClick={() => load()} disabled={loading} className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
           <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Atualizar
         </button>
       </div>

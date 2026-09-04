@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Plus, MoreVertical, DollarSign, Users, Edit2, Trash2, X, GripVertical } from 'lucide-react'
 
@@ -36,42 +37,43 @@ interface Deal {
 }
 
 export default function FunnelsPage() {
-  const [funnels, setFunnels] = useState<Funnel[]>([])
-  const [selectedFunnel, setSelectedFunnel] = useState<Funnel | null>(null)
-  const [deals, setDeals] = useState<Deal[]>([])
-  const [loading, setLoading] = useState(true)
+  const [selectedFunnelId, setSelectedFunnelId] = useState('')
   const [showCreateFunnel, setShowCreateFunnel] = useState(false)
   const [showCreateDeal, setShowCreateDeal] = useState(false)
   const [targetStageId, setTargetStageId] = useState('')
   const [dragDealId, setDragDealId] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetchFunnels()
-  }, [])
-
-  const fetchFunnels = async () => {
-    try {
+  const {
+    data: funnels = [],
+    isLoading: loading,
+    refetch: fetchFunnels,
+  } = useQuery({
+    queryKey: ['funnels'],
+    queryFn: async () => {
       const response = await api.get('/funnels')
-      const funnelList = response.data.funnels || []
-      setFunnels(funnelList)
-      if (funnelList.length > 0 && !selectedFunnel) {
-        setSelectedFunnel(funnelList[0])
-        fetchDeals(funnelList[0].id)
-      }
-    } catch (error) {
-      console.error('Error:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+      return (response.data.funnels || []) as Funnel[]
+    },
+  })
 
-  const fetchDeals = async (funnelId: string) => {
-    try {
-      const response = await api.get('/deals', { params: { funnel_id: funnelId } })
-      setDeals(response.data.deals || [])
-    } catch (error) {
-      console.error('Error:', error)
+  useEffect(() => {
+    if (funnels.length > 0 && !selectedFunnelId) {
+      setSelectedFunnelId(funnels[0].id)
     }
+  }, [funnels, selectedFunnelId])
+
+  const selectedFunnel = funnels.find((f) => f.id === selectedFunnelId) || null
+
+  const { data: deals = [], refetch: fetchDealsQuery } = useQuery({
+    queryKey: ['deals', selectedFunnelId],
+    queryFn: async () => {
+      const response = await api.get('/deals', { params: { funnel_id: selectedFunnelId } })
+      return (response.data.deals || []) as Deal[]
+    },
+    enabled: !!selectedFunnelId,
+  })
+
+  const fetchDeals = (funnelId: string) => {
+    setSelectedFunnelId(funnelId)
   }
 
   const createDeal = async (data: { title: string; value: number; contact_id: string; contact_name: string }) => {
@@ -86,7 +88,7 @@ export default function FunnelsPage() {
       })
       toast.success('Oportunidade criada')
       setShowCreateDeal(false)
-      fetchDeals(selectedFunnel.id)
+      fetchDealsQuery()
       fetchFunnels()
     } catch {
       toast.error('Erro ao criar')
@@ -96,9 +98,7 @@ export default function FunnelsPage() {
   const moveDeal = async (dealId: string, newStageId: string) => {
     try {
       await api.put(`/deals/${dealId}/stage`, { stage_id: newStageId })
-      setDeals((prev) =>
-        prev.map((d) => (d.id === dealId ? { ...d, stage_id: newStageId } : d))
-      )
+      fetchDealsQuery()
       fetchFunnels() // Update counts
     } catch {
       toast.error('Erro ao mover')
@@ -109,8 +109,8 @@ export default function FunnelsPage() {
     if (!confirm('Remover esta oportunidade?')) return
     try {
       await api.put(`/deals/${dealId}`, { status: 'lost', loss_reason: 'Removido' })
-      setDeals((prev) => prev.filter((d) => d.id !== dealId))
       toast.success('Oportunidade removida')
+      fetchDealsQuery()
       fetchFunnels()
     } catch {
       toast.error('Erro ao remover')
@@ -121,12 +121,11 @@ export default function FunnelsPage() {
     if (!confirm('Remover este funil e todas as oportunidades?')) return
     try {
       await api.delete(`/funnels/${funnelId}`)
-      setFunnels((prev) => prev.filter((f) => f.id !== funnelId))
-      if (selectedFunnel?.id === funnelId) {
-        setSelectedFunnel(null)
-        setDeals([])
+      if (selectedFunnelId === funnelId) {
+        setSelectedFunnelId('')
       }
       toast.success('Funil removido')
+      fetchFunnels()
     } catch {
       toast.error('Erro ao remover')
     }
@@ -161,7 +160,7 @@ export default function FunnelsPage() {
             {funnels.map((funnel) => (
               <button
                 key={funnel.id}
-                onClick={() => { setSelectedFunnel(funnel); fetchDeals(funnel.id) }}
+                onClick={() => fetchDeals(funnel.id)}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                   selectedFunnel?.id === funnel.id
                     ? 'bg-primary-100 text-primary-700'
@@ -423,20 +422,20 @@ function CreateDealModal({ onClose, onCreated }: { onClose: () => void; onCreate
   const [value, setValue] = useState('')
   const [contactSearch, setContactSearch] = useState('')
   const [selectedContact, setSelectedContact] = useState<{id: string; name: string; phone: string} | null>(null)
-  const [contacts, setContacts] = useState<Array<{id: string; name: string; phone: string}>>([])
   const [showContactResults, setShowContactResults] = useState(false)
-  const contactSearchRequestRef = useRef(0)
 
-  const searchContacts = async (query: string) => {
+  const { data: contacts = [] } = useQuery({
+    queryKey: ['funnel-deal-contact-search', contactSearch],
+    queryFn: async () => {
+      const response = await api.get('/contacts', { params: { search: contactSearch, limit: 5 } })
+      return ((response.data.contacts || []) as any[]).map((c: any) => ({ id: c.id, name: c.name || c.phone, phone: c.phone })) as Array<{id: string; name: string; phone: string}>
+    },
+    enabled: contactSearch.length >= 2,
+  })
+
+  const searchContacts = (query: string) => {
     setContactSearch(query)
-    if (query.length < 2) { setContacts([]); setShowContactResults(false); return }
-    const requestId = ++contactSearchRequestRef.current
-    try {
-      const response = await api.get('/contacts', { params: { search: query, limit: 5 } })
-      if (requestId !== contactSearchRequestRef.current) return
-      setContacts((response.data.contacts || []).map((c: any) => ({ id: c.id, name: c.name || c.phone, phone: c.phone })))
-      setShowContactResults(true)
-    } catch {}
+    setShowContactResults(query.length >= 2)
   }
 
   return (

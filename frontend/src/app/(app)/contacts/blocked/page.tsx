@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Ban, Loader2, Search, Unlock } from 'lucide-react'
 import { SafeImage } from '@/components/safe-image'
@@ -10,26 +11,18 @@ const PAGE_SIZE = 25
 type BlockedContact = { id: string; name?: string; phone?: string; email?: string; avatar_url?: string }
 
 export default function BlockedContactsPage() {
-  const [contacts, setContacts] = useState<BlockedContact[]>([])
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const requestRef = useRef(0)
 
-  const loadContacts = async () => {
-    const requestId = ++requestRef.current
-    setLoading(true)
-    try {
+  const { data, isLoading: loading, refetch: loadContacts } = useQuery({
+    queryKey: ['blocked-contacts', search, page],
+    queryFn: async () => {
       const response = await api.get('/contacts', { params: { blocked: true, search, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE } })
-      if (requestId !== requestRef.current) return
-      setContacts(response.data.contacts || [])
-      setTotal(response.data.total || 0)
-    } catch { if (requestId === requestRef.current) toast.error('Erro ao carregar contatos bloqueados') }
-    finally { if (requestId === requestRef.current) setLoading(false) }
-  }
-
-  useEffect(() => { loadContacts() }, [search, page])
+      return { contacts: (response.data.contacts || []) as BlockedContact[], total: response.data.total || 0 }
+    },
+  })
+  const contacts = data?.contacts || []
+  const total = data?.total || 0
 
   const unblock = async (contact: BlockedContact) => {
     if (!confirm(`Desbloquear ${contact.name || contact.phone || 'este contato'}?`)) return

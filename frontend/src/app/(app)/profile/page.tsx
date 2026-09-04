@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useAuthStore } from '@/store/auth'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Camera, Circle, KeyRound, Mail, MonitorSmartphone, Phone, Save, ShieldCheck, Trash2, User } from 'lucide-react'
 import { SafeImage } from '@/components/safe-image'
@@ -41,17 +42,15 @@ export default function ProfilePage() {
   const [twoFactorSecret, setTwoFactorSecret] = useState('')
   const [twoFactorCode, setTwoFactorCode] = useState('')
   const [twoFactorPassword, setTwoFactorPassword] = useState('')
-  const [sessions, setSessions] = useState<Session[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const loadSessions = async () => {
-    const response = await api.get('/me/sessions')
-    setSessions(response.data.sessions || [])
-  }
-
-  useEffect(() => {
-    void loadSessions()
-  }, [])
+  const { data: sessions = [], refetch: loadSessions } = useQuery({
+    queryKey: ['me-sessions'],
+    queryFn: async () => {
+      const response = await api.get('/me/sessions')
+      return (response.data.sessions || []) as Session[]
+    },
+  })
 
   const beginTwoFactor = async () => {
     try {

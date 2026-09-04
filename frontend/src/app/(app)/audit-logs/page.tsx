@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { FileText, RefreshCw, Search, ShieldCheck } from 'lucide-react'
 
@@ -30,27 +31,21 @@ const actionLabels: Record<string, string> = {
 }
 
 export default function AuditLogsPage() {
-  const [logs, setLogs] = useState<AuditLog[]>([])
-  const [loading, setLoading] = useState(true)
   const [action, setAction] = useState('')
 
-  useEffect(() => {
-    fetchLogs()
-  }, [])
-
-  const fetchLogs = async () => {
-    setLoading(true)
-    try {
+  const {
+    data: logs = [],
+    isLoading: loading,
+    refetch: fetchLogs,
+  } = useQuery({
+    queryKey: ['audit-logs'],
+    queryFn: async () => {
       const response = await api.get('/audit-logs', {
         params: { limit: 150, action: action || undefined },
       })
-      setLogs(response.data.logs || [])
-    } catch {
-      setLogs([])
-    } finally {
-      setLoading(false)
-    }
-  }
+      return (response.data.logs || []) as AuditLog[]
+    },
+  })
 
   const verifyIntegrity = async () => {
     try {
@@ -84,7 +79,7 @@ export default function AuditLogsPage() {
           <button type="button" onClick={verifyIntegrity} className="btn-secondary">
             <ShieldCheck size={16} /> Verificar integridade
           </button>
-          <button type="button" onClick={fetchLogs} className="btn-secondary">
+          <button type="button" onClick={() => fetchLogs()} className="btn-secondary">
             <RefreshCw size={16} /> Atualizar
           </button>
         </div>

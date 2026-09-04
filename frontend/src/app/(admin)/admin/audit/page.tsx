@@ -2,30 +2,27 @@
 
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
-import toast from 'react-hot-toast'
+import { useQuery } from '@tanstack/react-query'
 import { Search } from 'lucide-react'
 
 type Audit = { id: string; action: string; entity_type: string; tenant_name: string; user_name: string; user_email: string; ip_address: string; metadata?: Record<string, unknown>; created_at: string }
 
 export default function GlobalAuditPage() {
-  const [logs, setLogs] = useState<Audit[]>([])
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
+  const [debouncedSearch, setDebouncedSearch] = useState('')
 
   useEffect(() => {
-    const timer = setTimeout(async () => {
-      setLoading(true)
-      try {
-        const response = await api.get('/admin/audit-logs', { params: { search, limit: 300 } })
-        setLogs(response.data.logs || [])
-      } catch {
-        toast.error('Erro ao carregar auditoria')
-      } finally {
-        setLoading(false)
-      }
-    }, 250)
+    const timer = setTimeout(() => setDebouncedSearch(search), 250)
     return () => clearTimeout(timer)
   }, [search])
+
+  const { data: logs = [], isLoading: loading } = useQuery({
+    queryKey: ['admin-audit-logs', debouncedSearch],
+    queryFn: async () => {
+      const response = await api.get('/admin/audit-logs', { params: { search: debouncedSearch, limit: 300 } })
+      return (response.data.logs || []) as Audit[]
+    },
+  })
 
   return (
     <div>

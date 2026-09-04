@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Bell, Building, MessageSquare, Monitor, Moon, Play, Sun, Tag, Volume2 } from 'lucide-react'
 import { useAppearanceStore } from '@/store/appearance'
@@ -397,20 +398,16 @@ function NotificationSoundSettings() {
 }
 
 function TagsManager() {
-  const [tags, setTags] = useState<Array<{id: string; name: string; color: string}>>([])
   const [newTag, setNewTag] = useState('')
   const [newColor, setNewColor] = useState('#3B82F6')
 
-  useEffect(() => {
-    fetchTags()
-  }, [])
-
-  const fetchTags = async () => {
-    try {
+  const { data: tags = [], refetch: fetchTags } = useQuery({
+    queryKey: ['tags'],
+    queryFn: async () => {
       const res = await api.get('/tags')
-      setTags(res.data.tags || [])
-    } catch {}
-  }
+      return (res.data.tags || []) as Array<{ id: string; name: string; color: string }>
+    },
+  })
 
   const createTag = async () => {
     if (!newTag.trim()) return
@@ -418,7 +415,7 @@ function TagsManager() {
       await api.post('/tags', { name: newTag, color: newColor })
       toast.success('Tag criada')
       setNewTag('')
-      fetchTags()
+      await fetchTags()
     } catch {
       toast.error('Erro ao criar tag')
     }
@@ -428,8 +425,8 @@ function TagsManager() {
     if (!confirm('Remover esta tag?')) return
     try {
       await api.delete(`/tags/${id}`)
-      setTags(tags.filter(t => t.id !== id))
       toast.success('Tag removida')
+      await fetchTags()
     } catch {
       toast.error('Erro ao remover')
     }

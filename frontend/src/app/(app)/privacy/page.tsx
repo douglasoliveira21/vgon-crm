@@ -1,9 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Ban, CheckCircle2, Clock3, Plus, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 
 type PrivacyRequest = {
   id: string
@@ -28,39 +29,40 @@ type Suppression = {
 const requestLabels = { access: 'Acesso aos dados', correction: 'Correção', deletion: 'Exclusão' }
 
 export default function PrivacyPage() {
-  const [requests, setRequests] = useState<PrivacyRequest[]>([])
-  const [suppressions, setSuppressions] = useState<Suppression[]>([])
   const [retentionDays, setRetentionDays] = useState(730)
   const [retentionActive, setRetentionActive] = useState(false)
-  const [loading, setLoading] = useState(true)
   const [requestForm, setRequestForm] = useState({ request_type: 'access', requester_name: '', requester_email: '', notes: '' })
   const [suppressionForm, setSuppressionForm] = useState({ channel: 'email', destination: '', reason: '' })
 
-  const loadData = useCallback(async () => {
-    setLoading(true)
-    try {
+  const {
+    data,
+    isLoading: loading,
+    refetch: loadData,
+  } = useQuery({
+    queryKey: ['privacy'],
+    queryFn: async () => {
       const [requestResponse, suppressionResponse, retentionResponse] = await Promise.all([
         api.get('/privacy/requests'),
         api.get('/campaigns/suppressions'),
         api.get('/privacy/retention'),
       ])
-      setRequests(requestResponse.data.requests || [])
-      setSuppressions(suppressionResponse.data.suppressions || [])
       const policy = (retentionResponse.data.policies || []).find((item: any) => item.resource_type === 'inactive_contacts')
-      if (policy) {
-        setRetentionDays(policy.retention_days)
-        setRetentionActive(policy.is_active)
+      return {
+        requests: (requestResponse.data.requests || []) as PrivacyRequest[],
+        suppressions: (suppressionResponse.data.suppressions || []) as Suppression[],
+        policy,
       }
-    } catch (error: any) {
-      toast.error(error.response?.data?.error || 'Erro ao carregar controles de privacidade')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+    },
+  })
+  const requests = data?.requests || []
+  const suppressions = data?.suppressions || []
 
   useEffect(() => {
-    loadData()
-  }, [loadData])
+    if (data?.policy) {
+      setRetentionDays(data.policy.retention_days)
+      setRetentionActive(data.policy.is_active)
+    }
+  }, [data])
 
   const createRequest = async () => {
     if (!requestForm.requester_name && !requestForm.requester_email) {
@@ -71,7 +73,7 @@ export default function PrivacyPage() {
       await api.post('/privacy/requests', requestForm)
       setRequestForm({ request_type: 'access', requester_name: '', requester_email: '', notes: '' })
       toast.success('Solicitação registrada com prazo de 15 dias')
-      loadData()
+      await loadData()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Erro ao registrar solicitação')
     }
@@ -81,7 +83,7 @@ export default function PrivacyPage() {
     try {
       await api.put(`/privacy/requests/${request.id}`, { status: 'completed', notes: 'Atendimento concluído' })
       toast.success('Solicitação concluída')
-      loadData()
+      await loadData()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Erro ao concluir solicitação')
     }
@@ -109,7 +111,7 @@ export default function PrivacyPage() {
       await api.post('/campaigns/suppressions', suppressionForm)
       setSuppressionForm({ ...suppressionForm, destination: '', reason: '' })
       toast.success('Destino adicionado à lista de supressão')
-      loadData()
+      await loadData()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Erro ao adicionar supressão')
     }
@@ -119,7 +121,7 @@ export default function PrivacyPage() {
     try {
       await api.delete(`/campaigns/suppressions/${id}`)
       toast.success('Supressão removida')
-      loadData()
+      await loadData()
     } catch (error: any) {
       toast.error(error.response?.data?.error || 'Erro ao remover supressão')
     }
@@ -132,7 +134,7 @@ export default function PrivacyPage() {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Privacidade e LGPD</h1>
           <p className="mt-1 text-sm text-gray-500">Solicitações dos titulares, retenção e bloqueios de marketing.</p>
         </div>
-        <button type="button" onClick={loadData} className="btn-secondary" disabled={loading}>
+        <button type="button" onClick={() => loadData()} className="btn-secondary" disabled={loading}>
           <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Atualizar
         </button>
       </div>

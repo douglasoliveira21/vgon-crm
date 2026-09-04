@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import {
   ArrowLeft,
@@ -51,10 +52,27 @@ export default function TenantUsersPage() {
   const router = useRouter()
   const tenantId = params.id as string
 
-  const [tenant, setTenant] = useState<TenantInfo | null>(null)
-  const [stats, setStats] = useState<TenantStats | null>(null)
-  const [users, setUsers] = useState<TenantUser[]>([])
-  const [loading, setLoading] = useState(true)
+  const { data: tenantDetails, refetch: fetchTenantDetails } = useQuery({
+    queryKey: ['admin-tenant', tenantId],
+    queryFn: async () => {
+      const res = await api.get(`/admin/tenants/${tenantId}`)
+      return { tenant: res.data.tenant as TenantInfo, stats: res.data.stats as TenantStats }
+    },
+  })
+  const tenant = tenantDetails?.tenant || null
+  const stats = tenantDetails?.stats || null
+
+  const {
+    data: users = [],
+    isLoading: loading,
+    refetch: fetchUsers,
+  } = useQuery({
+    queryKey: ['admin-tenant-users', tenantId],
+    queryFn: async () => {
+      const res = await api.get(`/admin/tenants/${tenantId}/users`)
+      return (res.data.users || []) as TenantUser[]
+    },
+  })
 
   // Modals
   const [showCreateUser, setShowCreateUser] = useState(false)
@@ -66,32 +84,6 @@ export default function TenantUsersPage() {
   const [createForm, setCreateForm] = useState({ name: '', email: '', password: '', role: 'agent' })
   const [newPassword, setNewPassword] = useState('')
   const [editForm, setEditForm] = useState({ name: '', email: '', role: 'agent' })
-
-  useEffect(() => {
-    fetchTenantDetails()
-    fetchUsers()
-  }, [tenantId])
-
-  const fetchTenantDetails = async () => {
-    try {
-      const res = await api.get(`/admin/tenants/${tenantId}`)
-      setTenant(res.data.tenant)
-      setStats(res.data.stats)
-    } catch {
-      toast.error('Erro ao carregar dados da empresa')
-    }
-  }
-
-  const fetchUsers = async () => {
-    try {
-      const res = await api.get(`/admin/tenants/${tenantId}/users`)
-      setUsers(res.data.users || [])
-    } catch {
-      toast.error('Erro ao carregar usuários')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault()

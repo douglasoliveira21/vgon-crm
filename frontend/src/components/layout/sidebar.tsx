@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useAuthStore } from '@/store/auth'
 import { useAppearanceStore } from '@/store/appearance'
 import api from '@/lib/api'
+import { useQuery } from '@tanstack/react-query'
 import wsService from '@/lib/websocket'
 import toast from 'react-hot-toast'
 import {
@@ -115,8 +116,6 @@ export default function Sidebar() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const [hasImpersonationSession, setHasImpersonationSession] = useState(false)
   const [expandedSections, setExpandedSections] = useState<{ conversations: boolean; contacts: boolean; teams: boolean }>({ conversations: true, contacts: false, teams: false })
-  const [conversationCounts, setConversationCounts] = useState({ mine: 0, unassigned: 0, all: 0, mentions: 0 })
-  const [teams, setTeams] = useState<SidebarTeam[]>([])
   const profileMenuRef = useRef<HTMLDivElement>(null)
   const refreshTimerRef = useRef<NodeJS.Timeout | null>(null)
 	const sidebarExpanded = sidebarPinned || sidebarHovered
@@ -155,12 +154,12 @@ export default function Sidebar() {
 
   const countUnread = (items: SidebarConversation[]) => items.reduce((sum, item) => sum + (item.unread_count || 0), 0)
 
-  const fetchSidebarCounters = async () => {
-    if (!user?.id) return
-    try {
+  const { data: sidebarData, refetch: fetchSidebarCounters } = useQuery({
+    queryKey: ['sidebar-counters', user?.id, user?.name, user?.email],
+    queryFn: async () => {
       const status = 'open,in_progress,pending'
       const [mineRes, unassignedRes, allRes, teamsRes] = await Promise.all([
-        api.get('/conversations', { params: { assigned_to: user.id, status, limit: 200 } }),
+        api.get('/conversations', { params: { assigned_to: user!.id, status, limit: 200 } }),
         api.get('/conversations', { params: { unassigned: 'true', status, limit: 200 } }),
         api.get('/conversations', { params: { status, limit: 200 } }),
         api.get('/teams'),
@@ -169,7 +168,7 @@ export default function Sidebar() {
       const mine = (mineRes.data.conversations || []) as SidebarConversation[]
       const unassigned = (unassignedRes.data.conversations || []) as SidebarConversation[]
       const all = (allRes.data.conversations || []) as SidebarConversation[]
-      const userTokens = [user.name, user.email?.split('@')[0]]
+      const userTokens = [user?.name, user?.email?.split('@')[0]]
         .filter(Boolean)
         .map((value) => `@${String(value).toLowerCase()}`)
       const mentions = all.filter((conversation) => {
@@ -177,15 +176,21 @@ export default function Sidebar() {
         return userTokens.some((token) => preview.includes(token))
       })
 
-      setConversationCounts({
-        mine: countUnread(mine),
-        unassigned: countUnread(unassigned),
-        all: countUnread(all),
-        mentions: countUnread(mentions),
-      })
-      setTeams((teamsRes.data.teams || []).filter((team: SidebarTeam) => team.is_active !== false))
-    } catch {}
-  }
+      return {
+        conversationCounts: {
+          mine: countUnread(mine),
+          unassigned: countUnread(unassigned),
+          all: countUnread(all),
+          mentions: countUnread(mentions),
+        },
+        teams: (teamsRes.data.teams || []).filter((team: SidebarTeam) => team.is_active !== false) as SidebarTeam[],
+      }
+    },
+    enabled: !!user?.id,
+    refetchInterval: 30000,
+  })
+  const conversationCounts = sidebarData?.conversationCounts || { mine: 0, unassigned: 0, all: 0, mentions: 0 }
+  const teams = sidebarData?.teams || []
 
   const scheduleSidebarRefresh = () => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
@@ -206,18 +211,15 @@ export default function Sidebar() {
   }, [])
 
   useEffect(() => {
-    fetchSidebarCounters()
-    const interval = setInterval(fetchSidebarCounters, 30000)
     const handleNewMessage = () => scheduleSidebarRefresh()
     wsService.on('new_message', handleNewMessage)
     return () => {
-      clearInterval(interval)
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
       wsService.off('new_message', handleNewMessage)
     }
-    // Re-run (and rebuild fetchSidebarCounters' closure) whenever the fields
-    // it reads from `user` change, not just user.id — otherwise a profile
-    // rename/email change keeps computing @mentions against the stale name.
+    // Re-run whenever the fields fetchSidebarCounters reads from `user`
+    // change, not just user.id — otherwise a profile rename/email change
+    // keeps computing @mentions against the stale name.
   }, [user?.id, user?.name, user?.email])
 
   useEffect(() => {
