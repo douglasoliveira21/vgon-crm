@@ -246,6 +246,7 @@ export default function ConversationsPage() {
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const recordingAudioCtxRef = useRef<AudioContext | null>(null)
   const recordingLevelIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const recordingCancelledRef = useRef(false)
 
   // Quick replies
   const [quickReplies, setQuickReplies] = useState<{ id: string; shortcut: string; title: string | null; content: string; category: string | null }[]>([])
@@ -750,15 +751,25 @@ export default function ConversationsPage() {
       const mediaRecorder = new MediaRecorder(stream)
       mediaRecorderRef.current = mediaRecorder
       audioChunksRef.current = []
+      recordingCancelledRef.current = false
 
       mediaRecorder.ondataavailable = (event) => {
+        // stop() still delivers one final chunk asynchronously, after
+        // cancelRecording() has already run — check the cancel flag here
+        // (not just clear the array in cancelRecording) or that last chunk
+        // silently slips back in and gets sent anyway.
+        if (recordingCancelledRef.current) return
         audioChunksRef.current.push(event.data)
       }
 
       mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/ogg' })
         stream.getTracks().forEach((track) => track.stop())
         stopRecordingLevelMeter()
+        if (recordingCancelledRef.current) {
+          audioChunksRef.current = []
+          return
+        }
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/ogg' })
         await sendAudioMessage(audioBlob)
       }
 
@@ -819,6 +830,7 @@ export default function ConversationsPage() {
 
   const cancelRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
+      recordingCancelledRef.current = true
       mediaRecorderRef.current.stop()
       audioChunksRef.current = []
       setIsRecording(false)
