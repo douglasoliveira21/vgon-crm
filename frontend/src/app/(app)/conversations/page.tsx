@@ -2251,29 +2251,45 @@ function AudioMessagePlayer({ id, src, isOwn, onError }: { id: string; src: stri
   // MediaRecorder-produced audio (no duration in the streamed container),
   // which also breaks seeking via currentTime. The standard workaround is to
   // seek near the end once so the browser scans the file and corrects it.
+  // This must run as a SINGLE idempotent process shared by mount and by
+  // click-to-seek — running it twice independently races two "seek to 1e101,
+  // then reset to 0" cycles against each other, and whichever finishes last
+  // wins, silently snapping playback back to 0 (sounding like a restart)
+  // even after the user had already clicked a specific point.
+  const durationFixedRef = useRef(false)
+  const durationFixPromiseRef = useRef<Promise<void> | null>(null)
+  const ensureFiniteDuration = (): Promise<void> => {
+    const audio = audioRef.current
+    if (!audio) return Promise.resolve()
+    if (durationFixedRef.current || (isFinite(audio.duration) && audio.duration > 0)) {
+      durationFixedRef.current = true
+      if (isFinite(audio.duration) && audio.duration > 0) setDuration(audio.duration)
+      return Promise.resolve()
+    }
+    if (durationFixPromiseRef.current) return durationFixPromiseRef.current
+    durationFixPromiseRef.current = new Promise<void>((resolve) => {
+      const onTimeUpdate = () => {
+        audio.currentTime = 0
+        audio.removeEventListener('timeupdate', onTimeUpdate)
+        durationFixedRef.current = true
+        durationFixPromiseRef.current = null
+        if (isFinite(audio.duration) && audio.duration > 0) setDuration(audio.duration)
+        resolve()
+      }
+      audio.addEventListener('timeupdate', onTimeUpdate)
+      audio.currentTime = 1e101
+    })
+    return durationFixPromiseRef.current
+  }
+
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
-    const fixDuration = () => {
-      if (audio.duration === Infinity || isNaN(audio.duration)) {
-        audio.currentTime = 1e101
-        const onTimeUpdate = () => {
-          audio.currentTime = 0
-          audio.removeEventListener('timeupdate', onTimeUpdate)
-          if (isFinite(audio.duration) && audio.duration > 0) setDuration(audio.duration)
-        }
-        audio.addEventListener('timeupdate', onTimeUpdate)
-      } else if (isFinite(audio.duration) && audio.duration > 0) {
-        setDuration(audio.duration)
-      }
-    }
-    audio.addEventListener('loadedmetadata', fixDuration)
-    audio.addEventListener('durationchange', fixDuration)
+    const onLoadedMetadata = () => { ensureFiniteDuration() }
+    audio.addEventListener('loadedmetadata', onLoadedMetadata)
     audio.load()
-    return () => {
-      audio.removeEventListener('loadedmetadata', fixDuration)
-      audio.removeEventListener('durationchange', fixDuration)
-    }
+    return () => audio.removeEventListener('loadedmetadata', onLoadedMetadata)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src])
 
   const togglePlay = () => {
@@ -2283,24 +2299,15 @@ function AudioMessagePlayer({ id, src, isOwn, onError }: { id: string; src: stri
     else audio.play().catch(() => {})
   }
 
-  const seekToRatio = (ratio: number) => {
+  const seekToRatio = async (ratio: number) => {
     const audio = audioRef.current
     if (!audio || !duration) return
     const clamped = Math.max(0, Math.min(1, ratio))
     const target = clamped * duration
-    // If the browser hasn't resolved a real (finite) duration on the element
-    // yet, currentTime writes are silently ignored — fall back to the
-    // Infinity-duration seek trick to force it, then apply the real seek.
-    if (audio.duration === Infinity || isNaN(audio.duration)) {
-      audio.currentTime = 1e101
-      const onTimeUpdate = () => {
-        audio.currentTime = target
-        audio.removeEventListener('timeupdate', onTimeUpdate)
-      }
-      audio.addEventListener('timeupdate', onTimeUpdate)
-    } else {
-      audio.currentTime = target
-    }
+    // Wait for the (possibly already in-flight) duration fix to finish
+    // before applying the real seek, instead of racing a second attempt.
+    await ensureFiniteDuration()
+    audio.currentTime = target
     setCurrentTime(target)
     // Clicking a point on the waveform should start listening from there,
     // like WhatsApp — not just move the cursor while staying paused.
