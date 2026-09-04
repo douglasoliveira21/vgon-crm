@@ -69,7 +69,7 @@ func (s *MessageService) GetConversationMessages(conversationID, companyID strin
 		LEFT JOIN users u ON m.sender_type = 'user' AND m.sender_id = u.id
 		LEFT JOIN contacts c ON m.sender_type = 'contact' AND m.sender_id = c.id
 		WHERE m.conversation_id = $1 AND m.company_id = $2
-		ORDER BY m.created_at ASC
+		ORDER BY m.created_at DESC, m.id DESC
 		LIMIT $3 OFFSET $4
 	`, conversationID, companyID, limit, offset)
 	if err != nil {
@@ -93,6 +93,14 @@ func (s *MessageService) GetConversationMessages(conversationID, companyID strin
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("failed to read messages: %w", err)
+	}
+
+	// The query above is anchored to the most recent message (DESC) so that
+	// offset-based pagination ("load older") walks backward through history
+	// starting from "now" instead of starting at the oldest message ever sent.
+	// Reverse back to ascending order, which is what the chat UI renders.
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
 	}
 
 	return messages, nil

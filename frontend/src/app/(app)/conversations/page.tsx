@@ -176,6 +176,17 @@ interface CustomerCompany {
   name: string
 }
 
+// Incoming WebSocket messages aren't guaranteed to arrive in chronological
+// order (e.g. a text message can be broadcast before an earlier media
+// message that took longer to download/scan), so appending blindly at the
+// end can visually scramble the conversation. Insert by created_at instead.
+function insertMessageInOrder(list: Message[], message: Message): Message[] {
+  const newTime = new Date(message.created_at).getTime()
+  const insertAt = list.findIndex((m) => new Date(m.created_at).getTime() > newTime)
+  if (insertAt === -1) return [...list, message]
+  return [...list.slice(0, insertAt), message, ...list.slice(insertAt)]
+}
+
 export default function ConversationsPage() {
   const { user } = useAuthStore()
   const searchParams = useSearchParams()
@@ -330,13 +341,13 @@ export default function ConversationsPage() {
             const withoutTemp = prev.filter((m) => !m.id.startsWith('temp-'))
             const exists = withoutTemp.find((m) => m.id === data.id)
             if (exists) return withoutTemp
-            return [...withoutTemp, data]
+            return insertMessageInOrder(withoutTemp, data)
           })
         } else {
           setMessages((prev) => {
             const exists = prev.find((m) => m.id === data.id)
             if (exists) return prev
-            return [...prev, data]
+            return insertMessageInOrder(prev, data)
           })
         }
         scrollToBottom()
