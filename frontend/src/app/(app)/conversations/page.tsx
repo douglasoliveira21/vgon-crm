@@ -2228,6 +2228,14 @@ function AudioMessagePlayer({ id, src, isOwn, onError }: { id: string; src: stri
         }
         const max = Math.max(...values, 0.0001)
         if (!cancelled) setDecodedPeaks(values.map((v) => Math.max(0.15, v / max)))
+        // Voice notes recorded via MediaRecorder have no duration in their
+        // container header, so the <audio> element reports duration as
+        // Infinity/NaN until "fixed" (see the effect below). decodeAudioData
+        // reads the whole file and always knows the real duration, so use it
+        // as an immediate, reliable source while that fix is pending.
+        if (!cancelled && isFinite(audioBuffer.duration) && audioBuffer.duration > 0) {
+          setDuration((prev) => (prev > 0 && isFinite(prev) ? prev : audioBuffer.duration))
+        }
       })
       .catch(() => {
         // Keep the deterministic fallback waveform — playback still works
@@ -2237,6 +2245,35 @@ function AudioMessagePlayer({ id, src, isOwn, onError }: { id: string; src: stri
         try { ctx.close() } catch {}
       })
     return () => { cancelled = true }
+  }, [src])
+
+  // Chrome (and some other browsers) report duration as Infinity/NaN for
+  // MediaRecorder-produced audio (no duration in the streamed container),
+  // which also breaks seeking via currentTime. The standard workaround is to
+  // seek near the end once so the browser scans the file and corrects it.
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+    const fixDuration = () => {
+      if (audio.duration === Infinity || isNaN(audio.duration)) {
+        audio.currentTime = 1e101
+        const onTimeUpdate = () => {
+          audio.currentTime = 0
+          audio.removeEventListener('timeupdate', onTimeUpdate)
+          if (isFinite(audio.duration) && audio.duration > 0) setDuration(audio.duration)
+        }
+        audio.addEventListener('timeupdate', onTimeUpdate)
+      } else if (isFinite(audio.duration) && audio.duration > 0) {
+        setDuration(audio.duration)
+      }
+    }
+    audio.addEventListener('loadedmetadata', fixDuration)
+    audio.addEventListener('durationchange', fixDuration)
+    audio.load()
+    return () => {
+      audio.removeEventListener('loadedmetadata', fixDuration)
+      audio.removeEventListener('durationchange', fixDuration)
+    }
   }, [src])
 
   const togglePlay = () => {
@@ -2250,8 +2287,21 @@ function AudioMessagePlayer({ id, src, isOwn, onError }: { id: string; src: stri
     const audio = audioRef.current
     if (!audio || !duration) return
     const clamped = Math.max(0, Math.min(1, ratio))
-    audio.currentTime = clamped * duration
-    setCurrentTime(clamped * duration)
+    const target = clamped * duration
+    // If the browser hasn't resolved a real (finite) duration on the element
+    // yet, currentTime writes are silently ignored — fall back to the
+    // Infinity-duration seek trick to force it, then apply the real seek.
+    if (audio.duration === Infinity || isNaN(audio.duration)) {
+      audio.currentTime = 1e101
+      const onTimeUpdate = () => {
+        audio.currentTime = target
+        audio.removeEventListener('timeupdate', onTimeUpdate)
+      }
+      audio.addEventListener('timeupdate', onTimeUpdate)
+    } else {
+      audio.currentTime = target
+    }
+    setCurrentTime(target)
     // Clicking a point on the waveform should start listening from there,
     // like WhatsApp — not just move the cursor while staying paused.
     if (audio.paused) audio.play().catch(() => {})
@@ -2277,7 +2327,9 @@ function AudioMessagePlayer({ id, src, isOwn, onError }: { id: string; src: stri
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
         onEnded={() => setIsPlaying(false)}
-        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+        // Duration is handled by the fixDuration effect above (native
+        // loadedmetadata/durationchange fire unreliable/Infinity values for
+        // recorded voice notes, so a naive handler here would race with it).
         onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
         className="hidden"
       />
