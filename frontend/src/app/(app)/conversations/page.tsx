@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import wsService from '@/lib/websocket'
@@ -40,6 +40,8 @@ import {
   Loader2,
   Ban,
   ImageOff,
+  Play,
+  Pause,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import toast from 'react-hot-toast'
@@ -1576,30 +1578,12 @@ export default function ConversationsPage() {
                           <MicOff size={16} /> Áudio indisponível
                         </div>
                       ) : (
-                        <div className="flex items-center gap-2">
-                          <audio id={`audio-${msg.id}`} controls className="max-w-full h-10 flex-1" preload="metadata" onError={() => setFailedMediaIds((current) => ({ ...current, [msg.id]: true }))}>
-                            <source src={msg.media_url.startsWith('data:') ? msg.media_url : `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`} />
-                          </audio>
-                          <div className="flex gap-1">
-                            {[1, 1.5, 2].map((speed) => (
-                              <button
-                                key={speed}
-                                type="button"
-                                onClick={() => {
-                                  const audio = document.getElementById(`audio-${msg.id}`) as HTMLAudioElement
-                                  if (audio) audio.playbackRate = speed
-                                }}
-                                className={`text-[10px] px-1.5 py-0.5 rounded font-medium transition-colors ${
-                                  msg.sender_type === 'user'
-                                    ? 'bg-white/20 text-white hover:bg-white/30'
-                                    : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
-                                }`}
-                              >
-                                {speed}x
-                              </button>
-                            ))}
-                          </div>
-                        </div>
+                        <AudioMessagePlayer
+                          id={msg.id}
+                          src={msg.media_url.startsWith('data:') ? msg.media_url : `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`}
+                          isOwn={msg.sender_type === 'user'}
+                          onError={() => setFailedMediaIds((current) => ({ ...current, [msg.id]: true }))}
+                        />
                       )}
                     </div>
                   )}
@@ -2188,6 +2172,159 @@ export default function ConversationsPage() {
   )
 }
 
+
+const AUDIO_WAVEFORM_BARS = 40
+const AUDIO_SPEEDS = [1, 1.5, 2]
+
+function formatAudioTime(seconds: number) {
+  if (!isFinite(seconds) || seconds < 0) return '0:00'
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+// Deterministic pseudo-random bar heights seeded by the message id, so the
+// waveform stays stable across re-renders even before (or if) real decoded
+// peaks are available.
+function fallbackWaveform(seedKey: string) {
+  let seed = 0
+  for (let i = 0; i < seedKey.length; i++) seed = (seed * 31 + seedKey.charCodeAt(i)) >>> 0
+  const bars: number[] = []
+  for (let i = 0; i < AUDIO_WAVEFORM_BARS; i++) {
+    seed = (seed * 1103515245 + 12345) >>> 0
+    bars.push(0.25 + (seed / 0xffffffff) * 0.75)
+  }
+  return bars
+}
+
+function AudioMessagePlayer({ id, src, isOwn, onError }: { id: string; src: string; isOwn: boolean; onError: () => void }) {
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [duration, setDuration] = useState(0)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [speed, setSpeed] = useState(1)
+  const [decodedPeaks, setDecodedPeaks] = useState<number[] | null>(null)
+  const fallbackBars = useMemo(() => fallbackWaveform(id), [id])
+  const bars = decodedPeaks || fallbackBars
+
+  useEffect(() => {
+    let cancelled = false
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
+    if (!AudioCtx) return
+    const ctx: AudioContext = new AudioCtx()
+    fetch(src)
+      .then((res) => res.arrayBuffer())
+      .then((buf) => ctx.decodeAudioData(buf))
+      .then((audioBuffer) => {
+        if (cancelled) return
+        const channel = audioBuffer.getChannelData(0)
+        const blockSize = Math.max(1, Math.floor(channel.length / AUDIO_WAVEFORM_BARS))
+        const values: number[] = []
+        for (let i = 0; i < AUDIO_WAVEFORM_BARS; i++) {
+          let sum = 0
+          const start = i * blockSize
+          for (let j = 0; j < blockSize; j++) sum += Math.abs(channel[start + j] || 0)
+          values.push(sum / blockSize)
+        }
+        const max = Math.max(...values, 0.0001)
+        if (!cancelled) setDecodedPeaks(values.map((v) => Math.max(0.15, v / max)))
+      })
+      .catch(() => {
+        // Keep the deterministic fallback waveform — playback still works
+        // via the native <audio> element regardless of decode success.
+      })
+      .finally(() => {
+        try { ctx.close() } catch {}
+      })
+    return () => { cancelled = true }
+  }, [src])
+
+  const togglePlay = () => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (isPlaying) audio.pause()
+    else audio.play().catch(() => {})
+  }
+
+  const seekToBar = (index: number) => {
+    const audio = audioRef.current
+    if (!audio || !duration) return
+    audio.currentTime = Math.max(0, Math.min(duration, (index / bars.length) * duration))
+  }
+
+  const cycleSpeed = () => {
+    const next = AUDIO_SPEEDS[(AUDIO_SPEEDS.indexOf(speed) + 1) % AUDIO_SPEEDS.length]
+    setSpeed(next)
+    if (audioRef.current) audioRef.current.playbackRate = next
+  }
+
+  const progress = duration > 0 ? currentTime / duration : 0
+  const playedBars = Math.round(progress * bars.length)
+  const timeLabel = formatAudioTime(isPlaying || currentTime > 0 ? currentTime : duration)
+
+  return (
+    <div className="flex min-w-[220px] items-center gap-2">
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        onError={onError}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={() => setIsPlaying(false)}
+        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+        onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+        className="hidden"
+      />
+      <button
+        type="button"
+        onClick={togglePlay}
+        className={clsx(
+          'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors',
+          isOwn ? 'bg-white/20 text-white hover:bg-white/30' : 'bg-primary-600 text-white hover:bg-primary-700'
+        )}
+      >
+        {isPlaying ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" className="ml-0.5" />}
+      </button>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <button
+          type="button"
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect()
+            const ratio = (e.clientX - rect.left) / rect.width
+            seekToBar(Math.round(ratio * bars.length))
+          }}
+          className="flex h-8 w-full items-center gap-[2px]"
+          aria-label="Buscar posição do áudio"
+        >
+          {bars.map((height, i) => (
+            <span
+              key={i}
+              className={clsx(
+                'w-[3px] shrink-0 rounded-full transition-colors',
+                i < playedBars ? (isOwn ? 'bg-white' : 'bg-primary-600') : (isOwn ? 'bg-white/35' : 'bg-gray-300')
+              )}
+              style={{ height: `${Math.max(15, height * 100)}%` }}
+            />
+          ))}
+        </button>
+        <div className="flex items-center justify-between">
+          <span className={clsx('text-[10px] tabular-nums', isOwn ? 'text-white/70' : 'text-gray-400')}>{timeLabel}</span>
+          <button
+            type="button"
+            onClick={cycleSpeed}
+            className={clsx(
+              'rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors',
+              isOwn ? 'bg-white/20 text-white hover:bg-white/30' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+            )}
+          >
+            {speed}x
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function ConversationSLABar({ conversation }: { conversation: Conversation }) {
   const [now, setNow] = useState(Date.now())
