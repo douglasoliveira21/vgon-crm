@@ -2246,10 +2246,15 @@ function AudioMessagePlayer({ id, src, isOwn, onError }: { id: string; src: stri
     else audio.play().catch(() => {})
   }
 
-  const seekToBar = (index: number) => {
+  const seekToRatio = (ratio: number) => {
     const audio = audioRef.current
     if (!audio || !duration) return
-    audio.currentTime = Math.max(0, Math.min(duration, (index / bars.length) * duration))
+    const clamped = Math.max(0, Math.min(1, ratio))
+    audio.currentTime = clamped * duration
+    setCurrentTime(clamped * duration)
+    // Clicking a point on the waveform should start listening from there,
+    // like WhatsApp — not just move the cursor while staying paused.
+    if (audio.paused) audio.play().catch(() => {})
   }
 
   const cycleSpeed = () => {
@@ -2291,11 +2296,10 @@ function AudioMessagePlayer({ id, src, isOwn, onError }: { id: string; src: stri
           type="button"
           onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect()
-            const ratio = (e.clientX - rect.left) / rect.width
-            seekToBar(Math.round(ratio * bars.length))
+            seekToRatio((e.clientX - rect.left) / rect.width)
           }}
-          className="flex h-8 w-full items-center gap-[2px]"
-          aria-label="Buscar posição do áudio"
+          className="group relative flex h-8 w-full items-center gap-[2px]"
+          aria-label="Clique para ouvir a partir deste ponto"
         >
           {bars.map((height, i) => (
             <span
@@ -2307,6 +2311,15 @@ function AudioMessagePlayer({ id, src, isOwn, onError }: { id: string; src: stri
               style={{ height: `${Math.max(15, height * 100)}%` }}
             />
           ))}
+          {/* Playhead: exact position, independent of the coarser per-bar fill above */}
+          <span
+            className={clsx(
+              'pointer-events-none absolute top-1/2 h-3.5 w-[2px] -translate-y-1/2 rounded-full shadow-sm transition-opacity',
+              isOwn ? 'bg-white' : 'bg-primary-700',
+              duration > 0 ? 'opacity-100' : 'opacity-0'
+            )}
+            style={{ left: `${progress * 100}%` }}
+          />
         </button>
         <div className="flex items-center justify-between">
           <span className={clsx('text-[10px] tabular-nums', isOwn ? 'text-white/70' : 'text-gray-400')}>{timeLabel}</span>
