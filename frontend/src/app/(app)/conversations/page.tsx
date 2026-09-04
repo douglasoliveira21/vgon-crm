@@ -223,6 +223,7 @@ export default function ConversationsPage() {
   // Audio recording
   const [isRecording, setIsRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
+  const [recordingLevels, setRecordingLevels] = useState<number[]>([])
   const [contactTyping, setContactTyping] = useState(false)
   const [contactRecording, setContactRecording] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
@@ -243,6 +244,8 @@ export default function ConversationsPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const recordingAudioCtxRef = useRef<AudioContext | null>(null)
+  const recordingLevelIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // Quick replies
   const [quickReplies, setQuickReplies] = useState<{ id: string; shortcut: string; title: string | null; content: string; category: string | null }[]>([])
@@ -730,6 +733,17 @@ export default function ConversationsPage() {
   }
 
   // Audio recording
+  const stopRecordingLevelMeter = () => {
+    if (recordingLevelIntervalRef.current) {
+      clearInterval(recordingLevelIntervalRef.current)
+      recordingLevelIntervalRef.current = null
+    }
+    if (recordingAudioCtxRef.current) {
+      recordingAudioCtxRef.current.close().catch(() => {})
+      recordingAudioCtxRef.current = null
+    }
+  }
+
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -744,16 +758,50 @@ export default function ConversationsPage() {
       mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/ogg' })
         stream.getTracks().forEach((track) => track.stop())
+        stopRecordingLevelMeter()
         await sendAudioMessage(audioBlob)
       }
 
       mediaRecorder.start()
       setIsRecording(true)
       setRecordingTime(0)
+      setRecordingLevels([])
 
       recordingIntervalRef.current = setInterval(() => {
         setRecordingTime((prev) => prev + 1)
       }, 1000)
+
+      // Live waveform while recording — analyse the mic input volume and
+      // keep a rolling window of samples, like WhatsApp's recording bar.
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
+        if (AudioCtx) {
+          const audioCtx: AudioContext = new AudioCtx()
+          const source = audioCtx.createMediaStreamSource(stream)
+          const analyser = audioCtx.createAnalyser()
+          analyser.fftSize = 256
+          source.connect(analyser)
+          recordingAudioCtxRef.current = audioCtx
+          const dataArray = new Uint8Array(analyser.frequencyBinCount)
+
+          recordingLevelIntervalRef.current = setInterval(() => {
+            analyser.getByteTimeDomainData(dataArray)
+            let sumSquares = 0
+            for (let i = 0; i < dataArray.length; i++) {
+              const normalized = (dataArray[i] - 128) / 128
+              sumSquares += normalized * normalized
+            }
+            const rms = Math.sqrt(sumSquares / dataArray.length)
+            const level = Math.max(0.06, Math.min(1, rms * 4))
+            setRecordingLevels((prev) => {
+              const next = [...prev, level]
+              return next.length > RECORDING_WAVEFORM_BARS ? next.slice(next.length - RECORDING_WAVEFORM_BARS) : next
+            })
+          }, 100)
+        }
+      } catch {
+        // The live waveform is a visual nicety — recording itself doesn't depend on it.
+      }
     } catch {
       toast.error('Não foi possível acessar o microfone')
     }
@@ -777,6 +825,7 @@ export default function ConversationsPage() {
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current)
       }
+      stopRecordingLevelMeter()
     }
   }
 
@@ -1679,18 +1728,32 @@ export default function ConversationsPage() {
             )}
             <div className="p-3 sm:p-4">
             {isRecording ? (
-              <div className="flex items-center gap-4">
-                <button onClick={cancelRecording} className="p-2 text-red-500 hover:bg-red-50 rounded-lg">
+              <div className="flex items-center gap-3 sm:gap-4">
+                <button onClick={cancelRecording} className="shrink-0 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg">
                   <X size={20} />
                 </button>
-                <div className="flex-1 flex items-center gap-3">
-                  <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
-                  <span className="text-sm text-gray-600 font-mono">{formatRecordingTime(recordingTime)}</span>
-                  <span className="text-sm text-gray-400">Gravando...</span>
+                <div className="w-2.5 h-2.5 shrink-0 rounded-full bg-red-500 animate-pulse" />
+                <span className="shrink-0 text-sm font-mono text-gray-600 dark:text-gray-300 tabular-nums">
+                  {formatRecordingTime(recordingTime)}
+                </span>
+                <div className="flex h-8 flex-1 items-center gap-[2px] overflow-hidden">
+                  {Array.from({ length: RECORDING_WAVEFORM_BARS }, (_, i) => {
+                    const level = recordingLevels[recordingLevels.length - RECORDING_WAVEFORM_BARS + i]
+                    return (
+                      <span
+                        key={i}
+                        className={clsx(
+                          'w-[3px] shrink-0 rounded-full transition-[height] duration-75',
+                          level === undefined ? 'bg-gray-200 dark:bg-gray-700' : 'bg-red-500'
+                        )}
+                        style={{ height: `${Math.max(10, (level ?? 0.06) * 100)}%` }}
+                      />
+                    )
+                  })}
                 </div>
                 <button
                   onClick={stopRecording}
-                  className="p-3 bg-primary-600 text-white rounded-xl hover:bg-primary-700"
+                  className="shrink-0 p-3 bg-primary-600 text-white rounded-xl hover:bg-primary-700"
                 >
                   <Send size={18} />
                 </button>
@@ -2175,6 +2238,7 @@ export default function ConversationsPage() {
 
 const AUDIO_WAVEFORM_BARS = 40
 const AUDIO_SPEEDS = [1, 1.5, 2]
+const RECORDING_WAVEFORM_BARS = 40
 
 function formatAudioTime(seconds: number) {
   if (!isFinite(seconds) || seconds < 0) return '0:00'
