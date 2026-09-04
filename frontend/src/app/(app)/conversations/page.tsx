@@ -641,10 +641,17 @@ export default function ConversationsPage() {
 
   const loadOlderMessages = async () => {
     if (!selectedConv || loadingMore) return
+    // Snapshot which conversation/request this belongs to. If the user
+    // switches chats before this resolves, selectConversation() bumps
+    // messagesRequestRef, so the stale result below is discarded instead of
+    // being prepended onto whatever conversation is now on screen.
+    const conversationId = selectedConv.id
+    const requestId = messagesRequestRef.current
     setLoadingMore(true)
     try {
       const newOffset = messagesOffset + 80
-      const response = await api.get(`/conversations/${selectedConv.id}/messages`, { params: { limit: 80, offset: newOffset } })
+      const response = await api.get(`/conversations/${conversationId}/messages`, { params: { limit: 80, offset: newOffset } })
+      if (requestId !== messagesRequestRef.current) return
       const olderMessages: Message[] = response.data.messages || []
       if (olderMessages.length > 0) {
         setMessages((prev) => [...olderMessages, ...prev])
@@ -654,7 +661,7 @@ export default function ConversationsPage() {
         setHasMoreMessages(false)
       }
     } catch {} finally {
-      setLoadingMore(false)
+      if (requestId === messagesRequestRef.current) setLoadingMore(false)
     }
   }
 
