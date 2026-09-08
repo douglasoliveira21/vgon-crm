@@ -702,6 +702,12 @@ func (s *EvolutionService) handleConnectionUpdate(instanceName string, event map
 		if _, err := s.db.Exec("UPDATE whatsapp_instances SET connected_at = NOW(), qrcode = NULL WHERE instance_name = $1", instanceName); err != nil {
 			log.Printf("[EVOLUTION] failed to set connected_at for instance %s: %v", instanceName, err)
 		}
+		// Re-apply the webhook event subscription (including PRESENCE_UPDATE)
+		// on every (re)connect. The webhook config is otherwise only ever
+		// sent once, at instance creation — an instance created before an
+		// event type was added to that list (or whose config drifted) would
+		// silently never receive it, e.g. the contact's live typing status.
+		go s.syncInstanceWebhook(instanceName)
 	}
 
 	// Get company ID for WebSocket notification
@@ -714,6 +720,56 @@ func (s *EvolutionService) handleConnectionUpdate(instanceName string, event map
 			"status":        status,
 		})
 	}
+}
+
+// syncInstanceWebhook re-applies the webhook URL/event subscription for an
+// already-existing instance. Best-effort: CreateInstance only sends this
+// config once, so an instance created before an event was added to the list
+// (or with drifted config) needs this to start receiving it — but a failure
+// here must never break the connection flow, just log.
+func (s *EvolutionService) syncInstanceWebhook(instanceName string) {
+	payload := map[string]interface{}{
+		"webhook": map[string]interface{}{
+			"url":     fmt.Sprintf("%s/%s", s.cfg.EvolutionWebhookURL, instanceName),
+			"enabled": true,
+			"events": []string{
+				"MESSAGES_UPSERT",
+				"MESSAGES_UPDATE",
+				"MESSAGES_DELETE",
+				"SEND_MESSAGE",
+				"CONNECTION_UPDATE",
+				"CONTACTS_UPSERT",
+				"QRCODE_UPDATED",
+				"PRESENCE_UPDATE",
+			},
+		},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("[EVOLUTION] failed to marshal webhook sync payload for instance %s: %v", instanceName, err)
+		return
+	}
+
+	httpReq, err := http.NewRequest("POST", fmt.Sprintf("%s/webhook/set/%s", s.cfg.EvolutionAPIURL, instanceName), bytes.NewBuffer(body))
+	if err != nil {
+		log.Printf("[EVOLUTION] failed to build webhook sync request for instance %s: %v", instanceName, err)
+		return
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("apikey", s.cfg.EvolutionAPIKey)
+
+	resp, err := s.client.Do(httpReq)
+	if err != nil {
+		log.Printf("[EVOLUTION] failed to sync webhook for instance %s: %v", instanceName, err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		log.Printf("[EVOLUTION] webhook sync for instance %s returned status %d: %s", instanceName, resp.StatusCode, string(respBody))
+		return
+	}
+	log.Printf("[EVOLUTION] webhook config synced for instance %s (incl. PRESENCE_UPDATE)", instanceName)
 }
 
 func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[string]interface{}) {

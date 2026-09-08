@@ -97,6 +97,7 @@ func main() {
 	// Start periodic background tasks
 	svc.Evolution.StartPeriodicPhotoSync()
 	svc.Evolution.StartWhatsAppInstanceMonitor()
+	svc.Evolution.SyncConnectedInstanceWebhooks()
 	svc.Email.StartPeriodicSync()
 	svc.Bot.StartClientInactivityMonitor()
 	go func() {

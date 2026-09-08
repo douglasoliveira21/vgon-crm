@@ -18,6 +18,35 @@ func (s *EvolutionService) StartWhatsAppInstanceMonitor() {
 	}()
 }
 
+// SyncConnectedInstanceWebhooks re-applies the webhook event subscription
+// (see syncInstanceWebhook) for every already-connected WhatsApp instance.
+// The webhook config is otherwise only ever sent once, at instance creation,
+// so an instance connected before an event type (e.g. PRESENCE_UPDATE, used
+// for the live "contact is typing" indicator) was added to that list would
+// never pick it up until its next reconnect — this runs once at server
+// startup so already-running instances are fixed immediately instead of
+// waiting for their session to drop and reconnect on its own.
+func (s *EvolutionService) SyncConnectedInstanceWebhooks() {
+	rows, err := s.db.Query(`SELECT instance_name FROM whatsapp_instances WHERE status = 'connected' AND COALESCE(instance_name, '') <> ''`)
+	if err != nil {
+		log.Printf("[EVOLUTION] failed to list connected instances for webhook sync: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	var instanceNames []string
+	for rows.Next() {
+		var instanceName string
+		if err := rows.Scan(&instanceName); err == nil {
+			instanceNames = append(instanceNames, instanceName)
+		}
+	}
+
+	for _, instanceName := range instanceNames {
+		go s.syncInstanceWebhook(instanceName)
+	}
+}
+
 func (s *EvolutionService) monitorWhatsAppInstances() {
 	rows, err := s.db.Query(`
 		SELECT id, company_id, COALESCE(channel_id::text, ''), instance_name, COALESCE(status, 'disconnected')
