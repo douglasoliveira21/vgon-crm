@@ -232,6 +232,9 @@ export default function ConversationsPage() {
   const [pendingFile, setPendingFile] = useState<{ file: File; preview: string; type: string } | null>(null)
   const [pendingCaption, setPendingCaption] = useState('')
 
+  // Enlarged contact photo viewer
+  const [avatarPreview, setAvatarPreview] = useState<{ url: string; name: string } | null>(null)
+
   // Tab unread counts
   const [tabUnreadCounts, setTabUnreadCounts] = useState<{ mine: number; unassigned: number; all: number }>({ mine: 0, unassigned: 0, all: 0 })
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
@@ -1415,7 +1418,15 @@ export default function ConversationsPage() {
               >
                 <ArrowLeft size={18} />
               </button>
-              <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center overflow-hidden">
+              <button
+                type="button"
+                onClick={() => selectedConv.contact_avatar_url && setAvatarPreview({ url: resolveAvatar(selectedConv.contact_avatar_url), name: selectedConv.contact_name })}
+                className={clsx(
+                  'w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center overflow-hidden shrink-0',
+                  selectedConv.contact_avatar_url && 'cursor-zoom-in transition-opacity hover:opacity-80'
+                )}
+                aria-label={selectedConv.contact_avatar_url ? 'Ampliar foto do contato' : undefined}
+              >
                 {selectedConv.contact_avatar_url ? (
                   <SafeImage
                     src={selectedConv.contact_avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${selectedConv.contact_avatar_url}` : selectedConv.contact_avatar_url}
@@ -1427,7 +1438,7 @@ export default function ConversationsPage() {
                     {selectedConv.contact_name?.charAt(0)?.toUpperCase() || '?'}
                   </span>
                 )}
-              </div>
+              </button>
               <div className="min-w-0">
                 <h3 className="truncate font-medium text-gray-900">
                   {selectedConv.contact_name || selectedConv.contact_phone}
@@ -1708,12 +1719,21 @@ export default function ConversationsPage() {
               </div>
             ))}
             <div ref={messagesEndRef} />
-            {/* Typing indicator */}
+            {/* Typing indicator — live, shows who exactly is typing/recording */}
             {contactTyping && (
               <div className="flex justify-start message-enter">
-                <div className="bg-white rounded-2xl rounded-bl-md px-4 py-2.5 shadow-sm border border-gray-100">
-                  <p className="text-xs text-gray-500 italic">
-                    {contactRecording ? '🎙️ Gravando áudio...' : '✍️ Digitando...'}
+                <div className="flex items-center gap-2 rounded-2xl rounded-bl-md border border-gray-100 bg-white px-4 py-2.5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                  {!contactRecording && (
+                    <span className="flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
+                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
+                    </span>
+                  )}
+                  <p className="text-xs text-gray-500 italic dark:text-gray-400">
+                    {contactRecording
+                      ? `🎙️ ${selectedConv?.contact_name || 'Contato'} está gravando áudio...`
+                      : `✍️ ${selectedConv?.contact_name || 'Contato'} está digitando...`}
                   </p>
                 </div>
               </div>
@@ -1974,7 +1994,34 @@ export default function ConversationsPage() {
           onUnassign={unassignConversation}
           onUnassignTeam={unassignTeam}
           onSelectConversation={selectConversation}
+          onAvatarClick={(url, name) => setAvatarPreview({ url, name })}
         />
+      )}
+
+      {/* Enlarged contact photo viewer */}
+      {avatarPreview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setAvatarPreview(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setAvatarPreview(null)}
+            className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+            aria-label="Fechar"
+          >
+            <X size={22} />
+          </button>
+          <div className="flex max-h-full max-w-full flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
+            <SafeImage
+              src={avatarPreview.url}
+              alt={avatarPreview.name || 'Foto do contato'}
+              className="max-h-[80vh] max-w-[90vw] rounded-lg object-contain shadow-2xl"
+              fallback={<div className="flex h-60 w-60 items-center justify-center rounded-lg bg-gray-800 text-gray-400"><ImageOff size={40} /></div>}
+            />
+            {avatarPreview.name && <p className="text-sm font-medium text-white">{avatarPreview.name}</p>}
+          </div>
+        </div>
       )}
 
       {/* Transfer Modal */}
@@ -2543,6 +2590,7 @@ function ContactPanel({
   onUnassign,
   onUnassignTeam,
   onSelectConversation,
+  onAvatarClick,
 }: {
   conversation: Conversation
   users: UserItem[]
@@ -2552,6 +2600,7 @@ function ContactPanel({
   onUnassign: () => void
   onUnassignTeam: () => void
   onSelectConversation: (conversation: Conversation) => void
+  onAvatarClick: (url: string, name: string) => void
 }) {
   const [tags, setTags] = useState<Array<{id: string; name: string; color: string}>>([])
   const [contactTags, setContactTags] = useState<Array<{id: string; name: string; color: string}>>([])
@@ -2659,7 +2708,21 @@ function ContactPanel({
     <div className="hidden w-80 overflow-y-auto border-l border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 xl:block">
       {/* Avatar and name */}
       <div className="text-center mb-4">
-        <div className="w-14 h-14 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-2 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => {
+            if (!conversation.contact_avatar_url) return
+            const url = conversation.contact_avatar_url.startsWith('/')
+              ? `${process.env.NEXT_PUBLIC_API_URL}${conversation.contact_avatar_url}`
+              : conversation.contact_avatar_url
+            onAvatarClick(url, conversation.contact_name)
+          }}
+          className={clsx(
+            'mx-auto mb-2 flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-primary-100',
+            conversation.contact_avatar_url && 'cursor-zoom-in transition-opacity hover:opacity-80'
+          )}
+          aria-label={conversation.contact_avatar_url ? 'Ampliar foto do contato' : undefined}
+        >
           {conversation.contact_avatar_url ? (
             <SafeImage
               src={conversation.contact_avatar_url.startsWith('/') ? `${process.env.NEXT_PUBLIC_API_URL}${conversation.contact_avatar_url}` : conversation.contact_avatar_url}
@@ -2671,7 +2734,7 @@ function ContactPanel({
               {conversation.contact_name?.charAt(0)?.toUpperCase() || '?'}
             </span>
           )}
-        </div>
+        </button>
         <h3 className="font-semibold text-gray-900 text-sm dark:text-white">{conversation.contact_name}</h3>
         <p className="text-xs text-gray-500 dark:text-gray-400">{conversation.contact_phone}</p>
       </div>
