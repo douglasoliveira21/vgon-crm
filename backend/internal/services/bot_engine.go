@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/evocrm/backend/internal/websocket"
 	"github.com/google/uuid"
@@ -544,13 +545,24 @@ func edgeMetaMatches(edge BotEdge, tokens []string) bool {
 	return false
 }
 
+// stripSymbolEdges trims leading/trailing punctuation and formatting symbols
+// (WhatsApp bold markers like "*1*", trailing punctuation like "1.", "1)",
+// quotes, etc.) without touching interior characters — so "quero o produto 1"
+// is correctly left alone (not mistaken for choosing menu option 1), while
+// "*1*", " 1.", "(1)" all resolve to the bare option number.
+func stripSymbolEdges(s string) string {
+	return strings.TrimFunc(s, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+}
+
 func chooseNextNodeIDForResponse(outgoing []BotEdge, response string) string {
 	if len(outgoing) == 0 {
 		return ""
 	}
 	response = strings.TrimSpace(strings.ToLower(response))
 	if response != "" {
-		if idx, err := strconv.Atoi(response); err == nil && idx >= 1 && idx <= len(outgoing) {
+		if idx, err := strconv.Atoi(stripSymbolEdges(response)); err == nil && idx >= 1 && idx <= len(outgoing) {
 			return outgoing[idx-1].Target
 		}
 		for _, edge := range outgoing {
