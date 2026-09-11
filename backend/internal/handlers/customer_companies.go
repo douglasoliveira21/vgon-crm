@@ -73,8 +73,20 @@ func ListCustomerCompanies(svc *services.Container) fiber.Handler {
 			WHERE company_id = $1
 		`
 		if search != "" {
-			query += " AND (name ILIKE $2 OR cnpj ILIKE $2 OR trade_name ILIKE $2 OR legal_name ILIKE $2)"
-			args = append(args, "%"+search+"%")
+			// cnpj is always stored punctuation-formatted (see formatCNPJ), so a
+			// plain ILIKE on the raw search text misses it whenever the user
+			// searches with different punctuation than what's stored (or no
+			// punctuation at all) — making an existing company look like it
+			// doesn't exist, right up until saving reports it as a duplicate.
+			// Also match by digits-only when the search itself contains digits.
+			searchDigits := cleanCNPJ(search)
+			if searchDigits != "" {
+				query += " AND (name ILIKE $2 OR cnpj ILIKE $2 OR trade_name ILIKE $2 OR legal_name ILIKE $2 OR regexp_replace(COALESCE(cnpj, ''), '[^0-9]', '', 'g') LIKE '%' || $3 || '%')"
+				args = append(args, "%"+search+"%", searchDigits)
+			} else {
+				query += " AND (name ILIKE $2 OR cnpj ILIKE $2 OR trade_name ILIKE $2 OR legal_name ILIKE $2)"
+				args = append(args, "%"+search+"%")
+			}
 		}
 		query += " ORDER BY name"
 

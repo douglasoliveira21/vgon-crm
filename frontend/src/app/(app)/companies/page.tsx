@@ -68,9 +68,17 @@ export default function CompaniesPage() {
 
   const removeCompany = async (id: string) => {
     if (!confirm('Remover esta empresa? Os contatos vinculados ficarão sem empresa.')) return
-    await api.delete(`/customer-companies/${id}`)
-    toast.success('Empresa removida')
-    fetchCompanies()
+    try {
+      await api.delete(`/customer-companies/${id}`)
+      toast.success('Empresa removida')
+      fetchCompanies()
+    } catch (error: any) {
+      // Without this, a failed delete (network blip, server error) left the
+      // user thinking the company was gone while it was still in the list —
+      // and a later attempt to recreate it with the same CNPJ would then
+      // fail as "duplicate" with no visible reason why.
+      toast.error(error.response?.data?.error || 'Erro ao remover empresa')
+    }
   }
 
   const exportReport = async () => {
