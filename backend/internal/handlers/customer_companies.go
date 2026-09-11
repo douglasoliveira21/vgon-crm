@@ -14,7 +14,22 @@ import (
 	"github.com/evocrm/backend/internal/services"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
+
+// customerCompanySaveError turns a raw Postgres error from an insert/update
+// into a status code + user-facing message. Without this, a duplicate CNPJ
+// surfaced as the raw driver error ("pq: duplicate key value violates
+// unique constraint ...") straight to the UI instead of a clear message.
+func customerCompanySaveError(err error) (int, string) {
+	if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+		if pqErr.Constraint == "idx_customer_companies_company_cnpj" {
+			return fiber.StatusConflict, "Já existe uma empresa cadastrada com esse CNPJ"
+		}
+		return fiber.StatusConflict, "Já existe um registro com esses dados"
+	}
+	return fiber.StatusInternalServerError, err.Error()
+}
 
 type customerCompanyPayload struct {
 	Name                      string `json:"name"`
@@ -118,7 +133,8 @@ func CreateCustomerCompany(svc *services.Container) fiber.Handler {
 			body.Email, body.Phone, body.City, strings.ToUpper(body.State), body.Address,
 			body.InitialResponseSLAMinutes, body.ResolutionSLAMinutes, isActive)
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+			status, msg := customerCompanySaveError(err)
+			return c.Status(status).JSON(fiber.Map{"error": msg})
 		}
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"id": id})
 	}
@@ -156,7 +172,8 @@ func UpdateCustomerCompany(svc *services.Container) fiber.Handler {
 			body.City, strings.ToUpper(body.State), body.Address, body.InitialResponseSLAMinutes,
 			body.ResolutionSLAMinutes, isActive, id, companyID)
 		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+			status, msg := customerCompanySaveError(err)
+			return c.Status(status).JSON(fiber.Map{"error": msg})
 		}
 		refreshOpenConversationSLA(svc.DB, companyID, id)
 		return c.JSON(fiber.Map{"message": "Company updated"})
