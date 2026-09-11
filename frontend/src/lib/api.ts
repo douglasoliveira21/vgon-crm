@@ -16,6 +16,30 @@ const emitRequestActivity = (active: boolean) => {
   window.dispatchEvent(new CustomEvent('api:activity', { detail: { active } }))
 }
 
+// Multiple requests can 401 at almost the same moment (e.g. several fetches
+// firing together when switching between chats). Without this, each one
+// independently POSTs /auth/refresh — and since the backend deletes the old
+// refresh token and issues a new one, the second concurrent call finds the
+// token already gone and fails, leaving a dead refresh cookie behind that
+// F5 keeps resending forever (only a fresh login/incognito gets a new one).
+// Sharing a single in-flight refresh promise means only one call ever goes
+// out per expiry, so there's nothing left to race.
+let refreshPromise: Promise<void> | null = null
+
+const refreshAccessToken = (): Promise<void> => {
+  if (!refreshPromise) {
+    refreshPromise = axios
+      .post(`${API_URL}/api/auth/refresh`, {}, { withCredentials: true })
+      .then(() => {
+        wsService.connect()
+      })
+      .finally(() => {
+        refreshPromise = null
+      })
+  }
+  return refreshPromise
+}
+
 api.interceptors.request.use(
   (config) => {
     emitRequestActivity(true)
@@ -49,8 +73,7 @@ api.interceptors.response.use(
       originalRequest._retry = true
 
       try {
-        await axios.post(`${API_URL}/api/auth/refresh`, {}, { withCredentials: true })
-        wsService.connect()
+        await refreshAccessToken()
         return api(originalRequest)
       } catch (refreshError: any) {
         if (refreshError.response?.status === 429 || refreshError.response?.status >= 500) {
