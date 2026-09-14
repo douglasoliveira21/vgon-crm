@@ -387,6 +387,35 @@ func (s *EvolutionService) GetMediaBase64(instanceName, messageID string) (strin
 	return base64Data, mimeType, nil
 }
 
+// downloadAndSaveIncomingMedia fetches a just-received contact message's
+// media via Evolution API (which decrypts it) and saves it to local disk,
+// updating the message's media_url to point at the saved file. Best-effort:
+// on any failure the message keeps its original WhatsApp CDN URL, so the
+// on-demand fetch in the media proxy handler still gets a chance to work —
+// this only removes the time-sensitivity of that fallback for the common
+// case of a message downloaded shortly after arriving.
+func (s *EvolutionService) downloadAndSaveIncomingMedia(msgID, instanceName, msgType string) {
+	base64Data, mimeType, err := s.GetMediaBase64(instanceName, msgID)
+	if err != nil {
+		log.Printf("[MEDIA] failed to eagerly download incoming media for message %s: %v", msgID, err)
+		return
+	}
+
+	ext := MimeToExtension(mimeType)
+	if ext == ".bin" {
+		ext = GetExtensionFromType(msgType)
+	}
+	fileName, err := SaveBase64File(base64Data, ext)
+	if err != nil {
+		log.Printf("[MEDIA] failed to save eagerly downloaded media for message %s: %v", msgID, err)
+		return
+	}
+
+	if _, err := s.db.Exec("UPDATE messages SET media_url = $1 WHERE id = $2", "/uploads/"+fileName, msgID); err != nil {
+		log.Printf("[MEDIA] failed to update media_url for message %s: %v", msgID, err)
+	}
+}
+
 // DisconnectInstance disconnects a WhatsApp instance
 func (s *EvolutionService) DisconnectInstance(instanceName string) error {
 	httpReq, err := http.NewRequest("DELETE", fmt.Sprintf("%s/instance/logout/%s", s.cfg.EvolutionAPIURL, instanceName), nil)
@@ -845,6 +874,15 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	if err != nil {
 		log.Printf("Failed to save message: %v", err)
 		return
+	}
+
+	// Eagerly fetch and save the media to our own disk instead of leaving it
+	// pointing at WhatsApp's encrypted CDN URL, which Evolution API can only
+	// decrypt for a limited time after receipt — waiting until an attendant
+	// happens to open the conversation to fetch it on demand means it can
+	// already be gone by then ("mídia indisponível").
+	if mediaURL != "" {
+		go s.downloadAndSaveIncomingMedia(msgID, instanceName, msgType)
 	}
 
 	// Update conversation
