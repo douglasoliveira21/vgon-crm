@@ -632,6 +632,16 @@ func findNextNodeByPosition(current BotNode, nodes []BotNode, visited map[string
 // TriggerBot checks if any bot flow should be triggered for a new message
 func (e *BotEngine) TriggerBot(companyID, conversationID, contactID, channelID, message, instanceName, phone string) {
 	if e.conversationHasHumanOwner(companyID, conversationID) {
+		// A contact message means the client is no longer the one we're
+		// waiting on. Without this, a flow already running in the background
+		// (e.g. a "client inactivity" flow mid-way through closing the
+		// conversation) never learns the client replied — it isn't resumed
+		// here since we're bailing out early for human attendance — and can
+		// go on to close the conversation right after the client answered,
+		// simply because nothing ever paused it.
+		if err := pauseConversationAutomationState(e.db, conversationID); err != nil {
+			log.Printf("[BOT] failed to pause automation for conversation %s after contact reply: %v", conversationID, err)
+		}
 		log.Printf("[BOT] Skipping automation for conversation %s because it is assigned to human attendance", conversationID)
 		return
 	}
