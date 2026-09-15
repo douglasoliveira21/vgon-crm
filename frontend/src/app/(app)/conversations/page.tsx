@@ -306,13 +306,23 @@ export default function ConversationsPage() {
     fetchCompanies()
   }, [channelFilter, teamFilter, mentionsFilter, user?.id])
 
+  // Applies the ?conversation=<id> deep link once per URL value. Without
+  // tracking that, this effect re-ran every time `conversations` changed for
+  // any unrelated reason (periodic refresh, a read-count update, a new
+  // message bumping the list) — and since the URL param never gets cleared
+  // when the user manually picks a different chat, it kept snapping the
+  // selection back to whatever conversation the page was first opened with,
+  // even though the fetched messages (a separate state update) correctly
+  // reflected the chat the user actually clicked.
+  const appliedConversationFilterRef = useRef('')
   useEffect(() => {
-    if (!conversationFilter || selectedConv?.id === conversationFilter) return
+    if (!conversationFilter || appliedConversationFilterRef.current === conversationFilter) return
     const conversation = conversations.find((item) => item.id === conversationFilter)
     if (conversation) {
+      appliedConversationFilterRef.current = conversationFilter
       setSelectedConv(conversation)
     }
-  }, [conversationFilter, conversations, selectedConv?.id])
+  }, [conversationFilter, conversations])
 
   useEffect(() => {
     conversationsRef.current = conversations

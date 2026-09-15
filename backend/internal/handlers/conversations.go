@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -12,6 +13,24 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
+
+// publicBaseURL extracts just the scheme+host from EVOLUTION_WEBHOOK_URL, so
+// media links built for Evolution API to download point at "https://host/
+// uploads/..." instead of accidentally nesting the webhook path in front of
+// it. strings.TrimSuffix(webhookURL, "/api/webhooks/evolution") used to do
+// this by cutting a fixed suffix off the string — silently a no-op if the
+// configured URL has so much as a trailing slash, leaving the full webhook
+// path glued onto the media URL and producing a link Evolution API can never
+// fetch (a 401/404 "link inválido", not a signature problem).
+func publicBaseURL(webhookURL string) string {
+	parsed, err := url.Parse(webhookURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		// Fall back to the previous best-effort behavior rather than
+		// producing an empty base URL.
+		return strings.TrimSuffix(webhookURL, "/api/webhooks/evolution")
+	}
+	return parsed.Scheme + "://" + parsed.Host
+}
 
 var outgoingURLPattern = regexp.MustCompile(`(^|[\s(])((?:www\.|(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,})[^\s<>"']*)`)
 
@@ -699,8 +718,7 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 		if phone == "" || instanceName == "" || savedFileName == "" {
 			sendErr = fmt.Errorf("canal de WhatsApp não conectado para esta conversa")
 		} else {
-			publicURL := svc.Config.EvolutionWebhookURL
-			baseURL := strings.TrimSuffix(publicURL, "/api/webhooks/evolution")
+			baseURL := publicBaseURL(svc.Config.EvolutionWebhookURL)
 			mediaPublicURL := signedUploadURL(baseURL, savedFileName, svc.Config.JWTSecret, time.Now().Add(10*time.Minute))
 			externalID, sendErr = svc.Evolution.SendMediaMessage(instanceName, phone, body.MediaType, mediaPublicURL, body.Caption, body.FileName)
 		}
@@ -807,10 +825,7 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 		if phone == "" || instanceName == "" || savedFileName == "" {
 			sendErr = fmt.Errorf("canal de WhatsApp não conectado para esta conversa")
 		} else {
-			publicURL := svc.Config.EvolutionWebhookURL
-			// Build public URL from the backend domain
-			// Extract base URL (remove /api/webhooks/evolution)
-			baseURL := strings.TrimSuffix(publicURL, "/api/webhooks/evolution")
+			baseURL := publicBaseURL(svc.Config.EvolutionWebhookURL)
 			audioPublicURL := signedUploadURL(baseURL, savedFileName, svc.Config.JWTSecret, time.Now().Add(10*time.Minute))
 			externalID, sendErr = svc.Evolution.SendAudioMessage(instanceName, phone, audioPublicURL)
 		}

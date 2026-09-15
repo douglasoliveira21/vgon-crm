@@ -1957,8 +1957,7 @@ func publicCampaignMediaURL(svc *services.Container, mediaURL string) string {
 	if strings.HasPrefix(mediaURL, "http://") || strings.HasPrefix(mediaURL, "https://") {
 		return mediaURL
 	}
-	publicURL := svc.Config.EvolutionWebhookURL
-	baseURL := strings.TrimSuffix(publicURL, "/api/webhooks/evolution")
+	baseURL := publicBaseURL(svc.Config.EvolutionWebhookURL)
 	if strings.HasPrefix(mediaURL, "/uploads/") {
 		return signedUploadURL(baseURL, filepath.Base(mediaURL), svc.Config.JWTSecret, time.Now().Add(10*time.Minute))
 	}

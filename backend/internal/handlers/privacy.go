@@ -461,9 +461,9 @@ func parseUnsubscribeToken(token, secret string) (unsubscribeClaims, bool) {
 }
 
 func unsubscribeURL(svc *services.Container, companyID, contactID string) string {
-	baseURL := strings.TrimSuffix(svc.Config.EvolutionWebhookURL, "/api/webhooks/evolution")
+	baseURL := publicBaseURL(svc.Config.EvolutionWebhookURL)
 	token := createUnsubscribeToken(companyID, contactID, "email", svc.Config.JWTSecret, time.Now().Add(180*24*time.Hour))
-	return strings.TrimRight(baseURL, "/") + "/api/marketing/unsubscribe?token=" + url.QueryEscape(token)
+	return baseURL + "/api/marketing/unsubscribe?token=" + url.QueryEscape(token)
 }
 
 func HandleMarketingUnsubscribe(svc *services.Container) fiber.Handler {

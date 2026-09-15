@@ -215,8 +215,7 @@ func fetchOAuthAccountEmail(provider, accessToken string) (string, error) {
 func emailOAuthRedirectURI(svc *services.Container, provider string) string {
 	base := strings.TrimRight(svc.Config.OAuthRedirectBaseURL, "/")
 	if base == "" {
-		base = strings.TrimRight(svc.Config.EvolutionWebhookURL, "/")
-		base = strings.TrimSuffix(base, "/api/webhooks/evolution")
+		base = publicBaseURL(svc.Config.EvolutionWebhookURL)
 	}
 	return base + "/api/oauth/email/" + provider + "/callback"
 }
