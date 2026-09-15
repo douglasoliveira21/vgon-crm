@@ -820,6 +820,20 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	remoteJid, _ := key["remoteJid"].(string)
 	messageID, _ := key["id"].(string)
 
+	// WhatsApp is migrating some accounts to a privacy-preserving "@lid"
+	// identifier that is NOT the phone number — Baileys/Evolution API still
+	// exposes the real phone-based JID alongside it as remoteJidAlt. Without
+	// this, a contact who starts replying with a @lid remoteJid gets treated
+	// as a brand new contact (matched/created by the wrong "phone", which is
+	// really just the lid's digits), splitting into a second conversation:
+	// outgoing messages keep going to the original conversation while every
+	// reply lands in this new phantom one.
+	if strings.Contains(remoteJid, "@lid") {
+		if alt, ok := key["remoteJidAlt"].(string); ok && alt != "" && !strings.Contains(alt, "@lid") {
+			remoteJid = alt
+		}
+	}
+
 	// Skip if message from us (already tracked)
 	if fromMe {
 		return
