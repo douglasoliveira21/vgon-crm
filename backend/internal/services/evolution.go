@@ -29,7 +29,15 @@ type EvolutionService struct {
 
 var nonDigitPhoneChars = regexp.MustCompile(`\D+`)
 
-func normalizeEvolutionPhone(phone string) string {
+// NormalizeEvolutionPhone reduces a phone number (raw input, a WhatsApp JID,
+// or anything in between) to a canonical digit string. Contacts are matched
+// and created by comparing this exact string, so every code path that turns
+// a phone number into a `contacts.phone` value — starting a conversation
+// manually, or resolving one from an incoming WhatsApp webhook — MUST go
+// through this same function, or two representations of the same real
+// number (e.g. with/without the "55" country code) silently become two
+// different contacts with two separate, split conversations.
+func NormalizeEvolutionPhone(phone string) string {
 	phone = strings.TrimSpace(phone)
 	if phone == "" || strings.Contains(phone, "@g.us") {
 		return phone
@@ -42,6 +50,30 @@ func normalizeEvolutionPhone(phone string) string {
 		return "55" + digits
 	}
 	return digits
+}
+
+// BrazilianPhoneNinthDigitVariant returns the alternate form of a normalized
+// Brazilian mobile number with the "nono dígito" toggled — added if missing,
+// removed if present. WhatsApp's own JID for an account doesn't always agree
+// with however a number was typed/imported elsewhere on whether that extra
+// digit is included, so without checking both forms, the exact-match lookup
+// in NormalizeEvolutionPhone's callers can fail to find an existing contact
+// and create a duplicate. Returns "" when the input isn't a normalizable
+// 12/13-digit "55"-prefixed number.
+func BrazilianPhoneNinthDigitVariant(phone string) string {
+	if !strings.HasPrefix(phone, "55") {
+		return ""
+	}
+	rest := phone[2:]
+	switch len(rest) {
+	case 11: // area code (2) + 9-digit mobile number, e.g. 31 9 87654321
+		if rest[2] == '9' {
+			return "55" + rest[:2] + rest[3:]
+		}
+	case 10: // area code (2) + 8-digit legacy number, e.g. 31 87654321
+		return "55" + rest[:2] + "9" + rest[2:]
+	}
+	return ""
 }
 
 func evolutionSendError(kind string, statusCode int, body []byte) error {
@@ -471,7 +503,7 @@ func (s *EvolutionService) SendTextMessage(instanceName, phone, text string) (st
 
 // SendTextMessageWithQuote sends a text message with optional quoted message
 func (s *EvolutionService) SendTextMessageWithQuote(instanceName, phone, text, quotedMsgID string) (string, error) {
-	phone = normalizeEvolutionPhone(phone)
+	phone = NormalizeEvolutionPhone(phone)
 	payload := map[string]interface{}{
 		"number":      phone,
 		"text":        text,
@@ -523,7 +555,7 @@ func (s *EvolutionService) SendTextMessageWithQuote(instanceName, phone, text, q
 
 // SendMediaMessage sends a media message via WhatsApp
 func (s *EvolutionService) SendMediaMessage(instanceName, phone, mediaType, mediaURL, caption, fileName string) (string, error) {
-	phone = normalizeEvolutionPhone(phone)
+	phone = NormalizeEvolutionPhone(phone)
 	payload := map[string]interface{}{
 		"number":    phone,
 		"mediatype": mediaType,
@@ -569,7 +601,7 @@ func (s *EvolutionService) SendMediaMessage(instanceName, phone, mediaType, medi
 
 // SendAudioMessage sends an audio message via WhatsApp
 func (s *EvolutionService) SendAudioMessage(instanceName, phone, audioURL string) (string, error) {
-	phone = normalizeEvolutionPhone(phone)
+	phone = NormalizeEvolutionPhone(phone)
 	payload := map[string]interface{}{
 		"number": phone,
 		"audio":  audioURL,
@@ -612,7 +644,7 @@ func (s *EvolutionService) SendAudioMessage(instanceName, phone, audioURL string
 
 // SendAudioBase64 sends a base64 encoded audio via WhatsApp
 func (s *EvolutionService) SendAudioBase64(instanceName, phone, audioBase64 string) (string, error) {
-	phone = normalizeEvolutionPhone(phone)
+	phone = NormalizeEvolutionPhone(phone)
 	// Remove data URI prefix if present (data:audio/ogg;base64,...)
 	base64Data := audioBase64
 	if len(base64Data) > 30 {
@@ -1181,8 +1213,20 @@ func (s *EvolutionService) handlePresenceUpdate(instanceName string, event map[s
 }
 
 func (s *EvolutionService) getOrCreateContact(companyID, phone string, data map[string]interface{}, instanceName string) string {
+	phone = NormalizeEvolutionPhone(phone)
 	var contactID string
 	err := s.db.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, phone).Scan(&contactID)
+	if err != nil {
+		// The same real number can already be stored with or without the
+		// Brazilian "nono dígito" (9th digit) depending on how it was
+		// entered elsewhere — check that alternate form before assuming
+		// this is a brand new contact and splitting the conversation.
+		if variant := BrazilianPhoneNinthDigitVariant(phone); variant != "" {
+			if variantErr := s.db.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, variant).Scan(&contactID); variantErr == nil {
+				err = nil
+			}
+		}
+	}
 	if err == nil {
 		log.Printf("[CONTACT] Found existing contact %s for phone %s", contactID, phone)
 		// If no avatar yet, fetch in background

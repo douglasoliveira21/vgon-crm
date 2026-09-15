@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"fmt"
 	"log"
 	"regexp"
 	"strings"
@@ -66,10 +67,24 @@ func StartConversation(svc *services.Container) fiber.Handler {
 		if body.Phone == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Phone is required"})
 		}
+		// Normalize the same way incoming WhatsApp webhooks do — otherwise a
+		// conversation started manually here and the contact's real WhatsApp
+		// JID (which may include/omit the "55" country code or the "nono
+		// dígito") match by raw string and end up as two different contacts,
+		// splitting the conversation: replies land in one, sent messages in
+		// the other.
+		body.Phone = services.NormalizeEvolutionPhone(body.Phone)
 
 		// Find or create contact
 		var contactID string
 		err := svc.DB.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, body.Phone).Scan(&contactID)
+		if err != nil {
+			if variant := services.BrazilianPhoneNinthDigitVariant(body.Phone); variant != "" {
+				if variantErr := svc.DB.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, variant).Scan(&contactID); variantErr == nil {
+					err = nil
+				}
+			}
+		}
 		if err != nil {
 			contactID = uuid.New().String()
 			if _, err := svc.DB.Exec("INSERT INTO contacts (id, company_id, name, phone, origin) VALUES ($1, $2, $3, $4, 'manual')", contactID, companyID, body.Phone, body.Phone); err != nil {
@@ -676,12 +691,23 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 			}
 		}
 
-		if phone != "" && instanceName != "" && savedFileName != "" {
-			// Send using public URL of the saved file
+		// The actual WhatsApp send result was previously discarded here, so
+		// the message always got stored (and shown to the attendant) as
+		// "sent" even when it never reached the customer — e.g. the channel
+		// wasn't connected, or Evolution API rejected the send.
+		var sendErr error
+		if phone == "" || instanceName == "" || savedFileName == "" {
+			sendErr = fmt.Errorf("canal de WhatsApp não conectado para esta conversa")
+		} else {
 			publicURL := svc.Config.EvolutionWebhookURL
 			baseURL := strings.TrimSuffix(publicURL, "/api/webhooks/evolution")
 			mediaPublicURL := signedUploadURL(baseURL, savedFileName, svc.Config.JWTSecret, time.Now().Add(10*time.Minute))
-			externalID, _ = svc.Evolution.SendMediaMessage(instanceName, phone, body.MediaType, mediaPublicURL, body.Caption, body.FileName)
+			externalID, sendErr = svc.Evolution.SendMediaMessage(instanceName, phone, body.MediaType, mediaPublicURL, body.Caption, body.FileName)
+		}
+		status := "sent"
+		if sendErr != nil {
+			status = "failed"
+			log.Printf("[CONVERSATIONS] failed to send media message for conversation %s: %v", conversationID, sendErr)
 		}
 
 		// Save message to DB with local file URL
@@ -694,8 +720,8 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 
 		if _, err := svc.DB.Exec(`
 			INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, media_url, media_filename, external_id, status)
-			VALUES ($1, $2, $3, 'user', $4, $5, $6, $7, $8, $9, 'sent')
-		`, msgID, conversationID, companyID, userID, content, body.MediaType, mediaURL, body.FileName, externalID); err != nil {
+			VALUES ($1, $2, $3, 'user', $4, $5, $6, $7, $8, $9, $10)
+		`, msgID, conversationID, companyID, userID, content, body.MediaType, mediaURL, body.FileName, externalID, status); err != nil {
 			log.Printf("[CONVERSATIONS] failed to save media message for conversation %s: %v", conversationID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save message"})
 		}
@@ -708,6 +734,10 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 			log.Printf("[CONVERSATIONS] failed to auto-assign conversation %s: %v", conversationID, err)
 		}
 
+		if sendErr != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": sendErr.Error()})
+		}
+
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 			"id":              msgID,
 			"conversation_id": conversationID,
@@ -715,7 +745,7 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 			"content":         content,
 			"message_type":    body.MediaType,
 			"media_filename":  body.FileName,
-			"status":          "sent",
+			"status":          status,
 			"created_at":      time.Now(),
 		})
 	}
@@ -773,13 +803,21 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 
 		// Send audio via Evolution API using the public URL of the saved file
 		var externalID string
-		if phone != "" && instanceName != "" && savedFileName != "" {
+		var sendErr error
+		if phone == "" || instanceName == "" || savedFileName == "" {
+			sendErr = fmt.Errorf("canal de WhatsApp não conectado para esta conversa")
+		} else {
 			publicURL := svc.Config.EvolutionWebhookURL
 			// Build public URL from the backend domain
 			// Extract base URL (remove /api/webhooks/evolution)
 			baseURL := strings.TrimSuffix(publicURL, "/api/webhooks/evolution")
 			audioPublicURL := signedUploadURL(baseURL, savedFileName, svc.Config.JWTSecret, time.Now().Add(10*time.Minute))
-			externalID, _ = svc.Evolution.SendAudioMessage(instanceName, phone, audioPublicURL)
+			externalID, sendErr = svc.Evolution.SendAudioMessage(instanceName, phone, audioPublicURL)
+		}
+		status := "sent"
+		if sendErr != nil {
+			status = "failed"
+			log.Printf("[CONVERSATIONS] failed to send audio message for conversation %s: %v", conversationID, sendErr)
 		}
 
 		// Save message to DB with local file URL
@@ -787,8 +825,8 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 		mediaURL := "/uploads/" + savedFileName
 		if _, err := svc.DB.Exec(`
 			INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, media_url, external_id, status)
-			VALUES ($1, $2, $3, 'user', $4, '🎵 Áudio', 'audio', $5, $6, 'sent')
-		`, msgID, conversationID, companyID, userID, mediaURL, externalID); err != nil {
+			VALUES ($1, $2, $3, 'user', $4, '🎵 Áudio', 'audio', $5, $6, $7)
+		`, msgID, conversationID, companyID, userID, mediaURL, externalID, status); err != nil {
 			log.Printf("[CONVERSATIONS] failed to save audio message for conversation %s: %v", conversationID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save message"})
 		}
@@ -801,13 +839,17 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 			log.Printf("[CONVERSATIONS] failed to auto-assign conversation %s: %v", conversationID, err)
 		}
 
+		if sendErr != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": sendErr.Error()})
+		}
+
 		return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 			"id":              msgID,
 			"conversation_id": conversationID,
 			"sender_type":     "user",
 			"content":         "🎵 Áudio",
 			"message_type":    "audio",
-			"status":          "sent",
+			"status":          status,
 			"created_at":      time.Now(),
 		})
 	}

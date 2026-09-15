@@ -847,14 +847,18 @@ export default function ConversationsPage() {
   const sendAudioMessage = async (audioBlob: Blob) => {
     if (!selectedConv || audioBlob.size === 0) return
 
-    try {
-      // Convert blob to base64
-      const reader = new FileReader()
-      reader.readAsDataURL(audioBlob)
-      reader.onloadend = async () => {
-        const base64Audio = reader.result as string
+    // reader.onloadend runs asynchronously, after this function has already
+    // returned — a try/catch around the FileReader setup (as this used to
+    // have) never sees exceptions thrown inside that callback, so a failed
+    // send silently showed nothing to the attendant. The try/catch has to
+    // wrap the actual await inside onloadend itself.
+    const reader = new FileReader()
+    reader.readAsDataURL(audioBlob)
+    reader.onloadend = async () => {
+      const base64Audio = reader.result as string
 
-        const res = await api.post(`/conversations/${selectedConv!.id}/messages/audio`, {
+      try {
+        await api.post(`/conversations/${selectedConv!.id}/messages/audio`, {
           audio_base64: base64Audio,
         })
 
@@ -875,9 +879,9 @@ export default function ConversationsPage() {
         setMessages((prev) => [...prev, optimisticMsg])
         scrollToBottom()
         toast.success('Áudio enviado')
+      } catch (error: any) {
+        toast.error(error.response?.data?.error || 'Erro ao enviar áudio')
       }
-    } catch {
-      toast.error('Erro ao enviar áudio')
     }
   }
 
@@ -1136,8 +1140,8 @@ export default function ConversationsPage() {
         setMessages((prev) => [...prev, optimisticMsg])
         scrollToBottom()
         toast.success('Arquivo enviado')
-      } catch {
-        toast.error('Erro ao enviar arquivo')
+      } catch (error: any) {
+        toast.error(error.response?.data?.error || 'Erro ao enviar arquivo')
       }
 
       setPendingFile(null)

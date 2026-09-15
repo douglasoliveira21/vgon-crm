@@ -172,6 +172,16 @@ func (s *ContactService) GetContactByID(contactID, companyID string) (*models.Co
 
 // CreateContact creates a new contact
 func (s *ContactService) CreateContact(companyID string, req *CreateContactRequest) (*models.Contact, error) {
+	// Normalize the same way incoming WhatsApp webhooks resolve a contact's
+	// phone (NormalizeEvolutionPhone) — otherwise a contact typed in here
+	// with a differently formatted number (missing "55", missing the "nono
+	// dígito", etc.) than their actual WhatsApp JID becomes a second, split
+	// contact the moment they message in, with their own separate
+	// conversation history.
+	if req.Phone != nil {
+		normalized := NormalizeEvolutionPhone(*req.Phone)
+		req.Phone = &normalized
+	}
 	// Check for duplicate phone
 	if req.Phone != nil && *req.Phone != "" {
 		var exists bool
@@ -202,6 +212,10 @@ func (s *ContactService) CreateContact(companyID string, req *CreateContactReque
 
 // UpdateContact updates an existing contact
 func (s *ContactService) UpdateContact(contactID, companyID string, req *UpdateContactRequest) (*models.Contact, error) {
+	if req.Phone != nil {
+		normalized := NormalizeEvolutionPhone(*req.Phone)
+		req.Phone = &normalized
+	}
 	_, err := s.db.Exec(`
 		UPDATE contacts SET
 			name = COALESCE($3, name),
