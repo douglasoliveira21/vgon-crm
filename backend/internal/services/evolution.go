@@ -931,8 +931,16 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 		go s.downloadAndSaveIncomingMedia(msgID, instanceName, msgType)
 	}
 
-	// Update conversation
+	// Update conversation. WhatsApp media messages without a caption arrive
+	// with an empty content — audio always does, since it has no caption
+	// field at all — so a plain truncatePreview(content, 100) stored an
+	// empty preview, which the sidebar then rendered as "Sem mensagens"
+	// instead of indicating there's actually an audio/image/video/document
+	// waiting to be opened.
 	preview := truncatePreview(content, 100)
+	if preview == "" {
+		preview = mediaPreviewLabel(msgType)
+	}
 	if _, err := s.db.Exec(`
 		UPDATE conversations SET last_message_at = NOW(), last_message_preview = $1, unread_count = unread_count + 1, updated_at = NOW()
 		WHERE id = $2

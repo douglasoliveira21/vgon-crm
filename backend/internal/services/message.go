@@ -32,6 +32,28 @@ func truncatePreview(s string, maxBytes int) string {
 	return b
 }
 
+// mediaPreviewLabel gives the conversation list a readable fallback for a
+// media message that has no caption to use as its preview (audio never has
+// one at all; images/videos/stickers often don't either).
+func mediaPreviewLabel(msgType string) string {
+	switch msgType {
+	case "image":
+		return "📷 Imagem"
+	case "video":
+		return "🎥 Vídeo"
+	case "audio":
+		return "🎵 Áudio"
+	case "document":
+		return "📄 Documento"
+	case "sticker":
+		return "😀 Figurinha"
+	case "gif":
+		return "🎞️ GIF"
+	default:
+		return "📎 Mídia"
+	}
+}
+
 type MessageService struct {
 	db    *sql.DB
 	redis *redis.Client
