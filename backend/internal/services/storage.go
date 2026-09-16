@@ -1,17 +1,44 @@
 package services
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
 
 const uploadsDir = "/app/uploads"
+
+// MediaSignature computes the HMAC that authorizes a time-limited fetch of a
+// message's media through the /api/media/:messageId proxy. Shared between
+// internal/handlers (REST responses, which already produced a correctly
+// signed path) and internal/services (the WebSocket broadcast for a message
+// that just arrived) so both hand the frontend an equally usable link —
+// broadcasting the raw, still-encrypted WhatsApp CDN URL instead left a
+// live-received image/audio/video/document showing as unavailable until the
+// next full page load re-fetched it through the REST endpoint.
+func MediaSignature(messageID, companyID string, expires int64, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = fmt.Fprintf(mac, "%s:%s:%d", messageID, companyID, expires)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// SignedMediaPath builds the signed relative path the frontend uses to fetch
+// a message's media through the backend's proxy/decrypt layer.
+func SignedMediaPath(messageID, companyID, secret string, expiresAt time.Time) string {
+	expires := expiresAt.Unix()
+	return fmt.Sprintf("/api/media/%s?company=%s&expires=%d&signature=%s",
+		messageID, url.QueryEscape(companyID), expires, MediaSignature(messageID, companyID, expires, secret))
+}
 
 func init() {
 	// Ensure uploads directory exists on startup

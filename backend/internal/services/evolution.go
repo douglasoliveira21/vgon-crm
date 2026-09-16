@@ -940,14 +940,24 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 		log.Printf("[EVOLUTION] failed to update conversation %s preview: %v", conversationID, err)
 	}
 
-	// Broadcast via WebSocket
+	// Broadcast via WebSocket. media_url here must be a signed path the
+	// frontend can actually fetch — the raw value is still WhatsApp's
+	// encrypted CDN URL at this point (the eager download above runs in the
+	// background and hasn't necessarily finished yet), which the browser
+	// can't load directly. Without this, a live-received image/audio/video/
+	// document showed as unavailable until the next full page load, which
+	// re-fetches messages via REST and gets a properly signed path there.
+	broadcastMediaURL := mediaURL
+	if mediaURL != "" {
+		broadcastMediaURL = SignedMediaPath(msgID, instance.CompanyID, s.cfg.JWTSecret, time.Now().Add(5*time.Minute))
+	}
 	s.wsHub.BroadcastToCompany(instance.CompanyID, websocket.EventNewMessage, map[string]interface{}{
 		"id":              msgID,
 		"conversation_id": conversationID,
 		"sender_type":     "contact",
 		"content":         content,
 		"message_type":    msgType,
-		"media_url":       mediaURL,
+		"media_url":       broadcastMediaURL,
 		"created_at":      time.Now(),
 	})
 

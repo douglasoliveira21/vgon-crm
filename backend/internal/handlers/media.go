@@ -148,9 +148,7 @@ func MediaProxy(svc *services.Container) fiber.Handler {
 }
 
 func signedMediaPath(messageID, companyID, secret string, expiresAt time.Time) string {
-	expires := expiresAt.Unix()
-	return fmt.Sprintf("/api/media/%s?company=%s&expires=%d&signature=%s",
-		messageID, url.QueryEscape(companyID), expires, mediaSignature(messageID, companyID, expires, secret))
+	return services.SignedMediaPath(messageID, companyID, secret, expiresAt)
 }
 
 func signedUploadURL(baseURL, fileName, secret string, expiresAt time.Time) string {
@@ -202,9 +200,7 @@ func ServeUpload(svc *services.Container) fiber.Handler {
 }
 
 func mediaSignature(messageID, companyID string, expires int64, secret string) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	_, _ = fmt.Fprintf(mac, "%s:%s:%d", messageID, companyID, expires)
-	return hex.EncodeToString(mac.Sum(nil))
+	return services.MediaSignature(messageID, companyID, expires, secret)
 }
 
 func scanMedia(data []byte, address string) error {
