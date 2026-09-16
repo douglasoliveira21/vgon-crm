@@ -77,6 +77,10 @@ interface Message {
   sender_type: string
   sender_id?: string
   content?: string
+  // Sidebar preview label for this message (e.g. "🎵 Áudio" when content is
+  // empty), sent alongside content so the live WS update matches what a
+  // page reload shows via the persisted conversations.last_message_preview.
+  preview?: string
   message_type: string
   media_url?: string
   media_filename?: string
@@ -375,7 +379,7 @@ export default function ConversationsPage() {
         setConversations((prev) =>
           prev.map((c) =>
             c.id === data.conversation_id
-              ? { ...c, last_message_preview: data.content || '📎 Mídia', last_message_at: data.created_at, unread_count: 0 }
+              ? { ...c, last_message_preview: data.preview || data.content || '📎 Mídia', last_message_at: data.created_at, unread_count: 0 }
               : c
           )
         )
@@ -386,7 +390,7 @@ export default function ConversationsPage() {
           if (exists) {
             return prev.map((c) =>
               c.id === data.conversation_id
-                ? { ...c, last_message_preview: data.content || '📎 Mídia', last_message_at: data.created_at, unread_count: (c.unread_count || 0) + 1 }
+                ? { ...c, last_message_preview: data.preview || data.content || '📎 Mídia', last_message_at: data.created_at, unread_count: (c.unread_count || 0) + 1 }
                 : c
             )
           }

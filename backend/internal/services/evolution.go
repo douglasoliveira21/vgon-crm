@@ -964,8 +964,17 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 		"conversation_id": conversationID,
 		"sender_type":     "contact",
 		"content":         content,
-		"message_type":    msgType,
-		"media_url":       broadcastMediaURL,
+		// The message bubble itself only ever shows `content` (left empty
+		// for audio, often empty for image/video too), but the sidebar's
+		// live preview update falls back to a generic frontend-side label
+		// when content is blank — which doesn't match the specific "🎵
+		// Áudio"/"📷 Imagem" label that a page reload shows (computed from
+		// this same `preview` value, already stored on the conversation).
+		// Sending it here too keeps the live update and the post-reload
+		// value identical instead of only converging once the page reloads.
+		"preview":      preview,
+		"message_type": msgType,
+		"media_url":    broadcastMediaURL,
 		"created_at":      time.Now(),
 	})
 
