@@ -63,10 +63,11 @@ func (s *AuthService) Login(req *LoginRequest) (*AuthResponse, error) {
 	var roleSlug, twoFactorSecret sql.NullString
 
 	err := s.db.QueryRow(`
-		SELECT u.id, u.company_id, u.name, u.email, u.password_hash, u.avatar_url, 
+		SELECT u.id, u.company_id, u.name, u.email, u.password_hash, u.avatar_url,
 			   u.is_active, u.is_online, COALESCE(u.availability_status, 'offline'),
 			   COALESCE(u.is_super_admin, false), r.slug, r.name,
-			   COALESCE(u.two_factor_enabled, false), u.two_factor_secret
+			   COALESCE(u.two_factor_enabled, false), u.two_factor_secret,
+			   COALESCE((u.settings->>'spellcheck_enabled')::boolean, true)
 		FROM users u
 		LEFT JOIN roles r ON u.role_id = r.id
 		JOIN companies co ON co.id = u.company_id AND co.is_active = true
@@ -75,7 +76,7 @@ func (s *AuthService) Login(req *LoginRequest) (*AuthResponse, error) {
 		&user.ID, &user.CompanyID, &user.Name, &user.Email, &user.PasswordHash,
 		&user.AvatarURL, &user.IsActive, &user.IsOnline, &user.AvailabilityStatus,
 		&user.IsSuperAdmin, &roleSlug, &user.RoleName,
-		&user.TwoFactorEnabled, &twoFactorSecret,
+		&user.TwoFactorEnabled, &twoFactorSecret, &user.SpellcheckEnabled,
 	)
 
 	if err != nil {
@@ -436,7 +437,8 @@ func (s *AuthService) GetUserByID(userID string) (*models.User, error) {
 		SELECT u.id, u.company_id, u.name, u.email, u.avatar_url, u.phone,
 			   u.is_active, u.is_online, COALESCE(u.availability_status, 'offline'),
 			   COALESCE(u.is_super_admin, false), r.slug, r.name,
-			   COALESCE(u.two_factor_enabled, false)
+			   COALESCE(u.two_factor_enabled, false),
+			   COALESCE((u.settings->>'spellcheck_enabled')::boolean, true)
 		FROM users u
 		LEFT JOIN roles r ON u.role_id = r.id
 		WHERE u.id = $1
@@ -444,6 +446,7 @@ func (s *AuthService) GetUserByID(userID string) (*models.User, error) {
 		&user.ID, &user.CompanyID, &user.Name, &user.Email, &user.AvatarURL,
 		&user.Phone, &user.IsActive, &user.IsOnline, &user.AvailabilityStatus,
 		&user.IsSuperAdmin, &user.RoleSlug, &user.RoleName, &user.TwoFactorEnabled,
+		&user.SpellcheckEnabled,
 	)
 	if err != nil {
 		return nil, err

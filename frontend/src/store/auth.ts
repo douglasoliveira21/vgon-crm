@@ -15,6 +15,7 @@ interface User {
   availability_status?: 'online' | 'offline' | 'busy'
   is_super_admin?: boolean
   two_factor_enabled?: boolean
+  spellcheck_enabled?: boolean
 }
 
 interface AuthState {
@@ -26,6 +27,7 @@ interface AuthState {
   updateUser: (user: User) => void
   updateProfile: (data: { name: string; phone?: string }) => Promise<void>
   updateStatus: (status: 'online' | 'offline' | 'busy') => Promise<void>
+  updateSettings: (data: { spellcheck_enabled?: boolean }) => Promise<void>
   uploadAvatar: (file: File) => Promise<void>
   logout: () => void
   checkAuth: () => void
@@ -81,6 +83,11 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   updateStatus: async (status) => {
     const response = await api.put('/me/status', { status })
+    set({ user: response.data })
+  },
+
+  updateSettings: async (data) => {
+    const response = await api.put('/me/settings', data)
     set({ user: response.data })
   },
 

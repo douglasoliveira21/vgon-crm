@@ -366,6 +366,37 @@ func UpdateCurrentUser(svc *services.Container) fiber.Handler {
 	}
 }
 
+func UpdateCurrentUserSettings(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		userID := c.Locals("user_id").(string)
+		companyID := c.Locals("company_id").(string)
+
+		var body struct {
+			SpellcheckEnabled *bool `json:"spellcheck_enabled"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
+		}
+		if body.SpellcheckEnabled == nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "spellcheck_enabled is required"})
+		}
+
+		_, err := svc.DB.Exec(`
+			UPDATE users SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{spellcheck_enabled}', to_jsonb($1::boolean), true), updated_at = NOW()
+			WHERE id = $2 AND company_id = $3
+		`, *body.SpellcheckEnabled, userID, companyID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		user, err := svc.Auth.GetUserByID(userID)
+		if err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
+		}
+		return c.JSON(user)
+	}
+}
+
 func UpdateCurrentUserStatus(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		userID := c.Locals("user_id").(string)

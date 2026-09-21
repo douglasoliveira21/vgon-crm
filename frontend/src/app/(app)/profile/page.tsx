@@ -5,7 +5,7 @@ import { useAuthStore } from '@/store/auth'
 import api from '@/lib/api'
 import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
-import { Camera, Circle, KeyRound, Mail, MonitorSmartphone, Phone, Save, ShieldCheck, Trash2, User } from 'lucide-react'
+import { Camera, Circle, KeyRound, Mail, MonitorSmartphone, Phone, Save, ShieldCheck, SpellCheck, Trash2, User } from 'lucide-react'
 import { SafeImage } from '@/components/safe-image'
 
 interface Session {
@@ -29,7 +29,7 @@ const statusOptions = [
 ] as const
 
 export default function ProfilePage() {
-  const { user, updateProfile, updateStatus, uploadAvatar } = useAuthStore()
+  const { user, updateProfile, updateStatus, updateSettings, uploadAvatar } = useAuthStore()
   const [name, setName] = useState(user?.name || '')
   const [phone, setPhone] = useState(user?.phone || '')
   const [saving, setSaving] = useState(false)
@@ -38,6 +38,7 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [savingPassword, setSavingPassword] = useState(false)
+  const [savingSpellcheck, setSavingSpellcheck] = useState(false)
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(!!user?.two_factor_enabled)
   const [twoFactorSecret, setTwoFactorSecret] = useState('')
   const [twoFactorCode, setTwoFactorCode] = useState('')
@@ -122,6 +123,19 @@ export default function ProfilePage() {
   }
 
   const currentStatus = user?.is_online ? (user.availability_status || 'online') : 'offline'
+  const spellcheckEnabled = user?.spellcheck_enabled !== false
+
+  const toggleSpellcheck = async () => {
+    setSavingSpellcheck(true)
+    try {
+      await updateSettings({ spellcheck_enabled: !spellcheckEnabled })
+      toast.success(!spellcheckEnabled ? 'Corretor automático ativado' : 'Corretor automático desativado')
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao salvar preferência')
+    } finally {
+      setSavingSpellcheck(false)
+    }
+  }
 
   const changePassword = async () => {
     if (!currentPassword || !newPassword) {
@@ -260,6 +274,34 @@ export default function ProfilePage() {
                 <button type="button" onClick={disableTwoFactor} className="btn-secondary text-red-600">Desativar 2FA</button>
               </div>
             )}
+          </div>
+
+          <div className="card p-6">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <SpellCheck size={20} className="text-gray-400" />
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Corretor automático</h2>
+                  <p className="mt-1 text-sm text-gray-500">Sublinha erros de digitação em português do Brasil ao escrever mensagens.</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={spellcheckEnabled}
+                onClick={toggleSpellcheck}
+                disabled={savingSpellcheck}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 ${
+                  spellcheckEnabled ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-700'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    spellcheckEnabled ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
           </div>
 
           <div className="card p-6">

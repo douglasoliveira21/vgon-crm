@@ -1890,6 +1890,8 @@ export default function ConversationsPage() {
                       }
                     }}
                     placeholder="Digite uma mensagem... (/ para atalhos)"
+                    spellCheck={user?.spellcheck_enabled !== false}
+                    lang="pt-BR"
                     className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500/20 outline-none pr-10 resize-none min-h-[46px] max-h-32"
                   />
 

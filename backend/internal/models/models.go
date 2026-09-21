@@ -39,6 +39,7 @@ type User struct {
 	AvailabilityStatus string     `json:"availability_status"`
 	IsSuperAdmin       bool       `json:"is_super_admin"`
 	TwoFactorEnabled   bool       `json:"two_factor_enabled"`
+	SpellcheckEnabled  bool       `json:"spellcheck_enabled"`
 	LastSeenAt         *time.Time `json:"last_seen_at,omitempty"`
 	RoleName           string     `json:"role_name,omitempty"`
 	RoleSlug           string     `json:"role_slug,omitempty"`

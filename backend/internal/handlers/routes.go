@@ -72,6 +72,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	// User profile
 	protected.Get("/me", GetCurrentUser(svc))
 	protected.Put("/me", UpdateCurrentUser(svc))
+	protected.Put("/me/settings", UpdateCurrentUserSettings(svc))
 	protected.Put("/me/status", UpdateCurrentUserStatus(svc))
 	protected.Put("/me/password", UpdateCurrentUserPassword(svc))
 	protected.Post("/me/avatar", UploadCurrentUserAvatar(svc))
