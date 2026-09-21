@@ -117,6 +117,12 @@ func (s *EvolutionService) SyncContacts(instanceName, companyID string) (int, er
 			continue
 		}
 
+		// Store the same canonical form every other code path uses, otherwise
+		// this sync creates a second contact row for someone who already
+		// exists under the other "nono dígito" form and their conversation
+		// splits in two.
+		phone = NormalizeEvolutionPhone(phone)
+
 		// Skip groups and broadcasts
 		name, _ := contact["pushName"].(string)
 		if name == "" {
@@ -133,9 +139,8 @@ func (s *EvolutionService) SyncContacts(instanceName, companyID string) (int, er
 		}
 
 		// Check if contact exists
-		var existingID string
-		err := s.db.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, phone).Scan(&existingID)
-		if err == nil {
+		existingID, found := FindContactIDByPhone(s.db, companyID, phone)
+		if found {
 			// Update name if it was just the phone
 			if _, updErr := s.db.Exec("UPDATE contacts SET name = CASE WHEN name = phone THEN $1 ELSE name END, updated_at = NOW() WHERE id = $2", name, existingID); updErr != nil {
 				log.Printf("[SYNC] Failed to update contact %s name: %v", existingID, updErr)

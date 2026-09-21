@@ -182,11 +182,10 @@ func (s *ContactService) CreateContact(companyID string, req *CreateContactReque
 		normalized := NormalizeEvolutionPhone(*req.Phone)
 		req.Phone = &normalized
 	}
-	// Check for duplicate phone
+	// Check for duplicate phone, including the other "nono dígito" form so
+	// this doesn't become the door that creates the second, split contact.
 	if req.Phone != nil && *req.Phone != "" {
-		var exists bool
-		s.db.QueryRow("SELECT EXISTS(SELECT 1 FROM contacts WHERE company_id = $1 AND phone = $2)", companyID, *req.Phone).Scan(&exists)
-		if exists {
+		if _, exists := FindContactIDByPhone(s.db, companyID, *req.Phone); exists {
 			return nil, fmt.Errorf("contact with this phone already exists")
 		}
 	}

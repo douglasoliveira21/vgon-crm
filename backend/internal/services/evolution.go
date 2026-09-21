@@ -76,6 +76,39 @@ func BrazilianPhoneNinthDigitVariant(phone string) string {
 	return ""
 }
 
+// FindContactIDByPhone resolves a phone number to an existing contact,
+// considering both Brazilian "nono dígito" forms in a single lookup and always
+// preferring the oldest matching row.
+//
+// Checking the exact form first and only falling back to the variant when that
+// misses is not enough. Once both forms exist as separate contact rows — the
+// WhatsApp contact sync stores whatever form the JID uses, while an agent may
+// type the other one — each caller exact-matches whichever row its own format
+// points at and never reaches the fallback. The agent's outgoing conversation
+// then attaches to one contact and the contact's incoming replies to the
+// other, splitting into two chats that stay split forever. Considering both
+// forms with a stable winner makes every caller agree on one contact.
+func FindContactIDByPhone(db *sql.DB, companyID, phone string) (string, bool) {
+	phone = NormalizeEvolutionPhone(phone)
+	if phone == "" {
+		return "", false
+	}
+	variant := BrazilianPhoneNinthDigitVariant(phone)
+	if variant == "" {
+		variant = phone
+	}
+	var contactID string
+	if err := db.QueryRow(`
+		SELECT id FROM contacts
+		WHERE company_id = $1 AND phone IN ($2, $3)
+		ORDER BY created_at ASC NULLS LAST
+		LIMIT 1
+	`, companyID, phone, variant).Scan(&contactID); err != nil {
+		return "", false
+	}
+	return contactID, true
+}
+
 func evolutionSendError(kind string, statusCode int, body []byte) error {
 	var parsed struct {
 		Response struct {
@@ -1222,9 +1255,9 @@ func (s *EvolutionService) handlePresenceUpdate(instanceName string, event map[s
 	}
 
 	// Find contact and their active conversation
-	var contactID, conversationID string
-	s.db.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, phone).Scan(&contactID)
-	if contactID == "" {
+	var conversationID string
+	contactID, found := FindContactIDByPhone(s.db, companyID, phone)
+	if !found {
 		return
 	}
 	s.db.QueryRow("SELECT id FROM conversations WHERE company_id = $1 AND contact_id = $2 AND status != 'resolved' ORDER BY created_at DESC LIMIT 1", companyID, contactID).Scan(&conversationID)
@@ -1241,20 +1274,8 @@ func (s *EvolutionService) handlePresenceUpdate(instanceName string, event map[s
 
 func (s *EvolutionService) getOrCreateContact(companyID, phone string, data map[string]interface{}, instanceName string) string {
 	phone = NormalizeEvolutionPhone(phone)
-	var contactID string
-	err := s.db.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, phone).Scan(&contactID)
-	if err != nil {
-		// The same real number can already be stored with or without the
-		// Brazilian "nono dígito" (9th digit) depending on how it was
-		// entered elsewhere — check that alternate form before assuming
-		// this is a brand new contact and splitting the conversation.
-		if variant := BrazilianPhoneNinthDigitVariant(phone); variant != "" {
-			if variantErr := s.db.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, variant).Scan(&contactID); variantErr == nil {
-				err = nil
-			}
-		}
-	}
-	if err == nil {
+	contactID, found := FindContactIDByPhone(s.db, companyID, phone)
+	if found {
 		log.Printf("[CONTACT] Found existing contact %s for phone %s", contactID, phone)
 		// If no avatar yet, fetch in background
 		var avatarURL *string

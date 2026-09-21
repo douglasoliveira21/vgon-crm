@@ -95,16 +95,8 @@ func StartConversation(svc *services.Container) fiber.Handler {
 		body.Phone = services.NormalizeEvolutionPhone(body.Phone)
 
 		// Find or create contact
-		var contactID string
-		err := svc.DB.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, body.Phone).Scan(&contactID)
-		if err != nil {
-			if variant := services.BrazilianPhoneNinthDigitVariant(body.Phone); variant != "" {
-				if variantErr := svc.DB.QueryRow("SELECT id FROM contacts WHERE company_id = $1 AND phone = $2", companyID, variant).Scan(&contactID); variantErr == nil {
-					err = nil
-				}
-			}
-		}
-		if err != nil {
+		contactID, found := services.FindContactIDByPhone(svc.DB, companyID, body.Phone)
+		if !found {
 			contactID = uuid.New().String()
 			if _, err := svc.DB.Exec("INSERT INTO contacts (id, company_id, name, phone, origin) VALUES ($1, $2, $3, $4, 'manual')", contactID, companyID, body.Phone, body.Phone); err != nil {
 				log.Printf("[CONVERSATIONS] failed to create contact for company %s phone %s: %v", companyID, body.Phone, err)
@@ -119,6 +111,7 @@ func StartConversation(svc *services.Container) fiber.Handler {
 			}
 		}
 
+		var err error
 		channelID := body.ChannelID
 		if channelID != "" {
 			err = svc.DB.QueryRow(`
