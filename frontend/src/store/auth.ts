@@ -22,7 +22,7 @@ interface AuthState {
   user: User | null
   isAuthenticated: boolean
   isLoading: boolean
-  login: (email: string, password: string, totpCode?: string) => Promise<void>
+  login: (email: string, password: string, totpCode?: string, captchaToken?: string) => Promise<void>
   register: (companyName: string, name: string, email: string, password: string) => Promise<void>
   updateUser: (user: User) => void
   updateProfile: (data: { name: string; phone?: string }) => Promise<void>
@@ -41,10 +41,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   isLoading: false,
 
-  login: async (email: string, password: string, totpCode?: string) => {
+  login: async (email: string, password: string, totpCode?: string, captchaToken?: string) => {
     set({ isLoading: true })
     try {
-      const response = await api.post('/auth/login', { email, password, totp_code: totpCode })
+      const response = await api.post('/auth/login', { email, password, totp_code: totpCode, captcha_token: captchaToken })
       const { user } = response.data
       wsService.connect()
 

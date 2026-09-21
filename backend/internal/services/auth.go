@@ -30,9 +30,10 @@ func NewAuthService(db *sql.DB, cfg *config.Config) *AuthService {
 }
 
 type LoginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	TOTPCode string `json:"totp_code"`
+	Email        string `json:"email"`
+	Password     string `json:"password"`
+	TOTPCode     string `json:"totp_code"`
+	CaptchaToken string `json:"captcha_token"`
 }
 
 type RegisterRequest struct {

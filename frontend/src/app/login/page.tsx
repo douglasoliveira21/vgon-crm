@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import toast from 'react-hot-toast'
@@ -9,6 +9,7 @@ import { Eye, EyeOff, Mail, Lock, Shield, HeadphonesIcon } from 'lucide-react'
 import api from '@/lib/api'
 import { ChannelIcon } from '@/components/channel-icon'
 import { SafeImage } from '@/components/safe-image'
+import { TurnstileWidget } from '@/components/turnstile-widget'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -20,14 +21,33 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [isSendingReset, setIsSendingReset] = useState(false)
+  const [captchaSiteKey, setCaptchaSiteKey] = useState('')
+  const [captchaToken, setCaptchaToken] = useState('')
+  const [captchaResetKey, setCaptchaResetKey] = useState(0)
+
+  useEffect(() => {
+    api.get('/auth/captcha')
+      .then((response) => setCaptchaSiteKey(response.data?.site_key || ''))
+      .catch(() => setCaptchaSiteKey(''))
+  }, [])
+
+  const captchaRequired = captchaSiteKey !== ''
+  const captchaPending = captchaRequired && !captchaToken
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (captchaPending) {
+      toast.error('Aguarde a verificação de segurança')
+      return
+    }
     try {
-      await login(email, password, totpCode)
+      await login(email, password, totpCode, captchaToken)
       router.push('/dashboard')
       toast.success('Login realizado!')
     } catch (error: any) {
+      // Turnstile tokens are single-use: whatever the outcome, the next
+      // attempt needs a fresh challenge.
+      if (captchaRequired) setCaptchaResetKey((key) => key + 1)
       if (error.message === 'Informe o código do aplicativo autenticador') {
         setRequiresTwoFactor(true)
         return
@@ -179,6 +199,14 @@ export default function LoginPage() {
                 </div>
               )}
 
+              {!showForgotPassword && captchaRequired && (
+                <TurnstileWidget
+                  siteKey={captchaSiteKey}
+                  onToken={setCaptchaToken}
+                  resetKey={captchaResetKey}
+                />
+              )}
+
               {/* Forgot Password Link */}
               {!showForgotPassword && (
                 <div className="flex justify-end">
@@ -195,7 +223,7 @@ export default function LoginPage() {
               {/* Submit Button */}
               <button
                 type="submit"
-                disabled={isLoading || isSendingReset}
+                disabled={isLoading || isSendingReset || (!showForgotPassword && captchaPending)}
                 className="w-full h-[52px] bg-white text-[#050505] rounded-[10px] text-[15px] font-semibold tracking-[-0.01em] transition-all duration-300 hover:bg-[#e5e5e5] hover:-translate-y-[1px] hover:shadow-[0_4px_20px_rgba(255,255,255,0.1)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none"
               >
                 {showForgotPassword

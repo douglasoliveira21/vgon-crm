@@ -41,6 +41,10 @@ type Config struct {
 	RateLimitMax    int
 	RateLimitWindow time.Duration
 
+	// Login CAPTCHA (Cloudflare Turnstile). Disabled when either key is empty.
+	TurnstileSiteKey   string
+	TurnstileSecretKey string
+
 	// GLPI
 	GLPIBaseURL   string
 	GLPIAppToken  string
@@ -84,6 +88,8 @@ func Load() *Config {
 		ClamAVAddr:            getEnv("CLAMAV_ADDR", ""),
 		RateLimitMax:          parseInt(getEnv("RATE_LIMIT_MAX", "1200"), 1200),
 		RateLimitWindow:       parseDuration(getEnv("RATE_LIMIT_WINDOW", "1m")),
+		TurnstileSiteKey:      getEnv("TURNSTILE_SITE_KEY", ""),
+		TurnstileSecretKey:    getEnv("TURNSTILE_SECRET_KEY", ""),
 		GLPIBaseURL:           getEnv("GLPI_BASE_URL", ""),
 		GLPIAppToken:          getEnv("GLPI_APP_TOKEN", ""),
 		GLPIUserToken:         getEnv("GLPI_USER_TOKEN", ""),

@@ -24,6 +24,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	// AUTH Routes (public)
 	// ============================================
 	auth := api.Group("/auth")
+	auth.Get("/captcha", AuthCaptchaConfig(svc))
 	auth.Post("/login", AuthLogin(svc))
 	auth.Post("/register", AuthRegister(svc))
 	auth.Post("/refresh", AuthRefresh(svc))

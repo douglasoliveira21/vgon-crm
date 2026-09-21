@@ -25,6 +25,18 @@ func AuthLogin(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Email and password are required"})
 		}
 
+		// Verified before touching credentials so a bot can't probe passwords
+		// without solving the challenge.
+		if captchaEnabled(svc) {
+			if err := services.VerifyTurnstile(svc.Config.TurnstileSecretKey, req.CaptchaToken, clientIP(c)); err != nil {
+				recordLoginEvent(svc, c, req.Email, false, "captcha: "+err.Error(), "", "")
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"error": "Verificação de segurança falhou. Tente novamente.",
+					"code":  "captcha_failed",
+				})
+			}
+		}
+
 		resp, err := svc.Auth.Login(&req)
 		if err != nil {
 			if errors.Is(err, services.ErrTwoFactorRequired) {
@@ -52,6 +64,31 @@ func AuthLogin(svc *services.Container) fiber.Handler {
 
 		setAuthCookies(c, svc, resp.AccessToken, resp.RefreshToken)
 		return c.JSON(resp)
+	}
+}
+
+func captchaEnabled(svc *services.Container) bool {
+	return svc.Config.TurnstileSiteKey != "" && svc.Config.TurnstileSecretKey != ""
+}
+
+func clientIP(c *fiber.Ctx) string {
+	if forwardedFor := strings.TrimSpace(c.Get("X-Forwarded-For")); forwardedFor != "" {
+		return strings.TrimSpace(strings.Split(forwardedFor, ",")[0])
+	}
+	if realIP := strings.TrimSpace(c.Get("X-Real-IP")); realIP != "" {
+		return realIP
+	}
+	return c.IP()
+}
+
+// AuthCaptchaConfig tells the login page whether to render a CAPTCHA widget
+// and with which public site key, so the frontend needs no build-time config.
+func AuthCaptchaConfig(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if !captchaEnabled(svc) {
+			return c.JSON(fiber.Map{"provider": "", "site_key": ""})
+		}
+		return c.JSON(fiber.Map{"provider": "turnstile", "site_key": svc.Config.TurnstileSiteKey})
 	}
 }
 
