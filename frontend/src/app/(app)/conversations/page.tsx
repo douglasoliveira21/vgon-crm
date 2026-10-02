@@ -144,6 +144,117 @@ function renderTextWithLinks(text: string, isOwnMessage: boolean) {
   return parts.length > 0 ? parts : text
 }
 
+type WhatsAppInlineRule = {
+  marker: string
+  tag: 'strong' | 'em' | 's' | 'code'
+  nested: boolean
+  multiline: boolean
+}
+
+// Probed in this order so the triple backtick wins over the single-character
+// markers it would otherwise be read as.
+const WHATSAPP_INLINE_RULES: WhatsAppInlineRule[] = [
+  { marker: '```', tag: 'code', nested: false, multiline: true },
+  { marker: '*', tag: 'strong', nested: true, multiline: false },
+  { marker: '_', tag: 'em', nested: true, multiline: false },
+  { marker: '~', tag: 's', nested: true, multiline: false },
+]
+
+// Latin-1 letter ranges are spelled out instead of \p{L} because the project
+// compiles without the regex "u" flag. The × and ÷ symbols are left out.
+const WHATSAPP_WORD_CHAR_REGEX = /[0-9A-Za-zÀ-ÖØ-öø-ÿ]/
+
+// WhatsApp only treats a marker as formatting at a word boundary, so "2*3*4"
+// and "nome_do_campo" have to stay literal.
+function isWhatsAppMarkerBoundary(char: string | undefined) {
+  return char === undefined || !WHATSAPP_WORD_CHAR_REGEX.test(char)
+}
+
+function findWhatsAppMarkup(text: string) {
+  for (let index = 0; index < text.length; index++) {
+    for (const rule of WHATSAPP_INLINE_RULES) {
+      if (!text.startsWith(rule.marker, index)) continue
+      if (!isWhatsAppMarkerBoundary(text[index - 1])) continue
+      const contentStart = index + rule.marker.length
+      const closeIndex = text.indexOf(rule.marker, contentStart)
+      if (closeIndex === -1 || closeIndex === contentStart) continue
+      const content = text.slice(contentStart, closeIndex)
+      if (/^\s|\s$/.test(content)) continue
+      if (!rule.multiline && content.includes('\n')) continue
+      const end = closeIndex + rule.marker.length
+      if (!isWhatsAppMarkerBoundary(text[end])) continue
+      return { rule, content, start: index, end }
+    }
+  }
+  return null
+}
+
+// Renders WhatsApp's own markup (*negrito*, _itálico_, ~riscado~ and
+// ```monospaçado```) as real formatting instead of leaving the raw markers on
+// screen, keeping link detection working inside the formatted runs.
+function renderWhatsAppText(text: string, isOwnMessage: boolean, keyPrefix = 'wa'): React.ReactNode[] {
+  const nodes: React.ReactNode[] = []
+  let rest = text
+  let cursor = 0
+
+  while (rest.length > 0) {
+    const match = findWhatsAppMarkup(rest)
+    if (!match) {
+      nodes.push(<span key={`${keyPrefix}-${cursor}`}>{renderTextWithLinks(rest, isOwnMessage)}</span>)
+      break
+    }
+    if (match.start > 0) {
+      nodes.push(
+        <span key={`${keyPrefix}-${cursor}`}>
+          {renderTextWithLinks(rest.slice(0, match.start), isOwnMessage)}
+        </span>
+      )
+    }
+    const key = `${keyPrefix}-${cursor + match.start}`
+    const inner = match.rule.nested
+      ? renderWhatsAppText(match.content, isOwnMessage, `${key}-n`)
+      : match.content
+    switch (match.rule.tag) {
+      case 'strong':
+        nodes.push(<strong key={key} className="font-semibold">{inner}</strong>)
+        break
+      case 'em':
+        nodes.push(<em key={key} className="italic">{inner}</em>)
+        break
+      case 's':
+        nodes.push(<s key={key} className="line-through">{inner}</s>)
+        break
+      case 'code':
+        nodes.push(<code key={key} className="font-mono text-[0.95em]">{inner}</code>)
+        break
+    }
+    cursor += match.end
+    rest = rest.slice(match.end)
+  }
+
+  return nodes
+}
+
+// Plain-text spots (the quoted reply preview) can't show formatting, so drop
+// the markers there instead of leaking them as literal asterisks.
+function stripWhatsAppMarkup(text: string): string {
+  let result = ''
+  let rest = text
+
+  while (rest.length > 0) {
+    const match = findWhatsAppMarkup(rest)
+    if (!match) {
+      result += rest
+      break
+    }
+    result += rest.slice(0, match.start)
+    result += match.rule.nested ? stripWhatsAppMarkup(match.content) : match.content
+    rest = rest.slice(match.end)
+  }
+
+  return result
+}
+
 function LoadingState({ label }: { label: string }) {
   return (
     <div className="flex h-full min-h-[180px] flex-col items-center justify-center gap-3 text-sm text-gray-500">
@@ -1634,7 +1745,7 @@ export default function ConversationsPage() {
                         {msg.reply_to_sender || 'Contato'}
                       </p>
                       <p className={`text-xs truncate ${msg.sender_type === 'user' ? 'text-white/60' : 'text-gray-500'}`}>
-                        {msg.reply_to_content}
+                        {stripWhatsAppMarkup(msg.reply_to_content)}
                       </p>
                     </div>
                   )}
@@ -1706,7 +1817,7 @@ export default function ConversationsPage() {
 
                   {msg.content && msg.message_type !== 'audio' && (
                     <p className="text-sm whitespace-pre-wrap break-words">
-                      {renderTextWithLinks(msg.content, msg.sender_type === 'user')}
+                      {renderWhatsAppText(msg.content, msg.sender_type === 'user')}
                     </p>
                   )}
 
