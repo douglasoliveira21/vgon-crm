@@ -942,6 +942,18 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	// Extract message content
 	message, _ := data["message"].(map[string]interface{})
 	msgType, content, mediaURL := extractMessageContent(message)
+
+	// WhatsApp also pushes events that are not messages an attendant can
+	// read: reactions, deletions, edits, poll updates and protocol/system
+	// payloads. extractMessageContent reports every one of those as empty
+	// text, and persisting them showed the contact sending a blank bubble
+	// plus a phantom attachment preview in the conversation list for
+	// something they never sent.
+	if msgType == "text" && content == "" && mediaURL == "" {
+		log.Printf("[WEBHOOK] Skipping non-renderable event %s from %s on %s (payload: %s)", messageID, phone, instanceName, messagePayloadKeys(message))
+		return
+	}
+
 	log.Printf("[WEBHOOK] Incoming message for conversation %s from %s on %s: type=%s content=%q", conversationID, phone, instanceName, msgType, content)
 
 	// Save message
@@ -1503,10 +1515,61 @@ func splitJid(jid string) []string {
 	return result
 }
 
+// messagePayloadKeys names the fields of an unhandled WhatsApp payload so a
+// skipped event can be identified in the logs without dumping its contents.
+func messagePayloadKeys(message map[string]interface{}) string {
+	if len(message) == 0 {
+		return "empty"
+	}
+	keys := make([]string, 0, len(message))
+	for key := range message {
+		keys = append(keys, key)
+	}
+	return strings.Join(keys, ",")
+}
+
+// messageEnvelopes are the wrappers WhatsApp nests a real payload inside.
+// Left wrapped, a disappearing or view-once photo looks contentless and gets
+// dropped as a non-renderable event instead of reaching the attendant.
+var messageEnvelopes = []string{
+	"ephemeralMessage",
+	"viewOnceMessage",
+	"viewOnceMessageV2",
+	"viewOnceMessageV2Extension",
+	"documentWithCaptionMessage",
+}
+
+func unwrapMessageEnvelope(message map[string]interface{}) map[string]interface{} {
+	// Envelopes can nest (an ephemeral chat carrying view-once media), but
+	// only a few levels deep — the bound just stops a malformed payload from
+	// looping.
+	for depth := 0; depth < 4; depth++ {
+		unwrapped := false
+		for _, envelope := range messageEnvelopes {
+			wrapper, ok := message[envelope].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			inner, ok := wrapper["message"].(map[string]interface{})
+			if !ok || len(inner) == 0 {
+				continue
+			}
+			message = inner
+			unwrapped = true
+			break
+		}
+		if !unwrapped {
+			break
+		}
+	}
+	return message
+}
+
 func extractMessageContent(message map[string]interface{}) (msgType, content, mediaURL string) {
 	if message == nil {
 		return "text", "", ""
 	}
+	message = unwrapMessageEnvelope(message)
 
 	if conv, ok := message["conversation"].(string); ok {
 		return "text", conv, ""

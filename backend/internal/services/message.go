@@ -50,7 +50,10 @@ func mediaPreviewLabel(msgType string) string {
 	case "gif":
 		return "🎞️ GIF"
 	default:
-		return "📎 Mídia"
+		// Every media type is listed above, so anything else is a text
+		// message. Returning a generic "attachment" label here made
+		// contentless non-media events look like a file the contact sent.
+		return ""
 	}
 }
 
