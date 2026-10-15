@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/evocrm/backend/internal/safe"
 	"github.com/evocrm/backend/internal/services"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -1867,14 +1868,20 @@ func runCampaignSender(ctx context.Context, svc *services.Container, campaignID,
 		if err != nil {
 			requeueCampaignContact(svc.DB, campaignContactID, err)
 		} else {
-			_, _ = svc.DB.ExecContext(ctx, `
+			// This row is what takes the recipient out of the pending set.
+			// Ignoring a failure here left them pending, so the very next
+			// iteration selected them again and kept re-sending in a loop.
+			if _, dbErr := svc.DB.ExecContext(ctx, `
 				UPDATE campaign_contacts
 				SET status = CASE WHEN status IN ('delivered', 'read', 'replied') THEN status ELSE 'sent' END,
 					sent_at = COALESCE(sent_at, NOW()),
 					locked_at = NULL,
 					error_message = NULL
 				WHERE id = $1
-			`, campaignContactID)
+			`, campaignContactID); dbErr != nil {
+				log.Printf("[CAMPAIGN] failed to mark recipient %s as sent, stopping %s to avoid resending: %v", campaignContactID, campaignID, dbErr)
+				return dbErr
+			}
 		}
 		refreshCampaignCounters(svc.DB, campaignID)
 		if !waitForCampaign(ctx, campaignMessageDelay) {
@@ -1938,8 +1945,31 @@ func requeueCampaignContact(db *sql.DB, campaignContactID string, sendErr error)
 	`, retryCount, delayMinutes, sendErr.Error(), campaignContactID)
 }
 
+// campaignItemAlreadySent reports whether this recipient already received
+// this item of a multi-message campaign, so a retry resumes instead of
+// starting over.
+func campaignItemAlreadySent(db *sql.DB, campaignContactID string, itemIndex int) bool {
+	var exists bool
+	if err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM campaign_contact_messages
+			WHERE campaign_contact_id = $1 AND item_index = $2
+		)
+	`, campaignContactID, itemIndex).Scan(&exists); err != nil {
+		return false
+	}
+	return exists
+}
+
 func sendCampaignItems(svc *services.Container, campaignID, campaignContactID, instanceName, phone string, items []campaignMessageItem, name, contactPhone, email, companyName string) error {
 	for index, item := range items {
+		// A retry restarts this loop at the first item, so without this a
+		// failure on item 3 of 4 re-sent items 1 and 2 to a customer who
+		// already had them, once per retry.
+		if campaignItemAlreadySent(svc.DB, campaignContactID, index) {
+			continue
+		}
+
 		text := renderCampaignMessage(item.Content, name, contactPhone, email, companyName)
 		var externalID string
 		var err error
@@ -1954,14 +1984,21 @@ func sendCampaignItems(svc *services.Container, campaignID, campaignContactID, i
 		if err != nil {
 			return fmt.Errorf("%s %d: %w", campaignItemTypeLabel(item.Type), index+1, err)
 		}
-		if externalID != "" {
-			_, _ = svc.DB.Exec(`
-				INSERT INTO campaign_contact_messages (id, campaign_id, campaign_contact_id, external_id, message_type, item_index, status)
-				VALUES ($1, $2, $3, $4, $5, $6, 'sent')
-				ON CONFLICT (external_id) DO UPDATE SET
-					status = EXCLUDED.status,
-					updated_at = NOW()
-			`, uuid.New().String(), campaignID, campaignContactID, externalID, item.Type, index)
+		// Record the delivery even when the provider answers without a
+		// message id: the row is what stops a retry from sending this item
+		// again, and a synthetic id keeps that working. It is prefixed so it
+		// can never collide with a real WhatsApp id used for status updates.
+		if externalID == "" {
+			externalID = fmt.Sprintf("local:%s:%d", campaignContactID, index)
+		}
+		if _, dbErr := svc.DB.Exec(`
+			INSERT INTO campaign_contact_messages (id, campaign_id, campaign_contact_id, external_id, message_type, item_index, status)
+			VALUES ($1, $2, $3, $4, $5, $6, 'sent')
+			ON CONFLICT (external_id) DO UPDATE SET
+				status = EXCLUDED.status,
+				updated_at = NOW()
+		`, uuid.New().String(), campaignID, campaignContactID, externalID, item.Type, index); dbErr != nil {
+			log.Printf("[CAMPAIGN] failed to record item %d for recipient %s: %v", index, campaignContactID, dbErr)
 		}
 		if index < len(items)-1 {
 			time.Sleep(time.Second)
@@ -2697,7 +2734,7 @@ func SendWidgetMessage(svc *services.Container) fiber.Handler {
 		})
 
 		// Trigger bot automation (same as WhatsApp incoming messages)
-		go svc.Bot.TriggerBot(companyID, conversationID, contactID, channelID, body.Message, "", "")
+		safe.Go("bot-trigger", func() { svc.Bot.TriggerBot(companyID, conversationID, contactID, channelID, body.Message, "", "") })
 
 		if !svc.Auth.ValidateWidgetSession(widgetID, conversationID, body.VisitorID, sessionToken) {
 			sessionToken, err = svc.Auth.CreateWidgetSession(widgetID, conversationID, body.VisitorID)

@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -266,49 +269,85 @@ func ExportTenantData(svc *services.Container) fiber.Handler {
 		if err := svc.DB.QueryRow("SELECT name, slug FROM companies WHERE id = $1", tenantID).Scan(&name, &slug); err != nil {
 			return c.Status(404).JSON(fiber.Map{"error": "Tenant não encontrado"})
 		}
-		queries := map[string]string{
-			"users":         "SELECT id, name, email, phone, role_id, is_active, created_at, updated_at FROM users WHERE company_id = $1 ORDER BY created_at",
-			"contacts":      "SELECT * FROM contacts WHERE company_id = $1 ORDER BY created_at",
-			"channels":      "SELECT id, name, type, status, team_id, business_hours, is_active, created_at, updated_at FROM channels WHERE company_id = $1 ORDER BY created_at",
-			"conversations": "SELECT * FROM conversations WHERE company_id = $1 ORDER BY created_at",
-			"messages":      "SELECT * FROM messages WHERE company_id = $1 ORDER BY created_at",
-			"audit_logs":    "SELECT * FROM audit_logs WHERE company_id = $1 ORDER BY created_at",
-		}
-		data := fiber.Map{}
-		counts := fiber.Map{}
-		for key, query := range queries {
-			items, err := exportTenantRows(svc.DB, query, tenantID)
-			if err != nil {
-				return c.Status(500).JSON(fiber.Map{"error": "Falha ao exportar " + key + ": " + err.Error()})
-			}
-			data[key] = items
-			counts[key] = len(items)
-		}
 		logAuditEvent(svc.DB, c, "admin.tenant.export", "company", tenantID, nil)
+		c.Set("Content-Type", "application/json")
 		c.Set("Content-Disposition", "attachment; filename=tenant-"+slug+".json")
-		return c.JSON(fiber.Map{"tenant": fiber.Map{"id": tenantID, "name": name, "slug": slug}, "counts": counts, "data": data, "exported_at": time.Now()})
+
+		// Streamed row by row. Collecting every table into memory first — and
+		// twice over, as raw JSON and again as parsed values — meant one
+		// export of a large tenant could exhaust the server's memory and take
+		// every other tenant down with it. The rows also go out exactly as
+		// Postgres produced them, skipping a decode/re-encode round trip.
+		//
+		// The status code is already sent once streaming starts, so a failure
+		// mid-export can only be logged and truncates the file.
+		c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+			header, _ := json.Marshal(fiber.Map{"id": tenantID, "name": name, "slug": slug})
+			fmt.Fprintf(w, `{"tenant":%s,"exported_at":%q,"data":{`, header, time.Now().Format(time.RFC3339))
+
+			counts := map[string]int{}
+			for index, export := range tenantExports {
+				if index > 0 {
+					_, _ = w.WriteString(",")
+				}
+				fmt.Fprintf(w, "%q:[", export.name)
+				count, err := streamTenantRows(w, svc.DB, export.query, tenantID)
+				if err != nil {
+					log.Printf("[ADMIN] tenant %s export failed while writing %s: %v", tenantID, export.name, err)
+				}
+				counts[export.name] = count
+				_, _ = w.WriteString("]")
+				_ = w.Flush()
+			}
+
+			countsJSON, _ := json.Marshal(counts)
+			fmt.Fprintf(w, `},"counts":%s}`, countsJSON)
+			_ = w.Flush()
+		})
+		return nil
 	}
 }
 
-func exportTenantRows(db *sql.DB, query, tenantID string) ([]interface{}, error) {
+// tenantExports is ordered so the exported file is reproducible; ranging over
+// a map would shuffle the sections on every run.
+var tenantExports = []struct{ name, query string }{
+	{"users", "SELECT id, name, email, phone, role_id, is_active, created_at, updated_at FROM users WHERE company_id = $1 ORDER BY created_at"},
+	{"contacts", "SELECT * FROM contacts WHERE company_id = $1 ORDER BY created_at"},
+	{"channels", "SELECT id, name, type, status, team_id, business_hours, is_active, created_at, updated_at FROM channels WHERE company_id = $1 ORDER BY created_at"},
+	{"conversations", "SELECT * FROM conversations WHERE company_id = $1 ORDER BY created_at"},
+	{"messages", "SELECT * FROM messages WHERE company_id = $1 ORDER BY created_at"},
+	{"audit_logs", "SELECT * FROM audit_logs WHERE company_id = $1 ORDER BY created_at"},
+}
+
+func streamTenantRows(w *bufio.Writer, db *sql.DB, query, tenantID string) (int, error) {
 	rows, err := db.Query("SELECT to_jsonb(export_row) FROM ("+query+") export_row", tenantID)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	defer rows.Close()
-	items := []interface{}{}
+
+	count := 0
 	for rows.Next() {
 		var raw []byte
 		if err := rows.Scan(&raw); err != nil {
-			return nil, err
+			return count, err
 		}
-		var item interface{}
-		if err := json.Unmarshal(raw, &item); err != nil {
-			return nil, err
+		if count > 0 {
+			if _, err := w.WriteString(","); err != nil {
+				return count, err
+			}
 		}
-		items = append(items, item)
+		if _, err := w.Write(raw); err != nil {
+			return count, err
+		}
+		count++
+		if count%500 == 0 {
+			if err := w.Flush(); err != nil {
+				return count, err
+			}
+		}
 	}
-	return items, rows.Err()
+	return count, rows.Err()
 }
 
 func ScheduleTenantDeletion(svc *services.Container) fiber.Handler {

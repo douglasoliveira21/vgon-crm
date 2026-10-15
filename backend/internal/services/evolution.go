@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/evocrm/backend/internal/config"
 	"github.com/evocrm/backend/internal/models"
+	"github.com/evocrm/backend/internal/safe"
 	"github.com/evocrm/backend/internal/websocket"
 	"github.com/google/uuid"
 )
@@ -831,7 +833,7 @@ func (s *EvolutionService) handleConnectionUpdate(instanceName string, event map
 		// sent once, at instance creation — an instance created before an
 		// event type was added to that list (or whose config drifted) would
 		// silently never receive it, e.g. the contact's live typing status.
-		go s.syncInstanceWebhook(instanceName)
+		safe.Go("webhook-sync", func() { s.syncInstanceWebhook(instanceName) })
 	}
 
 	// Get company ID for WebSocket notification
@@ -920,8 +922,8 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	if fromMe {
 		return
 	}
-	if s.isKnownOutgoingMessage(messageID) {
-		log.Printf("[WEBHOOK] Skipping outgoing message echo %s from instance %s", messageID, instanceName)
+	if s.isMessageAlreadyStored(instance.CompanyID, messageID) {
+		log.Printf("[WEBHOOK] Skipping already-stored message %s from instance %s", messageID, instanceName)
 		return
 	}
 
@@ -990,7 +992,7 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	// happens to open the conversation to fetch it on demand means it can
 	// already be gone by then ("mídia indisponível").
 	if mediaURL != "" {
-		go s.downloadAndSaveIncomingMedia(msgID, instanceName, msgType)
+		safe.Go("media-download", func() { s.downloadAndSaveIncomingMedia(msgID, instanceName, msgType) })
 	}
 
 	// Update conversation. WhatsApp media messages without a caption arrive
@@ -1050,7 +1052,7 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	if s.glpiFlow != nil {
 		glpiConversationID := s.glpiFlow.ActiveConversationForMessage(instance.CompanyID, conversationID, contactID)
 		if glpiConversationID != "" {
-			go s.glpiFlow.HandleGLPIMessage(instance.CompanyID, glpiConversationID, contactID, instanceName, phone, content)
+			safe.Go("glpi-flow", func() { s.glpiFlow.HandleGLPIMessage(instance.CompanyID, glpiConversationID, contactID, instanceName, phone, content) })
 			return
 		}
 	}
@@ -1060,7 +1062,7 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 		if instance.ChannelID != nil {
 			channelID = *instance.ChannelID
 		}
-		go s.botEngine.TriggerBot(instance.CompanyID, conversationID, contactID, channelID, content, instanceName, phone)
+		safe.Go("bot-trigger", func() { s.botEngine.TriggerBot(instance.CompanyID, conversationID, contactID, channelID, content, instanceName, phone) })
 	}
 }
 
@@ -1310,7 +1312,7 @@ func (s *EvolutionService) getOrCreateContact(companyID, phone string, data map[
 		var avatarURL *string
 		s.db.QueryRow("SELECT avatar_url FROM contacts WHERE id = $1", contactID).Scan(&avatarURL)
 		if avatarURL == nil || *avatarURL == "" {
-			go s.fetchAndSaveContactPhoto(instanceName, phone, contactID)
+			safe.Go("contact-photo", func() { s.fetchAndSaveContactPhoto(instanceName, phone, contactID) })
 		}
 		return contactID
 	}
@@ -1326,6 +1328,14 @@ func (s *EvolutionService) getOrCreateContact(companyID, phone string, data map[
 		INSERT INTO contacts (id, company_id, name, phone, origin)
 		VALUES ($1, $2, $3, $4, 'whatsapp')
 	`, contactID, companyID, pushName, phone); err != nil {
+		// Two webhooks for the same brand new contact race here: both miss
+		// the lookup above, then the (phone, company_id) unique index
+		// rejects whichever insert loses. Giving up meant the caller
+		// dropped that message permanently, so take the winner's row.
+		if existing, found := FindContactIDByPhone(s.db, companyID, phone); found {
+			log.Printf("[CONTACT] Lost insert race for phone %s, using contact %s", phone, existing)
+			return existing
+		}
 		log.Printf("[CONTACT] failed to create contact for phone %s: %v", phone, err)
 		return ""
 	}
@@ -1333,7 +1343,7 @@ func (s *EvolutionService) getOrCreateContact(companyID, phone string, data map[
 	log.Printf("[CONTACT] Created new contact %s for phone %s", contactID, phone)
 
 	// Fetch profile photo in background
-	go s.fetchAndSaveContactPhoto(instanceName, phone, contactID)
+	safe.Go("contact-photo", func() { s.fetchAndSaveContactPhoto(instanceName, phone, contactID) })
 
 	return contactID
 }
@@ -1350,6 +1360,7 @@ func (s *EvolutionService) fetchAndSaveContactPhoto(instanceName, phone, contact
 
 func (s *EvolutionService) getOrCreateConversation(companyID, contactID string, channelID *string) string {
 	var conversationID string
+	var lookupErr error
 
 	// First, try to find an active conversation for this contact in the same channel.
 	// Different WhatsApp instances/channels must not steal each other's waiting bot execution.
@@ -1367,6 +1378,7 @@ func (s *EvolutionService) getOrCreateConversation(companyID, contactID string, 
 			log.Printf("[CONVERSATION] Found existing conversation %s for contact %s on channel %s", conversationID, contactID, *channelID)
 			return conversationID
 		}
+		lookupErr = err
 	} else {
 		err := s.db.QueryRow(`
 			SELECT id FROM conversations
@@ -1381,6 +1393,15 @@ func (s *EvolutionService) getOrCreateConversation(companyID, contactID string, 
 			log.Printf("[CONVERSATION] Found existing conversation %s for contact %s without channel", conversationID, contactID)
 			return conversationID
 		}
+		lookupErr = err
+	}
+
+	// Only "nothing matched" means there is no conversation yet. Treating any
+	// error the same way meant a transient database hiccup silently started a
+	// second chat for a contact who already had one, splitting their history.
+	if !errors.Is(lookupErr, sql.ErrNoRows) {
+		log.Printf("[CONVERSATION] lookup failed for contact %s, not creating a duplicate: %v", contactID, lookupErr)
+		return ""
 	}
 
 	// No active conversation found, create a new one
@@ -1694,7 +1715,15 @@ func firstNonEmptyString(data map[string]interface{}, keys ...string) string {
 	return ""
 }
 
-func (s *EvolutionService) isKnownOutgoingMessage(messageID string) bool {
+// isMessageAlreadyStored reports whether this WhatsApp message id is already
+// in the database for this tenant, covering both the echo of a message we
+// sent ourselves and a redelivery of one we received.
+//
+// It used to only match messages we sent, so when Evolution replayed an
+// inbound webhook — which it does on retry — the message was inserted a
+// second time, bumping the unread count and firing the bot flow again.
+// Scoping by company also keeps one tenant's ids from masking another's.
+func (s *EvolutionService) isMessageAlreadyStored(companyID, messageID string) bool {
 	if strings.TrimSpace(messageID) == "" {
 		return false
 	}
@@ -1704,10 +1733,9 @@ func (s *EvolutionService) isKnownOutgoingMessage(messageID string) bool {
 		SELECT EXISTS (
 			SELECT 1
 			FROM messages
-			WHERE external_id = $1
-				AND sender_type IN ('bot', 'agent', 'user')
+			WHERE company_id = $1 AND external_id = $2
 		)
-	`, messageID).Scan(&exists)
+	`, companyID, messageID).Scan(&exists)
 	return err == nil && exists
 }
 

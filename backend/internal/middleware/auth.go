@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/evocrm/backend/internal/config"
@@ -252,15 +254,72 @@ func ConversationAccess(db *sql.DB) fiber.Handler {
 	}
 }
 
+// conversationAccessTTL bounds how long an authorization decision is reused.
+//
+// The WebSocket hub calls CanAccessConversation once per connected client for
+// every broadcast, from its single goroutine while holding a lock. With a few
+// dozen agents online that was hundreds of serial queries per inbound
+// message, so realtime delivery stalled for the whole tenant. Access changes
+// (a transfer, a team change) take effect within this window instead of
+// instantly, which is a fair trade for a chat sidebar.
+const conversationAccessTTL = 5 * time.Second
+
+type conversationAccessEntry struct {
+	allowed   bool
+	expiresAt time.Time
+}
+
+var (
+	conversationAccessMu    sync.Mutex
+	conversationAccessCache = map[string]conversationAccessEntry{}
+)
+
+func conversationAccessCached(key string) (bool, bool) {
+	conversationAccessMu.Lock()
+	defer conversationAccessMu.Unlock()
+	entry, ok := conversationAccessCache[key]
+	if !ok || time.Now().After(entry.expiresAt) {
+		return false, false
+	}
+	return entry.allowed, true
+}
+
+func cacheConversationAccess(key string, allowed bool) {
+	conversationAccessMu.Lock()
+	defer conversationAccessMu.Unlock()
+	// Entries expire in seconds, so dropping the whole map when it grows is
+	// enough to bound memory without per-entry eviction bookkeeping.
+	if len(conversationAccessCache) > 10000 {
+		conversationAccessCache = map[string]conversationAccessEntry{}
+	}
+	conversationAccessCache[key] = conversationAccessEntry{
+		allowed:   allowed,
+		expiresAt: time.Now().Add(conversationAccessTTL),
+	}
+}
+
 func CanAccessConversation(db *sql.DB, conversationID, companyID, userID, roleSlug string) bool {
 	if conversationID == "" || companyID == "" || userID == "" {
 		return false
 	}
+
+	cacheKey := conversationID + "|" + companyID + "|" + userID + "|" + roleSlug
+	if allowed, ok := conversationAccessCached(cacheKey); ok {
+		return allowed
+	}
+
 	if roleSlug != "agent" && roleSlug != "supervisor" {
 		var allowed bool
-		_ = db.QueryRow(`SELECT EXISTS (
+		// A failure here denies access, which silently drops the message for
+		// that client, so make it visible instead of guessing — and don't
+		// cache it, so a transient error doesn't stick for the whole TTL.
+		if err := db.QueryRow(`SELECT EXISTS (
 			SELECT 1 FROM conversations WHERE id = $1 AND company_id = $2
-		)`, conversationID, companyID).Scan(&allowed)
+		)`, conversationID, companyID).Scan(&allowed); err != nil {
+			log.Printf("[ACCESS] conversation check failed for %s/%s: %v", conversationID, userID, err)
+			return false
+		}
+		cacheConversationAccess(cacheKey, allowed)
 		return allowed
 	}
 
@@ -288,6 +347,7 @@ func CanAccessConversation(db *sql.DB, conversationID, companyID, userID, roleSl
 			)
 		)`, conversationID, companyID, userID).Scan(&allowed)
 	}
+	cacheConversationAccess(cacheKey, allowed)
 	return allowed
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/evocrm/backend/internal/safe"
 	"github.com/evocrm/backend/internal/services"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -175,7 +176,7 @@ func StartConversation(svc *services.Container) fiber.Handler {
 		if body.Message != "" {
 			// Get instance for sending
 			var phone, instanceName string
-			svc.DB.QueryRow(`
+			lookupErr := svc.DB.QueryRow(`
 				SELECT co.phone, wi.instance_name
 				FROM conversations conv
 				JOIN contacts co ON conv.contact_id = co.id
@@ -184,21 +185,31 @@ func StartConversation(svc *services.Container) fiber.Handler {
 				WHERE conv.id = $1
 			`, conversationID).Scan(&phone, &instanceName)
 
-			if phone != "" && instanceName != "" {
-				externalID, sendErr := svc.Evolution.SendTextMessage(instanceName, phone, normalizeOutgoingWhatsAppLinks(body.Message))
-				msgID := uuid.New().String()
-				status := "sent"
-				if sendErr != nil {
-					status = "failed"
-				}
-				if _, err := svc.DB.Exec(`INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, external_id, status) VALUES ($1, $2, $3, 'user', $4, $5, 'text', $6, $7)`,
-					msgID, conversationID, companyID, userID, body.Message, externalID, status); err != nil {
-					log.Printf("[CONVERSATIONS] failed to save message for conversation %s: %v", conversationID, err)
-					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save message"})
-				}
-				if sendErr != nil {
-					return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": sendErr.Error()})
-				}
+			// Silently skipping here dropped the attendant's first message
+			// while still reporting the conversation as started.
+			if lookupErr != nil || phone == "" || instanceName == "" {
+				log.Printf("[CONVERSATIONS] cannot send first message on conversation %s: channel lookup failed (err=%v phoneMissing=%t instanceMissing=%t)",
+					conversationID, lookupErr, phone == "", instanceName == "")
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"error":           "Conversa criada, mas o canal de WhatsApp está indisponível para enviar a mensagem",
+					"conversation_id": conversationID,
+					"contact_id":      contactID,
+				})
+			}
+
+			externalID, sendErr := svc.Evolution.SendTextMessage(instanceName, phone, normalizeOutgoingWhatsAppLinks(body.Message))
+			msgID := uuid.New().String()
+			status := "sent"
+			if sendErr != nil {
+				status = "failed"
+			}
+			if _, err := svc.DB.Exec(`INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, external_id, status) VALUES ($1, $2, $3, 'user', $4, $5, 'text', $6, $7)`,
+				msgID, conversationID, companyID, userID, body.Message, externalID, status); err != nil {
+				log.Printf("[CONVERSATIONS] failed to save message for conversation %s: %v", conversationID, err)
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save message"})
+			}
+			if sendErr != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": sendErr.Error()})
 			}
 		}
 
@@ -252,7 +263,7 @@ func GetConversations(svc *services.Container) fiber.Handler {
 			visibilityUserID = userID
 			visibilityRole = roleSlug
 		}
-		conversations, err := svc.Message.GetConversations(companyID, status, assignedTo, teamID, channelID, unassigned == "true", limit, offset, "", contactID, visibilityUserID, visibilityRole)
+		conversations, err := svc.Message.GetConversations(companyID, status, assignedTo, teamID, channelID, unassigned == "true", limit, offset, "", contactID, visibilityUserID, visibilityRole, c.Query("search"))
 		if err != nil {
 			log.Printf("[CONVERSATIONS] failed to list conversations for company %s: %v", companyID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -378,7 +389,7 @@ func CloseConversation(svc *services.Container) fiber.Handler {
 
 		// Fire any "conversation closed" bot flow (e.g. a farewell message).
 		// Runs asynchronously so it never blocks the close response.
-		go svc.Bot.TriggerConversationClosed(companyID, conversationID)
+		safe.Go("bot-closed", func() { svc.Bot.TriggerConversationClosed(companyID, conversationID) })
 
 		return c.JSON(fiber.Map{"message": "Conversation closed"})
 	}
@@ -571,7 +582,21 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 				WHERE c.id = $1
 			`, conversationID).Scan(&phone, &instanceName)
 
-			if channelType != "email" && err == nil && phone != "" && instanceName != "" {
+			if channelType != "email" {
+				// Without this the lookup failing just skipped the send: the
+				// message stayed stored as 'sent', the WebSocket had already
+				// announced it, and the handler returned success — so the
+				// attendant believed the customer got a reply that was never
+				// transmitted. Same failure the media path already guards.
+				if err != nil || phone == "" || instanceName == "" {
+					log.Printf("[CONVERSATIONS] cannot send message %s on conversation %s: channel lookup failed (err=%v phoneMissing=%t instanceMissing=%t)",
+						msg.ID, conversationID, err, phone == "", instanceName == "")
+					if _, dbErr := svc.DB.Exec("UPDATE messages SET status = 'failed' WHERE id = $1 AND company_id = $2", msg.ID, companyID); dbErr != nil {
+						log.Printf("[CONVERSATIONS] failed to mark message %s as failed: %v", msg.ID, dbErr)
+					}
+					return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Canal de WhatsApp indisponível para esta conversa"})
+				}
+
 				// Get agent name to prefix message
 				var agentName string
 				svc.DB.QueryRow("SELECT name FROM users WHERE id = $1", userID).Scan(&agentName)

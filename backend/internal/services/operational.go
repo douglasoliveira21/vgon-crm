@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/evocrm/backend/internal/safe"
 	"github.com/google/uuid"
 )
 
@@ -43,7 +44,7 @@ func (s *EvolutionService) SyncConnectedInstanceWebhooks() {
 	}
 
 	for _, instanceName := range instanceNames {
-		go s.syncInstanceWebhook(instanceName)
+		safe.Go("webhook-sync", func() { s.syncInstanceWebhook(instanceName) })
 	}
 }
 

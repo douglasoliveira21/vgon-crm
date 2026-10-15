@@ -44,6 +44,10 @@ type Config struct {
 	RateLimitMax    int
 	RateLimitWindow time.Duration
 
+	// Background job workers. Long-running jobs (campaign sends, bot delay
+	// nodes) hold a worker for their whole duration.
+	JobWorkers int
+
 	// Login CAPTCHA (Cloudflare Turnstile). Disabled when either key is empty.
 	TurnstileSiteKey   string
 	TurnstileSecretKey string
@@ -99,6 +103,7 @@ func Load() *Config {
 		ClamAVAddr:            getEnv("CLAMAV_ADDR", ""),
 		RateLimitMax:          parseInt(getEnv("RATE_LIMIT_MAX", "1200"), 1200),
 		RateLimitWindow:       parseDuration(getEnv("RATE_LIMIT_WINDOW", "1m")),
+		JobWorkers:            parseInt(getEnv("JOB_WORKERS", "8"), 8),
 		TurnstileSiteKey:      getEnv("TURNSTILE_SITE_KEY", ""),
 		TurnstileSecretKey:    getEnv("TURNSTILE_SECRET_KEY", ""),
 		// Closed by default: there is no public signup page, and tenants are

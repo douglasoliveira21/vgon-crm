@@ -309,6 +309,10 @@ export default function ConversationsPage() {
   const searchParams = useSearchParams()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const conversationsRef = useRef<Conversation[]>([])
+  // Read from async callbacks (recording stop, uploads) that would otherwise
+  // see whichever conversation was open when the callback was created.
+  const selectedConvRef = useRef<Conversation | null>(null)
+  const recordingConversationIdRef = useRef<string>('')
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [newMessage, setNewMessage] = useState('')
@@ -402,16 +406,17 @@ export default function ConversationsPage() {
     if (conversationsDebounceRef.current) {
       clearTimeout(conversationsDebounceRef.current)
     }
+    // Longer debounce while typing a search so each keystroke isn't a query.
     conversationsDebounceRef.current = setTimeout(() => {
       fetchConversations()
-    }, 100)
+    }, search.trim() ? 350 : 100)
 
     return () => {
       if (conversationsDebounceRef.current) {
         clearTimeout(conversationsDebounceRef.current)
       }
     }
-  }, [filter, statusFilter, channelFilter, teamFilter, mentionsFilter, user?.id])
+  }, [filter, statusFilter, channelFilter, teamFilter, mentionsFilter, search, user?.id])
 
   useEffect(() => {
     fetchTabUnreadCounts()
@@ -442,6 +447,25 @@ export default function ConversationsPage() {
   useEffect(() => {
     conversationsRef.current = conversations
   }, [conversations])
+
+  useEffect(() => {
+    selectedConvRef.current = selectedConv
+  }, [selectedConv])
+
+  // Leaving the page mid-recording used to leave the microphone capturing and
+  // the timer running in the background.
+  useEffect(() => {
+    return () => {
+      recordingCancelledRef.current = true
+      if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current)
+      try {
+        mediaRecorderRef.current?.stream?.getTracks().forEach((track) => track.stop())
+        if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop()
+      } catch {
+        // recorder already torn down
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const handleNewMessage = async (data: Message) => {
@@ -485,6 +509,15 @@ export default function ConversationsPage() {
           })
         }
         scrollToBottom()
+
+        // The backend counts every inbound message as unread. Zeroing it only
+        // in local state meant the next list refresh brought the badge back
+        // (and kept inflating it), so tell the server it was read too.
+        if (data.sender_type === 'contact') {
+          api.post(`/conversations/${data.conversation_id}/read`)
+            .then(() => fetchTabUnreadCounts())
+            .catch(() => {})
+        }
 
         // Update sidebar - no unread since user is viewing
         setConversations((prev) =>
@@ -586,6 +619,14 @@ export default function ConversationsPage() {
       // all_status means no status filter
       if (statusFilter === 'all_status') {
         delete params.status
+      }
+
+      // Searched server-side: the list is capped, so filtering only what was
+      // already loaded would never find the conversations past that cap.
+      const term = search.trim()
+      if (term) {
+        params.search = term
+        params.limit = 100
       }
 
       const response = await api.get('/conversations', { params, signal: controller.signal })
@@ -874,12 +915,16 @@ export default function ConversationsPage() {
   }
 
   const startRecording = async () => {
+    if (!selectedConv) return
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const mediaRecorder = new MediaRecorder(stream)
       mediaRecorderRef.current = mediaRecorder
       audioChunksRef.current = []
       recordingCancelledRef.current = false
+      // The audio belongs to the chat it was recorded in, even if the
+      // attendant switches away before releasing the button.
+      recordingConversationIdRef.current = selectedConv.id
 
       mediaRecorder.ondataavailable = (event) => {
         // stop() still delivers one final chunk asynchronously, after
@@ -898,7 +943,7 @@ export default function ConversationsPage() {
           return
         }
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/ogg' })
-        await sendAudioMessage(audioBlob)
+        await sendAudioMessage(audioBlob, recordingConversationIdRef.current)
       }
 
       mediaRecorder.start()
@@ -969,8 +1014,13 @@ export default function ConversationsPage() {
     }
   }
 
-  const sendAudioMessage = async (audioBlob: Blob) => {
-    if (!selectedConv || audioBlob.size === 0) return
+  // targetConversationId is captured when recording starts. Without it the
+  // onstop callback used the conversation from the render that began the
+  // recording while the optimistic bubble used the current one, so switching
+  // chats mid-recording sent the audio to the old chat and drew it in the new.
+  const sendAudioMessage = async (audioBlob: Blob, targetConversationId?: string) => {
+    const conversationId = targetConversationId || selectedConv?.id
+    if (!conversationId || audioBlob.size === 0) return
 
     // reader.onloadend runs asynchronously, after this function has already
     // returned — a try/catch around the FileReader setup (as this used to
@@ -983,14 +1033,14 @@ export default function ConversationsPage() {
       const base64Audio = reader.result as string
 
       try {
-        await api.post(`/conversations/${selectedConv!.id}/messages/audio`, {
+        await api.post(`/conversations/${conversationId}/messages/audio`, {
           audio_base64: base64Audio,
         })
 
         // Show optimistic message
         const optimisticMsg: Message = {
           id: `temp-audio-${Date.now()}`,
-          conversation_id: selectedConv!.id,
+          conversation_id: conversationId,
           sender_type: 'user',
           sender_id: user?.id,
           sender_name: user?.name,
@@ -1001,8 +1051,11 @@ export default function ConversationsPage() {
           is_private: false,
           created_at: new Date().toISOString(),
         }
-        setMessages((prev) => [...prev, optimisticMsg])
-        scrollToBottom()
+        // Only draw the bubble if that conversation is still on screen.
+        if (selectedConvRef.current?.id === conversationId) {
+          setMessages((prev) => [...prev, optimisticMsg])
+          scrollToBottom()
+        }
         toast.success('Áudio enviado')
       } catch (error: any) {
         toast.error(error.response?.data?.error || 'Erro ao enviar áudio')

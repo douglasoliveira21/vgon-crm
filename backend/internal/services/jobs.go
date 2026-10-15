@@ -9,9 +9,11 @@ import (
 	"log"
 	"math"
 	"os"
+	"runtime/debug"
 	"sync"
 	"time"
 
+	"github.com/evocrm/backend/internal/safe"
 	"github.com/google/uuid"
 )
 
@@ -76,8 +78,27 @@ func (q *JobQueue) Start(ctx context.Context, workers int) {
 	q.mu.Unlock()
 	q.recoverStaleJobs(ctx)
 	for index := 0; index < workers; index++ {
-		go q.runWorker(ctx)
+		// A panic inside a job handler would otherwise kill the process; here
+		// it only loses that worker, and the loop below restarts it so the
+		// queue doesn't quietly end up with fewer workers than configured.
+		workerID := index
+		safe.Go(fmt.Sprintf("job-worker-%d", workerID), func() {
+			for ctx.Err() == nil {
+				q.runWorkerGuarded(ctx, workerID)
+			}
+		})
 	}
+}
+
+// runWorkerGuarded runs one worker and returns instead of propagating a
+// panic, so Start can bring it straight back up.
+func (q *JobQueue) runWorkerGuarded(ctx context.Context, workerID int) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[PANIC] job-worker-%d recovered, restarting: %v\n%s", workerID, r, debug.Stack())
+		}
+	}()
+	q.runWorker(ctx)
 }
 
 func (q *JobQueue) runWorker(ctx context.Context) {
@@ -153,7 +174,7 @@ func (q *JobQueue) processOne(ctx context.Context) error {
 	runCtx, cancel := jobExecutionContext(ctx, jobType)
 	defer cancel()
 	heartbeatDone := make(chan struct{})
-	go q.heartbeatJob(runCtx, id, heartbeatDone)
+	safe.Go("job-heartbeat", func() { q.heartbeatJob(runCtx, id, heartbeatDone) })
 	if err := handler(runCtx, payload); err != nil {
 		close(heartbeatDone)
 		if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {

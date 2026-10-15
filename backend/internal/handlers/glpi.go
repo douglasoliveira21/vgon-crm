@@ -4,6 +4,7 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/evocrm/backend/internal/safe"
 	"github.com/evocrm/backend/internal/services"
 	"github.com/gofiber/fiber/v2"
 )
@@ -226,7 +227,7 @@ func GLPIStartFlow(svc *services.Container) fiber.Handler {
 		}
 
 		// Start GLPI flow
-		go svc.GLPIFlow.StartGLPIFlow(companyID, body.ConversationID, contactID, instanceName, phone, body.Mode)
+		safe.Go("glpi-flow", func() { svc.GLPIFlow.StartGLPIFlow(companyID, body.ConversationID, contactID, instanceName, phone, body.Mode) })
 
 		return c.JSON(fiber.Map{"message": "GLPI flow started", "mode": body.Mode})
 	}

@@ -215,6 +215,16 @@ func (s *MessageService) GetConversations(companyID string, status string, assig
 		args = append(args, conversationIDs[1])
 		argIdx++
 	}
+	if len(conversationIDs) > 4 {
+		if searchTerm := strings.TrimSpace(conversationIDs[4]); searchTerm != "" {
+			// Escape the LIKE wildcards so searching for "%" or "_" looks for
+			// those characters instead of matching every conversation.
+			escaped := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(searchTerm)
+			query += fmt.Sprintf(" AND (co.name ILIKE $%d OR co.phone ILIKE $%d OR c.last_message_preview ILIKE $%d)", argIdx, argIdx, argIdx)
+			args = append(args, "%"+escaped+"%")
+			argIdx++
+		}
+	}
 	visibilityUserID := ""
 	visibilityRole := ""
 	if len(conversationIDs) > 2 {

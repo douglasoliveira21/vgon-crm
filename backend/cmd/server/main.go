@@ -16,6 +16,7 @@ import (
 	"github.com/evocrm/backend/internal/handlers"
 	"github.com/evocrm/backend/internal/middleware"
 	"github.com/evocrm/backend/internal/redis"
+	"github.com/evocrm/backend/internal/safe"
 	"github.com/evocrm/backend/internal/services"
 	"github.com/evocrm/backend/internal/websocket"
 	"github.com/gofiber/fiber/v2"
@@ -75,7 +76,7 @@ func main() {
 		}
 		return middleware.CanAccessConversation(db, conversationID, client.CompanyID, client.UserID, client.RoleSlug)
 	})
-	go wsHub.Run()
+	safe.Go("ws-hub", wsHub.Run)
 
 	// Initialize services
 	svc := services.NewContainer(db, rdb, cfg, wsHub)
@@ -83,7 +84,10 @@ func main() {
 	defer cancelWorkers()
 	handlers.RegisterDurableJobHandlers(svc)
 	handlers.RegisterPrivacyJobs(svc)
-	svc.Jobs.Start(workerCtx, 2)
+	// Campaign sends and bot delay nodes occupy a worker for as long as they
+	// run, so with only two of them a pair of campaigns stalled every other
+	// job — bot flows, e-mail, LGPD and retention — until they finished.
+	svc.Jobs.Start(workerCtx, cfg.JobWorkers)
 	if err := handlers.ResumeDurableCampaigns(svc); err != nil {
 		log.Printf("Failed to resume durable campaigns: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/evocrm/backend/internal/safe"
 	"github.com/evocrm/backend/internal/services"
 	"github.com/gofiber/fiber/v2"
 )
@@ -157,7 +158,7 @@ func SyncWhatsAppContacts(svc *services.Container) fiber.Handler {
 		}
 
 		// Sync photos in background
-		go svc.Evolution.SyncAllContactPhotos(instanceName, companyID)
+		safe.Go("photo-sync", func() { svc.Evolution.SyncAllContactPhotos(instanceName, companyID) })
 		logAuditEvent(svc.DB, c, "whatsapp.contacts.sync", "whatsapp_instance", instanceID, fiber.Map{"instance_name": instanceName, "count": count})
 
 		return c.JSON(fiber.Map{"message": "Contacts synced", "count": count})
@@ -175,7 +176,7 @@ func SyncWhatsAppPhotos(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Instance not found"})
 		}
 
-		go svc.Evolution.SyncAllContactPhotos(instanceName, companyID)
+		safe.Go("photo-sync", func() { svc.Evolution.SyncAllContactPhotos(instanceName, companyID) })
 		logAuditEvent(svc.DB, c, "whatsapp.photos.sync", "whatsapp_instance", instanceID, fiber.Map{"instance_name": instanceName})
 
 		return c.JSON(fiber.Map{"message": "Photo sync started in background"})
@@ -222,7 +223,7 @@ func HandleEvolutionWebhook(svc *services.Container) fiber.Handler {
 		log.Printf("[WEBHOOK] Received event from instance '%s': %v", instanceName, getEventType(event))
 
 		// Process webhook asynchronously
-		go svc.Evolution.HandleWebhook(instanceName, event)
+		safe.Go("evolution-webhook", func() { svc.Evolution.HandleWebhook(instanceName, event) })
 
 		return c.JSON(fiber.Map{"status": "ok"})
 	}

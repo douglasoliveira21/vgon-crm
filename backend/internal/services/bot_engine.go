@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/evocrm/backend/internal/safe"
 	"github.com/evocrm/backend/internal/websocket"
 	"github.com/google/uuid"
 )
@@ -97,9 +98,11 @@ func (e *BotEngine) ResumeDurableExecutions() error {
 
 func (e *BotEngine) enqueueFlow(payload botFlowJobPayload) {
 	if e.jobs == nil {
-		go e.executeFlowFrom(payload.FlowID, payload.TriggerType, payload.CompanyID,
-			payload.ConversationID, payload.ContactID, payload.InstanceName, payload.Phone,
-			payload.TriggerMessage, payload.Nodes, payload.Edges, payload.StartNodeID)
+		safe.Go("bot-flow", func() {
+			e.executeFlowFrom(payload.FlowID, payload.TriggerType, payload.CompanyID,
+				payload.ConversationID, payload.ContactID, payload.InstanceName, payload.Phone,
+				payload.TriggerMessage, payload.Nodes, payload.Edges, payload.StartNodeID)
+		})
 		return
 	}
 	key := payload.FlowID + ":" + payload.ConversationID
