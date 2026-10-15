@@ -455,12 +455,27 @@ export default function FlowEditorPage() {
         edges: edges,
       }
 
+      let savedFlowId = flowId
       if (isNew) {
-        await api.post('/bot-flows', payload)
+        const response = await api.post('/bot-flows', payload)
+        savedFlowId = response.data?.id || flowId
       } else {
         await api.put(`/bot-flows/${flowId}`, payload)
       }
-      toast.success('Automação salva!')
+
+      // Salvar grava apenas o rascunho (bot_flows.nodes/edges). O motor do bot
+      // executa a versão PUBLICADA (published_version). Se o fluxo está ativo,
+      // publicamos automaticamente para que as edições entrem em vigor de fato.
+      if (isActive && savedFlowId) {
+        try {
+          await api.post(`/bot-flows/${savedFlowId}/publish`)
+          toast.success('Automação salva e publicada!')
+        } catch (publishError: any) {
+          toast.error(publishError?.response?.data?.error || 'Rascunho salvo, mas não foi possível publicar')
+        }
+      } else {
+        toast.success('Rascunho salvo! Ative a automação para publicar as mudanças.')
+      }
       router.push('/automations')
     } catch {
       toast.error('Erro ao salvar')
