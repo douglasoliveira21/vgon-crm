@@ -217,6 +217,44 @@ func UnblockContact(svc *services.Container) fiber.Handler {
 	}
 }
 
+// UnlinkContactGLPI clears the GLPI CNPJ remembered for a contact so the bot
+// flow asks for and re-validates the CNPJ on the next conversation.
+func UnlinkContactGLPI(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		contactID := c.Params("id")
+
+		// Capture the previous CNPJ (for the audit trail) while clearing it.
+		// A CTE reads the old value before the UPDATE runs.
+		var previousCNPJ sql.NullString
+		err := svc.DB.QueryRow(`
+			WITH previous AS (
+				SELECT glpi_cnpj FROM contacts WHERE id = $1 AND company_id = $2
+			), updated AS (
+				UPDATE contacts
+				SET glpi_cnpj = NULL, glpi_entity_id = NULL, glpi_entity_name = NULL,
+				    glpi_validated_at = NULL, updated_at = NOW()
+				WHERE id = $1 AND company_id = $2
+				RETURNING id
+			)
+			SELECT previous.glpi_cnpj FROM previous
+			WHERE EXISTS (SELECT 1 FROM updated)
+		`, contactID, companyID).Scan(&previousCNPJ)
+		if err == sql.ErrNoRows {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Contato não encontrado"})
+		}
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Erro ao desvincular CNPJ"})
+		}
+		var meta interface{}
+		if previousCNPJ.Valid && previousCNPJ.String != "" {
+			meta = fiber.Map{"glpi_cnpj": previousCNPJ.String}
+		}
+		logAuditEvent(svc.DB, c, "contact.glpi.unlink", "contact", contactID, meta)
+		return c.JSON(fiber.Map{"message": "CNPJ desvinculado"})
+	}
+}
+
 func GetContact(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)

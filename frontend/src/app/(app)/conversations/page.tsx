@@ -39,6 +39,7 @@ import {
   ArrowLeft,
   Loader2,
   Ban,
+  Unlink,
   ImageOff,
   Play,
   Pause,
@@ -56,6 +57,8 @@ interface Conversation {
   contact_avatar_url?: string
   customer_company_id?: string
   customer_company_name?: string
+  glpi_cnpj?: string
+  glpi_entity_name?: string
   first_response_due_at?: string
   resolution_due_at?: string
   first_response_at?: string
@@ -1298,6 +1301,24 @@ export default function ConversationsPage() {
     }
   }
 
+  const unlinkGlpiCnpj = async () => {
+    if (!selectedConv?.contact_id) return
+    if (!confirm(`Desvincular o CNPJ ${selectedConv.glpi_cnpj || ''} deste contato? O bot voltará a perguntar o CNPJ na próxima vez.`)) return
+    try {
+      await api.post(`/contacts/${selectedConv.contact_id}/unlink-glpi`)
+      setShowConversationMenu(false)
+      setSelectedConv((prev) => (prev ? { ...prev, glpi_cnpj: undefined, glpi_entity_name: undefined } : prev))
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === selectedConv.id ? { ...c, glpi_cnpj: undefined, glpi_entity_name: undefined } : c
+        )
+      )
+      toast.success('CNPJ desvinculado')
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao desvincular CNPJ')
+    }
+  }
+
   // Mention user
   const mentionUser = (userName: string) => {
     setNewMessage((prev) => prev + `@${userName} `)
@@ -1908,7 +1929,12 @@ export default function ConversationsPage() {
                   <MoreVertical size={18} />
                 </button>
                 {showConversationMenu && (
-                  <div className="absolute right-0 top-full z-30 mt-2 w-52 rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                  <div className="absolute right-0 top-full z-30 mt-2 w-64 rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                    {selectedConv?.glpi_cnpj && (
+                      <button type="button" onClick={unlinkGlpiCnpj} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">
+                        <Unlink size={16} /> Desvincular CNPJ ({selectedConv.glpi_cnpj})
+                      </button>
+                    )}
                     <button type="button" onClick={blockSelectedContact} className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40">
                       <Ban size={16} /> Bloquear contato
                     </button>

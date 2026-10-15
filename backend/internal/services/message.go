@@ -206,6 +206,7 @@ func (s *MessageService) GetConversations(companyID string, status string, assig
 			   co.name as contact_name, co.phone as contact_phone, co.avatar_url as contact_avatar_url,
 			   COALESCE(c.customer_company_id, co.customer_company_id) as customer_company_id,
 			   cc.name as customer_company_name,
+			   co.glpi_cnpj as glpi_cnpj, co.glpi_entity_name as glpi_entity_name,
 			   c.first_response_due_at, c.resolution_due_at, c.first_response_at, c.resolved_at,
 			   u.name as assigned_to_name, t.name as team_name, ch.name as channel_name
 		FROM conversations c
@@ -328,6 +329,7 @@ func (s *MessageService) GetConversations(companyID string, status string, assig
 			&conv.LastMessagePreview, &conv.UnreadCount, &conv.CreatedAt, &conv.UpdatedAt,
 			&conv.ContactName, &conv.ContactPhone, &conv.ContactAvatarURL,
 			&conv.CustomerCompanyID, &conv.CustomerCompanyName,
+			&conv.GLPICNPJ, &conv.GLPIEntityName,
 			&conv.FirstResponseDueAt, &conv.ResolutionDueAt, &conv.FirstResponseAt, &conv.ResolvedAt,
 			&conv.AssignedToName, &conv.TeamName, &conv.ChannelName,
 		)

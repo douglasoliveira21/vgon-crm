@@ -134,6 +134,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	contacts.Delete("/:id", middleware.RBACMiddleware("contacts.delete"), DeleteContact(svc))
 	contacts.Post("/:id/block", middleware.RBACMiddleware("contacts.edit"), BlockContact(svc))
 	contacts.Post("/:id/unblock", middleware.RBACMiddleware("contacts.edit"), UnblockContact(svc))
+	contacts.Post("/:id/unlink-glpi", middleware.RBACMiddleware("contacts.edit"), UnlinkContactGLPI(svc))
 	contacts.Post("/:id/tags", middleware.RBACMiddleware("contacts.edit"), AddContactTag(svc))
 	contacts.Delete("/:id/tags/:tagId", middleware.RBACMiddleware("contacts.edit"), RemoveContactTag(svc))
 

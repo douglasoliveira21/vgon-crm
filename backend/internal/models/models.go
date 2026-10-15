@@ -169,6 +169,8 @@ type Conversation struct {
 	ContactAvatarURL    *string    `json:"contact_avatar_url,omitempty"`
 	CustomerCompanyID   *string    `json:"customer_company_id,omitempty"`
 	CustomerCompanyName *string    `json:"customer_company_name,omitempty"`
+	GLPICNPJ            *string    `json:"glpi_cnpj,omitempty"`
+	GLPIEntityName      *string    `json:"glpi_entity_name,omitempty"`
 	FirstResponseDueAt  *time.Time `json:"first_response_due_at,omitempty"`
 	ResolutionDueAt     *time.Time `json:"resolution_due_at,omitempty"`
 	FirstResponseAt     *time.Time `json:"first_response_at,omitempty"`
