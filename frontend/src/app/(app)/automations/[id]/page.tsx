@@ -1381,6 +1381,9 @@ function NodeConfigPanel({
           <br/>3. <strong>Se encontrar:</strong> confirma os dados do cliente (empresa, CNPJ, telefone, e-mail, endereço) e segue pela saída <strong>&quot;Encontrado&quot;</strong>
           <br/>4. <strong>Se não encontrar:</strong> avisa que o CNPJ não está cadastrado como cliente e segue pela saída <strong>&quot;Não encontrado&quot;</strong>
         </div>
+        <div className="p-2 bg-green-50 rounded-lg text-xs text-green-700">
+          💾 <strong>Memória por telefone:</strong> quando o CNPJ é validado na base do GLPI, ele fica salvo para aquele número. Nas próximas conversas o bloco reconhece o cliente automaticamente e segue direto pela saída &quot;Encontrado&quot;, sem perguntar o CNPJ de novo. CNPJs não encontrados nunca são salvos.
+        </div>
         <div className="p-2 bg-blue-50 rounded-lg text-xs text-blue-700">
           🔀 Conecte <strong>duas saídas</strong> neste bloco: rotule uma aresta como <strong>&quot;encontrado&quot;</strong> e a outra como <strong>&quot;nao_encontrado&quot;</strong> para ramificar o fluxo. Com apenas uma saída, ambos os casos seguem por ela.
         </div>

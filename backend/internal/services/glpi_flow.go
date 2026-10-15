@@ -69,6 +69,15 @@ func (e *GLPIFlowEngine) StartGLPIFlow(companyID, conversationID, contactID, ins
 	}
 
 	if mode == "check_cnpj" {
+		// If this contact already had a CNPJ validated against GLPI before, reuse
+		// it instead of asking again.
+		if cnpj, entityID, entityName, ok := e.loadValidatedCNPJ(contactID); ok {
+			e.sendBotMessage(companyID, conversationID, instanceName, phone,
+				fmt.Sprintf("✅ Você já está identificado como cliente:\n\n🏢 *Empresa:* %s\n📄 *CNPJ:* %s\n\nVou continuar o seu atendimento. 🙂", entityName, formatCNPJ(cnpj)))
+			e.resumeBotAfterCompletion(companyID, conversationID, contactID, instanceName, phone, fmt.Sprintf("glpi_cnpj_found:%d", entityID))
+			return
+		}
+
 		state.Step = "cnpj_lookup"
 		e.saveState(conversationID, state)
 		e.sendBotMessage(companyID, conversationID, instanceName, phone,
@@ -208,14 +217,49 @@ func (e *GLPIFlowEngine) handleCNPJLookup(companyID, conversationID, contactID, 
 
 	e.sendBotMessage(companyID, conversationID, instanceName, phone, buildCustomerFoundMessage(entity, cnpj))
 
-	// Persist what we found to the CRM contact when possible.
+	// Persist the VALIDATED CNPJ on the CRM contact so future conversations with
+	// this phone number skip the CNPJ question entirely. Only runs here, in the
+	// matches-found branch, so unvalidated/not-found CNPJs are never saved.
 	if contactID != "" {
-		e.db.Exec("UPDATE contacts SET company_name = $1 WHERE id = $2 AND (company_name IS NULL OR company_name = '')",
-			entityName, contactID)
+		e.db.Exec(`
+			UPDATE contacts
+			SET glpi_cnpj = $1,
+			    glpi_entity_id = $2,
+			    glpi_entity_name = $3,
+			    glpi_validated_at = NOW(),
+			    company_name = CASE WHEN company_name IS NULL OR company_name = '' THEN $3 ELSE company_name END,
+			    updated_at = NOW()
+			WHERE id = $4
+		`, cnpj, entity.ID, entityName, contactID)
 	}
 
 	e.finishCNPJLookup(companyID, conversationID, contactID, instanceName, phone, fmt.Sprintf("glpi_cnpj_found:%d", entity.ID))
 	return true
+}
+
+// loadValidatedCNPJ returns a previously validated GLPI CNPJ for the contact,
+// so the flow can skip asking for it again. Returns ok=false when the contact
+// has no stored CNPJ (or when contactID is empty).
+func (e *GLPIFlowEngine) loadValidatedCNPJ(contactID string) (cnpj string, entityID int, entityName string, ok bool) {
+	if contactID == "" {
+		return "", 0, "", false
+	}
+	var storedCNPJ sql.NullString
+	var storedID sql.NullInt64
+	var storedName sql.NullString
+	err := e.db.QueryRow(`
+		SELECT glpi_cnpj, glpi_entity_id, glpi_entity_name
+		FROM contacts
+		WHERE id = $1
+	`, contactID).Scan(&storedCNPJ, &storedID, &storedName)
+	if err != nil {
+		return "", 0, "", false
+	}
+	cnpj = onlyDigits(storedCNPJ.String)
+	if len(cnpj) != 14 || !storedID.Valid || storedID.Int64 <= 0 {
+		return "", 0, "", false
+	}
+	return cnpj, int(storedID.Int64), strings.TrimSpace(storedName.String), true
 }
 
 // finishCNPJLookup ends the dedicated lookup flow and hands control back to the
