@@ -27,6 +27,9 @@ func TestTransferConversationToTeamPreservesAssignedAgent(t *testing.T) {
 	service := &MessageService{db: db, wsHub: websocket.NewHub()}
 	teamID := "team-a"
 	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS (SELECT 1 FROM teams WHERE id = $1 AND company_id = $2)")).
+		WithArgs(teamID, "tenant-a").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE conversations SET team_id = $1, updated_at = NOW()")).
 		WithArgs(teamID, "conversation-a", "tenant-a").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -51,6 +54,9 @@ func TestTransferConversationToAgentPreservesAssignedTeam(t *testing.T) {
 	service := &MessageService{db: db, wsHub: websocket.NewHub()}
 	userID := "user-a"
 	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND company_id = $2)")).
+		WithArgs(userID, "tenant-a").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE conversations SET assigned_to = $1, status = 'in_progress', updated_at = NOW()")).
 		WithArgs(userID, "conversation-a", "tenant-a").
 		WillReturnResult(sqlmock.NewResult(0, 1))

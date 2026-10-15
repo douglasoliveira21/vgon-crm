@@ -192,8 +192,15 @@ func RemoveTeamMember(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		teamID := c.Params("id")
 		userID := c.Params("userId")
+		companyID := c.Locals("company_id").(string)
 
-		if _, err := svc.DB.Exec("DELETE FROM team_users WHERE team_id = $1 AND user_id = $2", teamID, userID); err != nil {
+		// Scoped through teams: addressing team_users by id alone let a
+		// request remove a member from another tenant's team.
+		if _, err := svc.DB.Exec(`
+			DELETE FROM team_users
+			WHERE team_id = $1 AND user_id = $2
+			  AND EXISTS (SELECT 1 FROM teams t WHERE t.id = $1 AND t.company_id = $3)
+		`, teamID, userID, companyID); err != nil {
 			log.Printf("[TEAMS] failed to remove member %s from team %s: %v", userID, teamID, err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to remove member"})
 		}
@@ -492,6 +499,48 @@ func GetDeals(svc *services.Container) fiber.Handler {
 	}
 }
 
+// belongsToCompany reports whether an id supplied in a request body really
+// belongs to the caller's tenant.
+//
+// Ids that arrive from the client were written straight into rows without
+// this check, so a request could point its own record at another tenant's
+// funnel, stage, contact, user or channel. The queries are selected by a
+// switch rather than built from the table name, and anything unrecognised
+// denies, so this can't become a SQL-injection hole later.
+func belongsToCompany(db *sql.DB, table, id, companyID string) bool {
+	if id == "" || companyID == "" {
+		return false
+	}
+	var query string
+	switch table {
+	case "funnels":
+		query = `SELECT EXISTS (SELECT 1 FROM funnels WHERE id = $1 AND company_id = $2)`
+	case "funnel_stages":
+		query = `SELECT EXISTS (
+			SELECT 1 FROM funnel_stages s
+			JOIN funnels f ON f.id = s.funnel_id
+			WHERE s.id = $1 AND f.company_id = $2
+		)`
+	case "contacts":
+		query = `SELECT EXISTS (SELECT 1 FROM contacts WHERE id = $1 AND company_id = $2)`
+	case "users":
+		query = `SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND company_id = $2)`
+	case "channels":
+		query = `SELECT EXISTS (SELECT 1 FROM channels WHERE id = $1 AND company_id = $2)`
+	case "teams":
+		query = `SELECT EXISTS (SELECT 1 FROM teams WHERE id = $1 AND company_id = $2)`
+	default:
+		return false
+	}
+
+	var exists bool
+	if err := db.QueryRow(query, id, companyID).Scan(&exists); err != nil {
+		log.Printf("[TENANT] ownership check failed for %s %s: %v", table, id, err)
+		return false
+	}
+	return exists
+}
+
 func CreateDeal(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
@@ -509,15 +558,26 @@ func CreateDeal(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request"})
 		}
 
+		if !belongsToCompany(svc.DB, "funnels", body.FunnelID, companyID) ||
+			!belongsToCompany(svc.DB, "funnel_stages", body.StageID, companyID) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Funil ou etapa inválidos"})
+		}
+
 		id := uuid.New().String()
 
 		// Use NULL for empty optional UUIDs
 		var contactID, assignedTo interface{}
 		if body.ContactID != "" {
+			if !belongsToCompany(svc.DB, "contacts", body.ContactID, companyID) {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Contato inválido"})
+			}
 			contactID = body.ContactID
 		}
 		// Auto-assign to current user if not specified
 		if body.AssignedTo != "" {
+			if !belongsToCompany(svc.DB, "users", body.AssignedTo, companyID) {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Responsável inválido"})
+			}
 			assignedTo = body.AssignedTo
 		} else {
 			assignedTo = userID
@@ -570,6 +630,10 @@ func MoveDealStage(svc *services.Container) fiber.Handler {
 			StageID string `json:"stage_id"`
 		}
 		c.BodyParser(&body)
+
+		if !belongsToCompany(svc.DB, "funnel_stages", body.StageID, companyID) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Etapa inválida"})
+		}
 
 		if _, err := svc.DB.Exec("UPDATE deals SET stage_id = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3",
 			body.StageID, dealID, companyID); err != nil {
@@ -1342,6 +1406,13 @@ func CreateCampaign(svc *services.Container) fiber.Handler {
 		}
 		defer tx.Rollback()
 
+		// Stored unchecked, this id was later joined to the WhatsApp instance
+		// when sending, so a campaign could go out through another tenant's
+		// connected number.
+		if body.ChannelID != "" && !belongsToCompany(svc.DB, "channels", body.ChannelID, companyID) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Canal inválido"})
+		}
+
 		_, err = tx.Exec(`
 			INSERT INTO campaigns
 				(id, company_id, channel_id, name, message_content, message_type, media_url,
@@ -2109,6 +2180,9 @@ func SendEmailCampaign(svc *services.Container) fiber.Handler {
 		body.Content = strings.TrimSpace(body.Content)
 		if body.ChannelID == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Selecione a caixa de entrada de envio"})
+		}
+		if !belongsToCompany(svc.DB, "channels", body.ChannelID, companyID) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Caixa de entrada inválida"})
 		}
 		if body.Subject == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Assunto é obrigatório"})

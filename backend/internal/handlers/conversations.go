@@ -182,8 +182,8 @@ func StartConversation(svc *services.Container) fiber.Handler {
 				JOIN contacts co ON conv.contact_id = co.id
 				JOIN channels ch ON conv.channel_id = ch.id
 				JOIN whatsapp_instances wi ON wi.channel_id = ch.id
-				WHERE conv.id = $1
-			`, conversationID).Scan(&phone, &instanceName)
+				WHERE conv.id = $1 AND conv.company_id = $2
+			`, conversationID, companyID).Scan(&phone, &instanceName)
 
 			// Silently skipping here dropped the attendant's first message
 			// while still reporting the conversation as started.
@@ -579,8 +579,8 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 				JOIN contacts co ON c.contact_id = co.id
 				JOIN channels ch ON c.channel_id = ch.id
 				JOIN whatsapp_instances wi ON wi.channel_id = ch.id
-				WHERE c.id = $1
-			`, conversationID).Scan(&phone, &instanceName)
+				WHERE c.id = $1 AND c.company_id = $2
+			`, conversationID, companyID).Scan(&phone, &instanceName)
 
 			if channelType != "email" {
 				// Without this the lookup failing just skipped the send: the
@@ -610,7 +610,7 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 				// Get quoted message external_id if replying
 				var quotedExternalID string
 				if body.ReplyToID != nil && *body.ReplyToID != "" {
-					svc.DB.QueryRow("SELECT COALESCE(external_id, '') FROM messages WHERE id = $1", *body.ReplyToID).Scan(&quotedExternalID)
+					svc.DB.QueryRow("SELECT COALESCE(external_id, '') FROM messages WHERE id = $1 AND company_id = $2", *body.ReplyToID, companyID).Scan(&quotedExternalID)
 				}
 
 				externalID, err := svc.Evolution.SendTextMessageWithQuote(instanceName, phone, normalizeOutgoingWhatsAppLinks(messageToSend), quotedExternalID)
@@ -637,11 +637,11 @@ func SendTextMessage(svc *services.Container) fiber.Handler {
 				FROM messages m
 				LEFT JOIN users u ON m.sender_type = 'user' AND m.sender_id = u.id
 				LEFT JOIN contacts c ON m.sender_type = 'contact' AND m.sender_id = c.id
-				WHERE m.id = $1
-			`, *body.ReplyToID).Scan(&replyContent, &replySender)
+				WHERE m.id = $1 AND m.company_id = $2
+			`, *body.ReplyToID, companyID).Scan(&replyContent, &replySender)
 
-			if _, err := svc.DB.Exec("UPDATE messages SET reply_to_id = $1, reply_to_content = $2, reply_to_sender = $3 WHERE id = $4",
-				*body.ReplyToID, replyContent, replySender, msg.ID); err != nil {
+			if _, err := svc.DB.Exec("UPDATE messages SET reply_to_id = $1, reply_to_content = $2, reply_to_sender = $3 WHERE id = $4 AND company_id = $5",
+				*body.ReplyToID, replyContent, replySender, msg.ID, companyID); err != nil {
 				log.Printf("[CONVERSATIONS] failed to save reply-to info for message %s: %v", msg.ID, err)
 			}
 		}
@@ -701,8 +701,8 @@ func SendMediaMessage(svc *services.Container) fiber.Handler {
 			JOIN contacts co ON c.contact_id = co.id
 			JOIN channels ch ON c.channel_id = ch.id
 			JOIN whatsapp_instances wi ON wi.channel_id = ch.id
-			WHERE c.id = $1
-		`, conversationID).Scan(&phone, &instanceName)
+			WHERE c.id = $1 AND c.company_id = $2
+		`, conversationID, companyID).Scan(&phone, &instanceName)
 
 		// Save file to disk and send via WhatsApp
 		var savedFileName string
@@ -834,8 +834,8 @@ func SendAudioMessage(svc *services.Container) fiber.Handler {
 			JOIN contacts co ON c.contact_id = co.id
 			JOIN channels ch ON c.channel_id = ch.id
 			JOIN whatsapp_instances wi ON wi.channel_id = ch.id
-			WHERE c.id = $1
-		`, conversationID).Scan(&phone, &instanceName)
+			WHERE c.id = $1 AND c.company_id = $2
+		`, conversationID, companyID).Scan(&phone, &instanceName)
 
 		// Send audio via Evolution API using the public URL of the saved file
 		var externalID string

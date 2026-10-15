@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, useRef } from 'react'
+import { memo, useEffect, useMemo, useState, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import api from '@/lib/api'
 import wsService from '@/lib/websocket'
@@ -42,6 +42,7 @@ import {
   ImageOff,
   Play,
   Pause,
+  UserRound,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import toast from 'react-hot-toast'
@@ -93,7 +94,17 @@ interface Message {
   created_at: string
 }
 
-const URL_REGEX = /((?:https?:\/\/|www\.|(?:[a-z0-9-]+\.)+[a-z]{2,})[^\s<>"']*)/gi
+const CONVERSATIONS_PAGE_SIZE = 50
+
+function isTouchDevice() {
+  return typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches
+}
+
+// Matches the backend's per-file cap (25MB). The file travels as base64,
+// which adds about a third, so anything larger is rejected before uploading.
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+
+const URL_REGEX =/((?:https?:\/\/|www\.|(?:[a-z0-9-]+\.)+[a-z]{2,})[^\s<>"']*)/gi
 const TRAILING_PUNCTUATION_REGEX = /[.,!?;:)\]}]+$/
 
 function renderTextWithLinks(text: string, isOwnMessage: boolean) {
@@ -235,6 +246,12 @@ function renderWhatsAppText(text: string, isOwnMessage: boolean, keyPrefix = 'wa
   return nodes
 }
 
+// Memoized: the chat page re-renders on every keystroke in the composer, and
+// without this every visible message re-parsed its WhatsApp markup each time.
+const MessageText = memo(function MessageText({ content, isOwn }: { content: string; isOwn: boolean }) {
+  return <>{renderWhatsAppText(content, isOwn)}</>
+})
+
 // Plain-text spots (the quoted reply preview) can't show formatting, so drop
 // the markers there instead of leaking them as literal asterisks.
 function stripWhatsAppMarkup(text: string): string {
@@ -312,6 +329,19 @@ export default function ConversationsPage() {
   // Read from async callbacks (recording stop, uploads) that would otherwise
   // see whichever conversation was open when the callback was created.
   const selectedConvRef = useRef<Conversation | null>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  const [showContactPanel, setShowContactPanel] = useState(false)
+  const [hasMoreConversations, setHasMoreConversations] = useState(false)
+  const [loadingMoreConversations, setLoadingMoreConversations] = useState(false)
+  // Defaults to true so the first (server) render matches a desktop layout.
+  const [isWideScreen, setIsWideScreen] = useState(true)
+  useEffect(() => {
+    const query = window.matchMedia('(min-width: 1280px)')
+    const sync = () => setIsWideScreen(query.matches)
+    sync()
+    query.addEventListener('change', sync)
+    return () => query.removeEventListener('change', sync)
+  }, [])
   const recordingConversationIdRef = useRef<string>('')
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
@@ -349,6 +379,7 @@ export default function ConversationsPage() {
 
   // Attachment preview
   const [pendingFile, setPendingFile] = useState<{ file: File; preview: string; type: string } | null>(null)
+  const [sendingFile, setSendingFile] = useState(false)
   const [pendingCaption, setPendingCaption] = useState('')
 
   // Enlarged contact photo viewer
@@ -452,6 +483,29 @@ export default function ConversationsPage() {
     selectedConvRef.current = selectedConv
   }, [selectedConv])
 
+  // Escape closes whatever overlay is open, innermost first. None of the
+  // modals handled it, so keyboard users had no way out except tabbing to the
+  // close button.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (avatarPreview) setAvatarPreview(null)
+      else if (pendingFile && !sendingFile) cancelPendingFile()
+      else if (showTransferModal) setShowTransferModal(false)
+      else if (showMentionModal) setShowMentionModal(false)
+      else if (showCallModal) setShowCallModal(false)
+      else if (contextMenu || conversationContextMenu) closeContextMenu()
+      else if (showContactPanel && !isWideScreen) setShowContactPanel(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  })
+
+  // Shrink the composer back after a send clears it.
+  useEffect(() => {
+    if (newMessage === '' && composerRef.current) composerRef.current.style.height = 'auto'
+  }, [newMessage])
+
   // Leaving the page mid-recording used to leave the microphone capturing and
   // the timer running in the background.
   useEffect(() => {
@@ -508,7 +562,7 @@ export default function ConversationsPage() {
             return insertMessageInOrder(prev, data)
           })
         }
-        scrollToBottom()
+        scrollToBottom(data.sender_type === 'user')
 
         // The backend counts every inbound message as unread. Zeroing it only
         // in local state meant the next list refresh brought the badge back
@@ -538,8 +592,11 @@ export default function ConversationsPage() {
                 : c
             )
           }
-          // New conversation not in list - refetch
-          fetchConversations()
+          // New conversation not in list - refetch. Deferred and routed
+          // through the ref: this runs inside a state updater (which React may
+          // invoke twice) and this listener only sees the filters from the
+          // render that registered it.
+          setTimeout(() => fetchConversationsRef.current(false), 0)
           return prev
         })
 
@@ -583,12 +640,17 @@ export default function ConversationsPage() {
     }
   }, [selectedConv, user?.id, user?.role_slug])
 
-  const fetchConversations = async (showLoader = true) => {
-    conversationsAbortRef.current?.abort()
+  // offset > 0 appends the next page instead of replacing the list.
+  const fetchConversations = async (showLoader = true, offset = 0) => {
+    const loadingNextPage = offset > 0
+    // A page fetch must not cancel (or be cancelled by) the periodic refresh
+    // of the first page, since they serve different purposes.
+    if (!loadingNextPage) conversationsAbortRef.current?.abort()
     const controller = new AbortController()
-    conversationsAbortRef.current = controller
-    const requestId = ++conversationsRequestRef.current
-    if (showLoader) setLoading(true)
+    if (!loadingNextPage) conversationsAbortRef.current = controller
+    const requestId = loadingNextPage ? conversationsRequestRef.current : ++conversationsRequestRef.current
+    if (loadingNextPage) setLoadingMoreConversations(true)
+    else if (showLoader) setLoading(true)
 
     try {
       const params: any = {}
@@ -624,14 +686,20 @@ export default function ConversationsPage() {
       // Searched server-side: the list is capped, so filtering only what was
       // already loaded would never find the conversations past that cap.
       const term = search.trim()
-      if (term) {
-        params.search = term
-        params.limit = 100
-      }
+      if (term) params.search = term
+
+      // The periodic refresh re-fetches everything already loaded, so it
+      // doesn't collapse a list the attendant paged through back to page one.
+      const pageSize = term ? 100 : CONVERSATIONS_PAGE_SIZE
+      params.limit = loadingNextPage
+        ? pageSize
+        : Math.min(Math.max(pageSize, conversationsRef.current.length), 500)
+      if (loadingNextPage) params.offset = offset
 
       const response = await api.get('/conversations', { params, signal: controller.signal })
-      if (requestId === conversationsRequestRef.current) {
+      if (loadingNextPage || requestId === conversationsRequestRef.current) {
         let nextConversations: Conversation[] = response.data.conversations || []
+        setHasMoreConversations(nextConversations.length >= params.limit)
         if (mentionsFilter && user) {
           const tokens = [user.name, user.email?.split('@')[0]]
             .filter(Boolean)
@@ -641,13 +709,22 @@ export default function ConversationsPage() {
             return tokens.some((token) => preview.includes(token))
           })
         }
-        setConversations(nextConversations)
+        if (loadingNextPage) {
+          setConversations((prev) => {
+            const known = new Set(prev.map((c) => c.id))
+            return [...prev, ...nextConversations.filter((c) => !known.has(c.id))]
+          })
+        } else {
+          setConversations(nextConversations)
+        }
       }
     } catch (error: any) {
       if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') return
       console.error('Error fetching conversations:', error)
+      if (loadingNextPage) toast.error('Não foi possível carregar mais conversas')
     } finally {
-      if (requestId === conversationsRequestRef.current) {
+      if (loadingNextPage) setLoadingMoreConversations(false)
+      else if (requestId === conversationsRequestRef.current) {
         setLoading(false)
       }
     }
@@ -733,28 +810,42 @@ export default function ConversationsPage() {
       if (messagesInFlightRef.current || now - lastMessagesFetchRef.current < 8000) return
       messagesInFlightRef.current = true
       lastMessagesFetchRef.current = now
-      const requestId = ++messagesRequestRef.current
+      // Compared by conversation instead of bumping messagesRequestRef: that
+      // counter also guards "load older messages", so every poll silently
+      // discarded an in-flight history load and left its button stuck.
+      const polledConversationId = selectedConv.id
       try {
-        const response = await api.get(`/conversations/${selectedConv.id}/messages`, { params: { limit: 80 } })
+        const response = await api.get(`/conversations/${polledConversationId}/messages`, { params: { limit: 80 } })
         const newMessages: Message[] = response.data.messages || []
-        if (requestId !== messagesRequestRef.current) return
+        if (selectedConvRef.current?.id !== polledConversationId) return
         messagesErrorUntilRef.current = 0
         setMessages((prev) => {
-          // Count real messages (not temp)
-          const realPrev = prev.filter((m) => !m.id.startsWith('temp-'))
-          // Only update if server has more messages
-          if (newMessages.length > realPrev.length) {
-            return newMessages
+          // Merge rather than replace. Replacing the list with the latest 80
+          // threw away any older history the attendant had scrolled back to
+          // load, along with unsent optimistic bubbles.
+          const byId = new Map(prev.map((m) => [m.id, m]))
+          let changed = false
+          for (const incoming of newMessages) {
+            const existing = byId.get(incoming.id)
+            if (!existing) {
+              byId.set(incoming.id, incoming)
+              changed = true
+              // The server copy of something we sent replaces its optimistic
+              // bubble, which would otherwise be shown twice.
+              if (incoming.sender_type === 'user' && incoming.sender_id === user?.id) {
+                for (const [id, message] of Array.from(byId.entries())) {
+                  if (id.startsWith('temp-') && message.message_type === incoming.message_type) byId.delete(id)
+                }
+              }
+            } else if (existing.status !== incoming.status) {
+              byId.set(incoming.id, { ...existing, ...incoming })
+              changed = true
+            }
           }
-          // Also update if statuses changed
-          const hasStatusChange = newMessages.some((nm, i) => {
-            const existing = realPrev.find(m => m.id === nm.id)
-            return existing && existing.status !== nm.status
-          })
-          if (hasStatusChange) {
-            return newMessages
-          }
-          return prev
+          if (!changed) return prev
+          return Array.from(byId.values()).sort(
+            (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          )
         })
       } catch (error: any) {
         if (error.response?.status >= 500) {
@@ -768,15 +859,27 @@ export default function ConversationsPage() {
     return () => clearInterval(interval)
   }, [selectedConv?.id])
 
+  // The interval and the WebSocket listener are registered once, so calling
+  // fetchConversations directly from them used the filters from the render
+  // that created them: switch team (or channel, or mentions) and, after 30s,
+  // the list silently flipped back to the old selection. They go through
+  // these refs, which always point at the latest render's functions.
+  const fetchConversationsRef = useRef(fetchConversations)
+  const fetchTabUnreadCountsRef = useRef(fetchTabUnreadCounts)
+  useEffect(() => {
+    fetchConversationsRef.current = fetchConversations
+    fetchTabUnreadCountsRef.current = fetchTabUnreadCounts
+  })
+
   // Auto-refresh conversation list
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchConversations(false)
-      fetchTabUnreadCounts()
+      fetchConversationsRef.current(false)
+      fetchTabUnreadCountsRef.current()
     }, 30000) // WebSocket is primary; polling is only a calm fallback.
 
     return () => clearInterval(interval)
-  }, [filter, statusFilter])
+  }, [])
 
   const selectConversation = async (conv: Conversation) => {
     setSelectedConv(conv)
@@ -801,6 +904,7 @@ export default function ConversationsPage() {
     const requestId = ++messagesRequestRef.current
     messagesInFlightRef.current = true
     setMessagesLoading(true)
+    setLoadingMore(false)
     lastMessagesFetchRef.current = Date.now()
     try {
       const response = await api.get(`/conversations/${conv.id}/messages`, { params: { limit: 80 }, signal: controller.signal })
@@ -840,14 +944,24 @@ export default function ConversationsPage() {
       if (requestId !== messagesRequestRef.current) return
       const olderMessages: Message[] = response.data.messages || []
       if (olderMessages.length > 0) {
-        setMessages((prev) => [...olderMessages, ...prev])
+        // Paging is by offset from the newest message, so anything that
+        // arrived while this loaded shifts the window and returns rows that
+        // are already on screen.
+        setMessages((prev) => {
+          const known = new Set(prev.map((m) => m.id))
+          return [...olderMessages.filter((m) => !known.has(m.id)), ...prev]
+        })
         setMessagesOffset(newOffset)
       }
       if (olderMessages.length < 80) {
         setHasMoreMessages(false)
       }
-    } catch {} finally {
-      if (requestId === messagesRequestRef.current) setLoadingMore(false)
+    } catch {
+      toast.error('Não foi possível carregar mensagens anteriores')
+    } finally {
+      // Always released. Skipping this when the request was superseded left
+      // the button on "Carregando…" permanently, even across other chats.
+      setLoadingMore(false)
     }
   }
 
@@ -873,6 +987,7 @@ export default function ConversationsPage() {
 
     setMessages((prev) => [...prev, optimisticMsg])
     const msgContent = newMessage
+    const quotedMessage = replyingTo
     setNewMessage('')
     setReplyingTo(null)
     scrollToBottom()
@@ -880,11 +995,15 @@ export default function ConversationsPage() {
     try {
       await api.post(`/conversations/${selectedConv.id}/messages/text`, {
         content: msgContent,
-        reply_to_id: replyingTo?.id || null,
+        reply_to_id: quotedMessage?.id || null,
       })
-    } catch (error) {
-      toast.error('Erro ao enviar mensagem')
+    } catch (error: any) {
+      // Show the server's reason (e.g. channel unavailable) rather than a
+      // generic message, and give the text back so it isn't lost.
+      toast.error(error.response?.data?.error || 'Erro ao enviar mensagem')
       setMessages((prev) => prev.filter((m) => m.id !== tempId))
+      setNewMessage((current) => (current.trim() ? current : msgContent))
+      if (quotedMessage) setReplyingTo(quotedMessage)
     }
   }
 
@@ -892,6 +1011,11 @@ export default function ConversationsPage() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: string) => {
     const file = e.target.files?.[0]
     if (!file || !selectedConv) return
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast.error(`Arquivo maior que o limite de ${MAX_UPLOAD_BYTES / 1024 / 1024} MB`)
+      e.target.value = ''
+      return
+    }
 
     // Show preview modal (same as drag/drop)
     const preview = file.type.startsWith('image/') ? URL.createObjectURL(file) : ''
@@ -1184,9 +1308,18 @@ export default function ConversationsPage() {
     setShowCallModal(false)
   }
 
-  const scrollToBottom = () => {
+  // force=false is for messages arriving from the contact: if the attendant
+  // has scrolled up to read earlier history, yanking them back to the bottom
+  // on every incoming message made that impossible.
+  const scrollToBottom = (force = true) => {
     setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      const end = messagesEndRef.current
+      if (!end) return
+      if (!force) {
+        const container = end.parentElement
+        if (container && container.scrollHeight - container.scrollTop - container.clientHeight > 250) return
+      }
+      end.scrollIntoView({ behavior: 'smooth' })
     }, 100)
   }
 
@@ -1273,6 +1406,10 @@ export default function ConversationsPage() {
   // Send file from paste/drop - show preview first
   const sendFileToChat = (file: File) => {
     if (!selectedConv) return
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast.error(`Arquivo maior que o limite de ${MAX_UPLOAD_BYTES / 1024 / 1024} MB`)
+      return
+    }
 
     let mediaType = 'document'
     if (file.type.startsWith('image/')) mediaType = 'image'
@@ -1286,65 +1423,105 @@ export default function ConversationsPage() {
 
   // Confirm and send the pending file
   const confirmSendFile = async () => {
-    if (!pendingFile || !selectedConv) return
+    // The modal stays open until the upload finishes, so without this guard a
+    // second click (or Enter) uploaded the same file again.
+    if (!pendingFile || !selectedConv || sendingFile) return
 
-    const reader = new FileReader()
-    reader.readAsDataURL(pendingFile.file)
-    reader.onloadend = async () => {
-      const base64File = reader.result as string
+    const file = pendingFile.file
+    const fileType = pendingFile.type
+    const caption = pendingCaption
+    const conversationId = selectedConv.id
 
-      try {
-        await api.post(`/conversations/${selectedConv!.id}/messages/media`, {
-          media_base64: base64File,
-          media_type: pendingFile.type,
-          file_name: pendingFile.file.name,
-          caption: pendingCaption,
-        })
+    setSendingFile(true)
+    try {
+      const base64File = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = () => reject(new Error('Não foi possível ler o arquivo'))
+        reader.readAsDataURL(file)
+      })
 
+      await api.post(`/conversations/${conversationId}/messages/media`, {
+        media_base64: base64File,
+        media_type: fileType,
+        file_name: file.name,
+        caption,
+      })
+
+      // The preview URL is released on success too, not just on cancel.
+      if (pendingFile.preview) URL.revokeObjectURL(pendingFile.preview)
+      setPendingFile(null)
+      setPendingCaption('')
+
+      if (selectedConvRef.current?.id === conversationId) {
         const optimisticMsg: Message = {
           id: `temp-file-${Date.now()}`,
-          conversation_id: selectedConv!.id,
+          conversation_id: conversationId,
           sender_type: 'user',
           sender_id: user?.id,
           sender_name: user?.name,
-          content: pendingCaption || pendingFile.file.name,
-          message_type: pendingFile.type,
+          content: caption || file.name,
+          message_type: fileType,
           media_url: base64File,
-          media_filename: pendingFile.file.name,
+          media_filename: file.name,
           status: 'sent',
           is_private: false,
           created_at: new Date().toISOString(),
         }
         setMessages((prev) => [...prev, optimisticMsg])
         scrollToBottom()
-        toast.success('Arquivo enviado')
-      } catch (error: any) {
-        toast.error(error.response?.data?.error || 'Erro ao enviar arquivo')
       }
-
-      setPendingFile(null)
-      setPendingCaption('')
+      toast.success('Arquivo enviado')
+    } catch (error: any) {
+      // The file and caption stay in the modal so a failed send can simply
+      // be retried instead of having to pick the file again.
+      toast.error(error.response?.data?.error || error.message || 'Erro ao enviar arquivo')
+    } finally {
+      setSendingFile(false)
     }
   }
 
   const cancelPendingFile = () => {
+    if (sendingFile) return
     if (pendingFile?.preview) URL.revokeObjectURL(pendingFile.preview)
     setPendingFile(null)
     setPendingCaption('')
   }
 
   // Context menu (right click on message)
+  // Keeps a menu opened near the screen edge fully visible.
+  const clampMenuPosition = (x: number, y: number) => ({
+    x: Math.max(8, Math.min(x, window.innerWidth - 230)),
+    y: Math.max(8, Math.min(y, window.innerHeight - 320)),
+  })
+
   const handleMessageContextMenu = (e: React.MouseEvent, msg: Message) => {
     e.preventDefault()
     setConversationContextMenu(null)
-    setContextMenu({ x: e.clientX, y: e.clientY, message: msg })
+    setContextMenu({ ...clampMenuPosition(e.clientX, e.clientY), message: msg })
   }
 
   const handleConversationContextMenu = (e: React.MouseEvent, conversation: Conversation) => {
     e.preventDefault()
     setContextMenu(null)
-    setConversationContextMenu({ x: e.clientX, y: e.clientY, conversation })
+    setConversationContextMenu({ ...clampMenuPosition(e.clientX, e.clientY), conversation })
   }
+
+  // iOS Safari never fires "contextmenu" on a long press, so on a phone these
+  // menus (archive, transfer, reply, delete) could not be reached at all.
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const longPressHandlers = (open: (x: number, y: number) => void) => ({
+    onTouchStart: (e: React.TouchEvent) => {
+      const touch = e.touches[0]
+      longPressTimerRef.current = setTimeout(() => open(touch.clientX, touch.clientY), 500)
+    },
+    onTouchEnd: () => {
+      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current)
+    },
+    onTouchMove: () => {
+      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current)
+    },
+  })
 
   const closeContextMenu = () => {
     setContextMenu(null)
@@ -1523,6 +1700,10 @@ export default function ConversationsPage() {
                     selectConversation(conv)
                   }}
                   onContextMenu={(e) => handleConversationContextMenu(e, conv)}
+                  {...longPressHandlers((x, y) => {
+                    setContextMenu(null)
+                    setConversationContextMenu({ ...clampMenuPosition(x, y), conversation: conv })
+                  })}
                   className={clsx(
                     'w-full p-4 flex items-start gap-3 border-b border-gray-50 hover:bg-gray-50 transition-colors text-left',
                     selectedConv?.id === conv.id && 'bg-primary-50 border-l-2 border-l-primary-500'
@@ -1565,6 +1746,16 @@ export default function ConversationsPage() {
               ))}
               {conversations.length === 0 && (
                 <div className="p-8 text-center text-gray-400 text-sm">Nenhuma conversa encontrada</div>
+              )}
+              {hasMoreConversations && conversations.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => fetchConversations(false, conversations.length)}
+                  disabled={loadingMoreConversations}
+                  className="w-full py-3 text-sm font-medium text-primary-600 hover:bg-gray-50 disabled:opacity-60"
+                >
+                  {loadingMoreConversations ? 'Carregando...' : 'Carregar mais conversas'}
+                </button>
               )}
             </>
           )}
@@ -1708,6 +1899,11 @@ export default function ConversationsPage() {
               )}
               {/* More */}
               <div className="relative">
+                {!isWideScreen && (
+                  <button type="button" onClick={() => setShowContactPanel((open) => !open)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" aria-label="Dados do contato">
+                    <UserRound size={18} />
+                  </button>
+                )}
                 <button type="button" onClick={() => setShowConversationMenu((open) => !open)} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg" aria-label="Mais opções">
                   <MoreVertical size={18} />
                 </button>
@@ -1745,6 +1941,10 @@ export default function ConversationsPage() {
                   msg.sender_type === 'user' ? 'justify-end' : 'justify-start'
                 )}
                 onContextMenu={(e) => handleMessageContextMenu(e, msg)}
+                {...longPressHandlers((x, y) => {
+                  setConversationContextMenu(null)
+                  setContextMenu({ ...clampMenuPosition(x, y), message: msg })
+                })}
               >
                 {msg.sender_type !== 'user' && (
                   <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gray-200">
@@ -1870,7 +2070,7 @@ export default function ConversationsPage() {
 
                   {msg.content && msg.message_type !== 'audio' && (
                     <p className="text-sm whitespace-pre-wrap break-words">
-                      {renderWhatsAppText(msg.content, msg.sender_type === 'user')}
+                      <MessageText content={msg.content} isOwn={msg.sender_type === 'user'} />
                     </p>
                   )}
 
@@ -1935,7 +2135,7 @@ export default function ConversationsPage() {
                   </p>
                   <p className="text-xs text-gray-500 truncate">{replyingTo.content || '📎 Mídia'}</p>
                 </div>
-                <button onClick={() => setReplyingTo(null)} className="text-gray-400 hover:text-gray-600">
+                <button onClick={() => setReplyingTo(null)} aria-label="Cancelar resposta" className="text-gray-400 hover:text-gray-600">
                   <X size={16} />
                 </button>
               </div>
@@ -1943,7 +2143,7 @@ export default function ConversationsPage() {
             <div className="p-3 sm:p-4">
             {isRecording ? (
               <div className="flex items-center gap-3 sm:gap-4">
-                <button onClick={cancelRecording} className="shrink-0 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg">
+                <button onClick={cancelRecording} aria-label="Cancelar gravação" className="shrink-0 p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg">
                   <X size={20} />
                 </button>
                 <div className="w-2.5 h-2.5 shrink-0 rounded-full bg-red-500 animate-pulse" />
@@ -2008,11 +2208,17 @@ export default function ConversationsPage() {
                 {/* Input */}
                 <div className="flex-1 relative">
                   <textarea
+                    ref={composerRef}
                     rows={1}
                     value={newMessage}
+                    aria-label="Mensagem"
                     onChange={(e) => {
                       const val = e.target.value
                       setNewMessage(val)
+                      // Grow with the text (up to the max-h-32 cap) so a long
+                      // or multi-line message is actually visible.
+                      e.target.style.height = 'auto'
+                      e.target.style.height = `${e.target.scrollHeight}px`
                       // Quick reply trigger
                       if (val.startsWith('/')) {
                         setShowQuickReplies(true)
@@ -2047,8 +2253,16 @@ export default function ConversationsPage() {
                           }
                         } else if (e.key === 'Escape') {
                           setShowQuickReplies(false)
+                        } else if (e.key === 'Enter' && !e.shiftKey && !isTouchDevice()) {
+                          // A "/..." message that matches no shortcut is just
+                          // a message; Enter did nothing here before.
+                          e.preventDefault()
+                          setShowQuickReplies(false)
+                          sendMessage()
                         }
-                      } else if (e.key === 'Enter' && !e.shiftKey) {
+                      } else if (e.key === 'Enter' && !e.shiftKey && !isTouchDevice()) {
+                        // On touch keyboards Enter inserts a newline (there is
+                        // no Shift), and the send button sends.
                         e.preventDefault()
                         sendMessage()
                       }
@@ -2168,8 +2382,10 @@ export default function ConversationsPage() {
       )}
 
       {/* Right Panel - Contact */}
-      {selectedConv && (
+      {selectedConv && (isWideScreen || showContactPanel) && (
         <ContactPanel
+          drawer={!isWideScreen}
+          onClose={() => setShowContactPanel(false)}
           conversation={selectedConv}
           users={users}
           teams={teams}
@@ -2210,11 +2426,11 @@ export default function ConversationsPage() {
 
       {/* Transfer Modal */}
       {showTransferModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[80vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">Transferir conversa</h3>
-              <button onClick={() => setShowTransferModal(false)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setShowTransferModal(false)} aria-label="Fechar" className="text-gray-400 hover:text-gray-600">
                 <X size={20} />
               </button>
             </div>
@@ -2263,11 +2479,11 @@ export default function ConversationsPage() {
 
       {/* Mention Modal */}
       {showMentionModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">Mencionar atendente</h3>
-              <button onClick={() => setShowMentionModal(false)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setShowMentionModal(false)} aria-label="Fechar" className="text-gray-400 hover:text-gray-600">
                 <X size={20} />
               </button>
             </div>
@@ -2290,7 +2506,7 @@ export default function ConversationsPage() {
 
       {/* Call Modal */}
       {showCallModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div role="dialog" aria-modal="true" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center">
             <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <PhoneCall size={28} className="text-green-600" />
@@ -2422,11 +2638,11 @@ export default function ConversationsPage() {
 
       {/* File Preview Modal */}
       {pendingFile && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+        <div role="dialog" aria-modal="true" aria-label="Enviar arquivo" className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-lg">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">Enviar arquivo</h3>
-              <button onClick={cancelPendingFile} className="text-gray-400 hover:text-gray-600">
+              <button onClick={cancelPendingFile} aria-label="Fechar" className="text-gray-400 hover:text-gray-600">
                 <X size={20} />
               </button>
             </div>
@@ -2464,11 +2680,12 @@ export default function ConversationsPage() {
             </div>
 
             <div className="flex gap-3">
-              <button onClick={cancelPendingFile} className="btn-secondary flex-1">
+              <button onClick={cancelPendingFile} disabled={sendingFile} className="btn-secondary flex-1 disabled:opacity-50">
                 Cancelar
               </button>
-              <button onClick={confirmSendFile} className="btn-primary flex-1">
-                <Send size={16} /> Enviar
+              <button onClick={confirmSendFile} disabled={sendingFile} className="btn-primary flex-1 disabled:opacity-60">
+                {sendingFile ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                {sendingFile ? 'Enviando...' : 'Enviar'}
               </button>
             </div>
           </div>
@@ -2514,7 +2731,31 @@ function AudioMessagePlayer({ id, src, isOwn, onError }: { id: string; src: stri
   const fallbackBars = useMemo(() => fallbackWaveform(id), [id])
   const bars = decodedPeaks || fallbackBars
 
+  // Decoding the waveform downloads the whole file again and builds an
+  // AudioContext, so a chat with many voice notes did all of that at once on
+  // open. Only players that have scrolled into view do it now.
+  const [nearViewport, setNearViewport] = useState(false)
   useEffect(() => {
+    const element = audioRef.current?.parentElement
+    if (!element || typeof IntersectionObserver === 'undefined') {
+      setNearViewport(true)
+      return
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setNearViewport(true)
+          observer.disconnect()
+        }
+      },
+      { rootMargin: '300px' }
+    )
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (!nearViewport) return
     let cancelled = false
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext
     if (!AudioCtx) return
@@ -2552,7 +2793,7 @@ function AudioMessagePlayer({ id, src, isOwn, onError }: { id: string; src: stri
         try { ctx.close() } catch {}
       })
     return () => { cancelled = true }
-  }, [src])
+  }, [src, nearViewport])
 
   // Chrome (and some other browsers) report duration as Infinity/NaN for
   // MediaRecorder-produced audio (no duration in the streamed container),
@@ -2775,6 +3016,8 @@ function ContactPanel({
   onUnassignTeam,
   onSelectConversation,
   onAvatarClick,
+  drawer = false,
+  onClose,
 }: {
   conversation: Conversation
   users: UserItem[]
@@ -2785,6 +3028,8 @@ function ContactPanel({
   onUnassignTeam: () => void
   onSelectConversation: (conversation: Conversation) => void
   onAvatarClick: (url: string, name: string) => void
+  drawer?: boolean
+  onClose?: () => void
 }) {
   const [tags, setTags] = useState<Array<{id: string; name: string; color: string}>>([])
   const [contactTags, setContactTags] = useState<Array<{id: string; name: string; color: string}>>([])
@@ -2889,7 +3134,20 @@ function ContactPanel({
     conversation.status === 'pending' ? 'badge-yellow' : 'badge-gray'
 
   return (
-    <div className="hidden w-80 overflow-y-auto border-l border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900 xl:block">
+    <div
+      className={clsx(
+        'overflow-y-auto border-l border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900',
+        // Below the xl breakpoint the panel was simply hidden, which put tags,
+        // funnel and history out of reach on laptops and phones. There it
+        // opens as a drawer from the header button instead.
+        drawer ? 'fixed inset-y-0 right-0 z-40 w-[min(20rem,100vw)] shadow-2xl' : 'w-80'
+      )}
+    >
+      {drawer && onClose && (
+        <button type="button" onClick={onClose} aria-label="Fechar painel do contato" className="mb-2 ml-auto flex rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
+          <X size={18} />
+        </button>
+      )}
       {/* Avatar and name */}
       <div className="text-center mb-4">
         <button

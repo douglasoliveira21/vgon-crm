@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"log"
 	"net/smtp"
 	"strings"
 	"time"
@@ -221,25 +220,23 @@ func (s *AuthService) RefreshToken(refreshTokenStr string) (*AuthResponse, error
 
 	// Check if token exists in DB (compare hashed)
 	hashedRefresh := hashToken(refreshTokenStr)
-	var tokenID, sessionID string
+	// A token is accepted while it is the current one, or briefly after it
+	// was rotated away. Two browser tabs refresh at the same instant and the
+	// second one is still holding the token that was valid when it sent the
+	// request; rejecting it logged the user out of that tab.
+	var sessionID string
 	err = s.db.QueryRow(`
-		SELECT rt.id, rt.session_id
+		SELECT rt.session_id
 		FROM refresh_tokens rt
 		JOIN users u ON u.id = rt.user_id AND u.is_active = true
 		JOIN companies co ON co.id = u.company_id AND co.is_active = true
-		WHERE rt.token = $1 AND rt.user_id = $2 AND rt.expires_at > NOW()
-		  AND rt.revoked_at IS NULL
-	`, hashedRefresh, claims.UserID).Scan(&tokenID, &sessionID)
+		WHERE rt.user_id = $2 AND rt.expires_at > NOW() AND rt.revoked_at IS NULL
+		  AND (rt.token = $1 OR (rt.previous_token = $1 AND rt.previous_token_expires_at > NOW()))
+	`, hashedRefresh, claims.UserID).Scan(&sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("refresh token not found or expired")
 	}
 
-	// Delete old refresh token
-	if _, err := s.db.Exec("DELETE FROM refresh_tokens WHERE id = $1", tokenID); err != nil {
-		log.Printf("[AUTH] failed to delete rotated refresh token %s: %v", tokenID, err)
-	}
-
-	// Generate new tokens
 	accessToken, newRefreshToken, err := middleware.GenerateTokensForSession(
 		claims.UserID, claims.CompanyID, claims.RoleSlug, claims.Email, sessionID, s.cfg,
 	)
@@ -247,12 +244,24 @@ func (s *AuthService) RefreshToken(refreshTokenStr string) (*AuthResponse, error
 		return nil, fmt.Errorf("failed to generate tokens: %w", err)
 	}
 
-	// Save new refresh token (hashed)
-	if _, err := s.db.Exec(`
-		INSERT INTO refresh_tokens (id, user_id, token, expires_at, session_id)
-		VALUES ($1, $2, $3, $4, $5)
-	`, uuid.New().String(), claims.UserID, hashToken(newRefreshToken), time.Now().Add(s.cfg.JWTRefreshExpiry), sessionID); err != nil {
-		return nil, fmt.Errorf("failed to save refresh token: %w", err)
+	// One statement does the whole rotation, so the row is claimed atomically
+	// instead of the previous delete-then-insert, which could lose the
+	// session entirely if the insert failed in between.
+	result, err := s.db.Exec(`
+		UPDATE refresh_tokens
+		SET previous_token = token,
+			previous_token_expires_at = NOW() + INTERVAL '60 seconds',
+			token = $3,
+			expires_at = $4,
+			last_used_at = NOW()
+		WHERE user_id = $2 AND expires_at > NOW() AND revoked_at IS NULL
+		  AND (token = $1 OR (previous_token = $1 AND previous_token_expires_at > NOW()))
+	`, hashedRefresh, claims.UserID, hashToken(newRefreshToken), time.Now().Add(s.cfg.JWTRefreshExpiry))
+	if err != nil {
+		return nil, fmt.Errorf("failed to rotate refresh token: %w", err)
+	}
+	if affected, err := result.RowsAffected(); err == nil && affected == 0 {
+		return nil, fmt.Errorf("refresh token not found or expired")
 	}
 
 	return &AuthResponse{

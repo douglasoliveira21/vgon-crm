@@ -135,6 +135,20 @@ func (s *MessageService) GetConversationMessages(conversationID, companyID strin
 func (s *MessageService) SaveAndSendMessage(companyID, userID string, req *SendTextMessageRequest) (*models.Message, error) {
 	msgID := uuid.New().String()
 
+	// Every write below addresses the conversation by id alone, so a request
+	// carrying another tenant's conversation id would have appended a message
+	// to their thread and overwritten their preview. This is the one place
+	// all text sends pass through, so the ownership check belongs here.
+	var owned bool
+	if err := s.db.QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND company_id = $2)`,
+		req.ConversationID, companyID,
+	).Scan(&owned); err != nil {
+		return nil, fmt.Errorf("failed to verify conversation: %w", err)
+	} else if !owned {
+		return nil, fmt.Errorf("conversation not found")
+	}
+
 	if !req.IsPrivate {
 		if err := pauseConversationAutomationState(s.db, req.ConversationID); err != nil {
 			return nil, fmt.Errorf("failed to pause automation: %w", err)
@@ -153,8 +167,8 @@ func (s *MessageService) SaveAndSendMessage(companyID, userID string, req *SendT
 	preview := truncatePreview(req.Content, 100)
 	if _, err := s.db.Exec(`
 		UPDATE conversations SET last_message_at = NOW(), last_message_preview = $1, updated_at = NOW()
-		WHERE id = $2
-	`, preview, req.ConversationID); err != nil {
+		WHERE id = $2 AND company_id = $3
+	`, preview, req.ConversationID, companyID); err != nil {
 		log.Printf("[MESSAGE] failed to update conversation %s preview: %v", req.ConversationID, err)
 	}
 
@@ -372,6 +386,13 @@ func (s *MessageService) AssignConversation(conversationID, userID, companyID st
 	}
 	defer tx.Rollback()
 
+	var sameCompany bool
+	if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND company_id = $2)`, userID, companyID).Scan(&sameCompany); err != nil {
+		return err
+	} else if !sameCompany {
+		return fmt.Errorf("usuário de destino não encontrado")
+	}
+
 	_, err = tx.Exec(`
 		UPDATE conversations SET assigned_to = $1, status = 'in_progress', updated_at = NOW()
 		WHERE id = $2 AND company_id = $3
@@ -405,12 +426,27 @@ func (s *MessageService) TransferConversation(conversationID, companyID string, 
 	shouldPauseAutomation := false
 
 	if toUserID != nil {
-		_, err := tx.Exec(`
+		// The conversation is scoped by company, but the destination was not:
+		// a request could hand its own conversation to a user belonging to a
+		// different tenant, who would then see it in their inbox.
+		var sameCompany bool
+		if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND company_id = $2)`, *toUserID, companyID).Scan(&sameCompany); err != nil {
+			return err
+		} else if !sameCompany {
+			return fmt.Errorf("usuário de destino não encontrado")
+		}
+
+		result, err := tx.Exec(`
 			UPDATE conversations SET assigned_to = $1, status = 'in_progress', updated_at = NOW()
 			WHERE id = $2 AND company_id = $3
 		`, *toUserID, conversationID, companyID)
 		if err != nil {
 			return err
+		}
+		// Without this a transfer of a conversation that doesn't exist (or
+		// belongs to someone else) updated nothing and still reported success.
+		if affected, err := result.RowsAffected(); err == nil && affected == 0 {
+			return fmt.Errorf("conversa não encontrada")
 		}
 		shouldPauseAutomation = true
 
@@ -422,12 +458,22 @@ func (s *MessageService) TransferConversation(conversationID, companyID string, 
 	}
 
 	if toTeamID != nil {
-		_, err := tx.Exec(`
+		var sameCompany bool
+		if err := tx.QueryRow(`SELECT EXISTS (SELECT 1 FROM teams WHERE id = $1 AND company_id = $2)`, *toTeamID, companyID).Scan(&sameCompany); err != nil {
+			return err
+		} else if !sameCompany {
+			return fmt.Errorf("time de destino não encontrado")
+		}
+
+		result, err := tx.Exec(`
 			UPDATE conversations SET team_id = $1, updated_at = NOW()
 			WHERE id = $2 AND company_id = $3
 		`, *toTeamID, conversationID, companyID)
 		if err != nil {
 			return err
+		}
+		if affected, err := result.RowsAffected(); err == nil && affected == 0 {
+			return fmt.Errorf("conversa não encontrada")
 		}
 		shouldPauseAutomation = true
 

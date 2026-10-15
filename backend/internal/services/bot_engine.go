@@ -2045,9 +2045,15 @@ func (e *BotEngine) nodeTransferTeam(node BotNode, companyID, conversationID str
 		}
 	} else {
 		var exists bool
-		e.db.QueryRow("SELECT EXISTS(SELECT 1 FROM teams WHERE id = $1 AND company_id = $2 AND is_active = true)", teamID, companyID).Scan(&exists)
+		if err := e.db.QueryRow("SELECT EXISTS(SELECT 1 FROM teams WHERE id = $1 AND company_id = $2 AND is_active = true)", teamID, companyID).Scan(&exists); err != nil {
+			return fmt.Errorf("falha ao verificar time %s: %w", teamID, err)
+		}
 		if !exists {
-			return nil
+			// Returning nil let the flow carry on to whatever came next —
+			// often an end node that closed the conversation. The customer
+			// asked for a human and was hung up on instead. Failing here
+			// stops the flow and leaves the conversation open.
+			return fmt.Errorf("time %s não encontrado ou inativo", teamID)
 		}
 	}
 
@@ -2056,7 +2062,9 @@ func (e *BotEngine) nodeTransferTeam(node BotNode, companyID, conversationID str
 	}
 
 	// Pause bot when transferring to human attendance.
-	_ = pauseConversationAutomationState(e.db, conversationID)
+	if err := pauseConversationAutomationState(e.db, conversationID); err != nil {
+		return fmt.Errorf("falha ao pausar automação após transferir: %w", err)
+	}
 
 	return nil
 }
@@ -2076,13 +2084,17 @@ func (e *BotEngine) nodeAssignAgent(node BotNode, companyID, conversationID stri
 			LIMIT 1
 		`, companyID, agentEmail).Scan(&userID)
 		if err != nil {
-			return nil
+			// Same reasoning as nodeTransferToTeam: continuing the flow here
+			// silently dropped the customer instead of reaching a human.
+			return fmt.Errorf("atendente %s não encontrado ou inativo", agentEmail)
 		}
 	} else {
 		var exists bool
-		e.db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND company_id = $2 AND is_active = true)", userID, companyID).Scan(&exists)
+		if err := e.db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND company_id = $2 AND is_active = true)", userID, companyID).Scan(&exists); err != nil {
+			return fmt.Errorf("falha ao verificar atendente %s: %w", userID, err)
+		}
 		if !exists {
-			return nil
+			return fmt.Errorf("atendente %s não encontrado ou inativo", userID)
 		}
 	}
 
@@ -2150,6 +2162,10 @@ func (e *BotEngine) nodeCallWebhook(node BotNode, companyID, conversationID, con
 		return nil
 	}
 
+	if err := ValidatePublicURL(url); err != nil {
+		return err
+	}
+
 	method := strings.ToUpper(firstString(config, "method"))
 	if method == "" {
 		method = http.MethodPost
@@ -2178,7 +2194,7 @@ func (e *BotEngine) nodeCallWebhook(node BotNode, companyID, conversationID, con
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := NewGuardedHTTPClient(15 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
