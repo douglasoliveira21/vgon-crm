@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"crypto/hmac"
 	"encoding/json"
 	"log"
+	"strings"
 
 	"github.com/evocrm/backend/internal/services"
 	"github.com/gofiber/fiber/v2"
@@ -180,9 +182,36 @@ func SyncWhatsAppPhotos(svc *services.Container) fiber.Handler {
 	}
 }
 
+// evolutionWebhookAuthorized checks the shared secret Evolution echoes back,
+// taken from the callback URL (works on every version) or from a forwarded
+// header (newer ones). An empty configured token leaves the endpoint open so
+// an existing deployment keeps receiving messages until the operator sets
+// EVOLUTION_WEBHOOK_TOKEN and the instances re-register their callback URL.
+func evolutionWebhookAuthorized(c *fiber.Ctx, expected string) bool {
+	if expected == "" {
+		return true
+	}
+	candidates := []string{
+		c.Query("token"),
+		strings.TrimPrefix(strings.TrimSpace(c.Get("Authorization")), "Bearer "),
+		strings.TrimSpace(c.Get("X-Webhook-Token")),
+	}
+	for _, candidate := range candidates {
+		if candidate != "" && hmac.Equal([]byte(candidate), []byte(expected)) {
+			return true
+		}
+	}
+	return false
+}
+
 func HandleEvolutionWebhook(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		instanceName := c.Params("instanceName")
+
+		if !evolutionWebhookAuthorized(c, svc.Config.EvolutionWebhookToken) {
+			log.Printf("[WEBHOOK] Rejected unauthenticated callback for instance '%s' from %s", instanceName, clientIP(c))
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
+		}
 
 		var event map[string]interface{}
 		if err := json.Unmarshal(c.Body(), &event); err != nil {

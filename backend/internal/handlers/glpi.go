@@ -1,11 +1,43 @@
 package handlers
 
 import (
+	"log"
 	"strconv"
 
 	"github.com/evocrm/backend/internal/services"
 	"github.com/gofiber/fiber/v2"
 )
+
+// GLPITenantGuard restricts the GLPI routes to the single company that owns
+// the integration.
+//
+// GLPI is reached with one global account from the environment, and the
+// handlers address tickets by sequential numeric id, so without this any
+// tenant could read (and open) tickets in that one helpdesk just by counting
+// upwards — and since signup is open and a new company's owner is created as
+// an admin with "*", that meant anyone who registered.
+func GLPITenantGuard(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID, _ := c.Locals("company_id").(string)
+
+		if svc.Config.GLPICompanyID != "" {
+			if companyID == svc.Config.GLPICompanyID {
+				return c.Next()
+			}
+			log.Printf("[GLPI] Blocked access from company %s (integration belongs to %s)", companyID, svc.Config.GLPICompanyID)
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Integração GLPI não disponível para esta empresa"})
+		}
+
+		// Not configured: fall back to super admins rather than everyone.
+		userID, _ := c.Locals("user_id").(string)
+		var isSuperAdmin bool
+		if err := svc.DB.QueryRow("SELECT COALESCE(is_super_admin, false) FROM users WHERE id = $1", userID).Scan(&isSuperAdmin); err != nil || !isSuperAdmin {
+			log.Printf("[GLPI] Blocked access from company %s: GLPI_COMPANY_ID is not set", companyID)
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Integração GLPI não liberada para esta empresa"})
+		}
+		return c.Next()
+	}
+}
 
 // POST /api/glpi/tickets - Create a GLPI ticket
 func GLPICreateTicket(svc *services.Container) fiber.Handler {

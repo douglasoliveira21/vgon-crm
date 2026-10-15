@@ -37,10 +37,11 @@ type LoginRequest struct {
 }
 
 type RegisterRequest struct {
-	CompanyName string `json:"company_name"`
-	Name        string `json:"name"`
-	Email       string `json:"email"`
-	Password    string `json:"password"`
+	CompanyName  string `json:"company_name"`
+	Name         string `json:"name"`
+	Email        string `json:"email"`
+	Password     string `json:"password"`
+	CaptchaToken string `json:"captcha_token"`
 }
 
 type ForgotPasswordRequest struct {

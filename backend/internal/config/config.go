@@ -23,6 +23,9 @@ type Config struct {
 	EvolutionAPIURL     string
 	EvolutionAPIKey     string
 	EvolutionWebhookURL string
+	// Shared secret echoed back by Evolution on every callback. Empty keeps
+	// the endpoint open, for deployments that haven't configured it yet.
+	EvolutionWebhookToken string
 
 	// App
 	AppPort     string
@@ -45,10 +48,17 @@ type Config struct {
 	TurnstileSiteKey   string
 	TurnstileSecretKey string
 
-	// GLPI
+	// Whether anyone can create a tenant from the public signup form.
+	AllowPublicRegistration bool
+
+	// GLPI. The credentials are a single global account, not per tenant, so
+	// GLPICompanyID names the one company allowed to reach it. Empty means
+	// super admins only — never every tenant, which would expose one
+	// helpdesk's tickets to anyone who can sign up.
 	GLPIBaseURL   string
 	GLPIAppToken  string
 	GLPIUserToken string
+	GLPICompanyID string
 
 	// Email OAuth
 	GoogleClientID        string
@@ -77,6 +87,7 @@ func Load() *Config {
 		EvolutionAPIURL:       getEnv("EVOLUTION_API_URL", "http://localhost:8080"),
 		EvolutionAPIKey:       getEnv("EVOLUTION_API_KEY", ""),
 		EvolutionWebhookURL:   getEnv("EVOLUTION_WEBHOOK_URL", "http://localhost:3001/api/webhooks/evolution"),
+		EvolutionWebhookToken: getEnv("EVOLUTION_WEBHOOK_TOKEN", ""),
 		AppPort:               getEnv("APP_PORT", "3001"),
 		AppEnv:                getEnv("APP_ENV", "development"),
 		FrontendURL:           getEnv("FRONTEND_URL", "http://localhost:3000"),
@@ -90,9 +101,14 @@ func Load() *Config {
 		RateLimitWindow:       parseDuration(getEnv("RATE_LIMIT_WINDOW", "1m")),
 		TurnstileSiteKey:      getEnv("TURNSTILE_SITE_KEY", ""),
 		TurnstileSecretKey:    getEnv("TURNSTILE_SECRET_KEY", ""),
+		// Closed by default: there is no public signup page, and tenants are
+		// created by a super admin through /api/admin/tenants, so the only
+		// traffic this endpoint ever saw was somebody calling it directly.
+		AllowPublicRegistration: getEnv("ALLOW_PUBLIC_REGISTRATION", "false") == "true",
 		GLPIBaseURL:           getEnv("GLPI_BASE_URL", ""),
 		GLPIAppToken:          getEnv("GLPI_APP_TOKEN", ""),
 		GLPIUserToken:         getEnv("GLPI_USER_TOKEN", ""),
+		GLPICompanyID:         getEnv("GLPI_COMPANY_ID", ""),
 		GoogleClientID:        getEnv("GOOGLE_CLIENT_ID", ""),
 		GoogleClientSecret:    getEnv("GOOGLE_CLIENT_SECRET", ""),
 		MicrosoftClientID:     getEnv("MICROSOFT_CLIENT_ID", ""),

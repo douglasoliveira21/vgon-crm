@@ -227,7 +227,7 @@ func GetChannels(svc *services.Container) fiber.Handler {
 			if err := rows.Scan(&id, &name, &chType, &status, &rawSettings, &isActive, &createdAt); err != nil {
 				continue
 			}
-			settings := sanitizeChannelSettings(chType, rawSettings)
+			settings := sanitizeChannelSettings(rawSettings)
 			channels = append(channels, map[string]interface{}{
 				"id": id, "name": name, "type": chType, "status": status,
 				"settings": settings, "is_active": isActive, "created_at": createdAt,
@@ -241,14 +241,31 @@ func GetChannels(svc *services.Container) fiber.Handler {
 	}
 }
 
-func sanitizeChannelSettings(channelType string, raw []byte) map[string]interface{} {
+// channelSecretFields are stripped from channel settings before they reach
+// the browser. Mailbox passwords were already removed, but the Gmail/Outlook
+// OAuth tokens next to them were not — and those are bearer credentials for
+// the whole mailbox, handed to every user allowed to view the channel list.
+// Applied to every channel type rather than just email, so a secret added by
+// a future channel type isn't exposed by default.
+var channelSecretFields = []string{
+	"password",
+	"smtp_password",
+	"access_token",
+	"refresh_token",
+	"token",
+	"api_key",
+	"apikey",
+	"client_secret",
+	"secret",
+}
+
+func sanitizeChannelSettings(raw []byte) map[string]interface{} {
 	settings := map[string]interface{}{}
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &settings)
 	}
-	if channelType == "email" {
-		delete(settings, "password")
-		delete(settings, "smtp_password")
+	for _, field := range channelSecretFields {
+		delete(settings, field)
 	}
 	return settings
 }

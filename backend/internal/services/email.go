@@ -129,7 +129,7 @@ func (s *EmailService) SyncChannel(companyID, channelID string) (int, error) {
 		return 0, fmt.Errorf("email channel not found: %w", err)
 	}
 
-	settings, err := parseEmailSettings(rawSettings)
+	settings, err := parseEmailSettings(rawSettings, s.cfg.JWTSecret)
 	if err != nil {
 		return 0, err
 	}
@@ -165,7 +165,7 @@ func (s *EmailService) SyncChannel(companyID, channelID string) (int, error) {
 	if lastUID > settings.LastUID {
 		settings.LastUID = lastUID
 	}
-	updatedSettings, _ := json.Marshal(settings)
+	updatedSettings, _ := MarshalEmailSettings(settings, s.cfg.JWTSecret)
 	newStatus := "connected"
 	if fetchErr != nil {
 		newStatus = "error"
@@ -214,7 +214,7 @@ func (s *EmailService) SendReply(companyID, conversationID, content string) (str
 		return "", err
 	}
 
-	updatedSettings, _ := json.Marshal(target.Settings)
+	updatedSettings, _ := MarshalEmailSettings(target.Settings, s.cfg.JWTSecret)
 	_, _ = s.db.Exec("UPDATE channels SET settings = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3", updatedSettings, target.ChannelID, companyID)
 	return externalID, nil
 }
@@ -251,7 +251,7 @@ func (s *EmailService) SendMarketingEmail(companyID, channelID, to, subject, con
 		return "", fmt.Errorf("caixa de entrada de e-mail não conectada")
 	}
 
-	settings, err := parseEmailSettings(rawSettings)
+	settings, err := parseEmailSettings(rawSettings, s.cfg.JWTSecret)
 	if err != nil {
 		return "", err
 	}
@@ -269,7 +269,7 @@ func (s *EmailService) SendMarketingEmail(companyID, channelID, to, subject, con
 		return "", err
 	}
 
-	updatedSettings, _ := json.Marshal(settings)
+	updatedSettings, _ := MarshalEmailSettings(settings, s.cfg.JWTSecret)
 	_, _ = s.db.Exec("UPDATE channels SET settings = $1, updated_at = NOW() WHERE id = $2 AND company_id = $3", updatedSettings, channelID, companyID)
 	return externalID, nil
 }
@@ -286,7 +286,7 @@ func (s *EmailService) getEmailSendTarget(companyID, conversationID string) (ema
 	if err != nil {
 		return target, fmt.Errorf("conversa de e-mail não encontrada: %w", err)
 	}
-	settings, err := parseEmailSettings(target.RawSettings)
+	settings, err := parseEmailSettings(target.RawSettings, s.cfg.JWTSecret)
 	if err != nil {
 		return target, err
 	}
@@ -827,11 +827,44 @@ func normalizeEmailSubject(subject string) string {
 	return value
 }
 
-func parseEmailSettings(raw []byte) (EmailChannelSettings, error) {
+// Email channel credentials live inside the channels.settings JSON blob.
+// They used to be stored in the clear, so anyone with read access to the
+// database — a backup, a dump, a stray query — got working mailbox logins
+// and OAuth tokens. These are encrypted with the same scheme as the TOTP
+// secrets, which leaves existing plaintext rows readable (DecryptSecret
+// passes through anything unprefixed) and re-writes them encrypted on the
+// next save.
+func encryptEmailSecrets(settings *EmailChannelSettings, seed string) {
+	for _, field := range []*string{&settings.Password, &settings.SMTPPassword, &settings.AccessToken, &settings.RefreshToken} {
+		// Keep the original value if encryption fails, so a bad seed can
+		// never silently wipe a working credential.
+		if encrypted, err := EncryptSecret(*field, seed); err == nil {
+			*field = encrypted
+		}
+	}
+}
+
+func decryptEmailSecrets(settings *EmailChannelSettings, seed string) {
+	settings.Password = DecryptSecret(settings.Password, seed)
+	settings.SMTPPassword = DecryptSecret(settings.SMTPPassword, seed)
+	settings.AccessToken = DecryptSecret(settings.AccessToken, seed)
+	settings.RefreshToken = DecryptSecret(settings.RefreshToken, seed)
+}
+
+// MarshalEmailSettings serializes channel settings for storage with the
+// credentials encrypted. Every write path goes through this instead of
+// json.Marshal so a new one can't quietly reintroduce plaintext secrets.
+func MarshalEmailSettings(settings EmailChannelSettings, seed string) ([]byte, error) {
+	encryptEmailSecrets(&settings, seed)
+	return json.Marshal(settings)
+}
+
+func parseEmailSettings(raw []byte, seed string) (EmailChannelSettings, error) {
 	var settings EmailChannelSettings
 	if err := json.Unmarshal(raw, &settings); err != nil {
 		return settings, fmt.Errorf("invalid email settings: %w", err)
 	}
+	decryptEmailSecrets(&settings, seed)
 	if settings.Provider == "gmail" || settings.Provider == "outlook" {
 		if settings.AccessToken == "" && settings.RefreshToken == "" {
 			return settings, fmt.Errorf("conta OAuth sem tokens")
@@ -860,8 +893,8 @@ func parseEmailSettings(raw []byte) (EmailChannelSettings, error) {
 	return settings, nil
 }
 
-func ParseEmailSettingsForHandler(raw []byte) (EmailChannelSettings, error) {
-	return parseEmailSettings(raw)
+func ParseEmailSettingsForHandler(raw []byte, seed string) (EmailChannelSettings, error) {
+	return parseEmailSettings(raw, seed)
 }
 
 func fetchInboxEmails(settings EmailChannelSettings) ([]fetchedEmail, uint32, error) {

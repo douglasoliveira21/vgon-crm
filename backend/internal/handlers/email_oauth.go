@@ -104,7 +104,7 @@ func EmailOAuthCallback(svc *services.Container) fiber.Handler {
 			RefreshToken: token.RefreshToken,
 			TokenExpiry:  time.Now().Add(time.Duration(token.ExpiresIn) * time.Second),
 		}
-		settingsJSON, _ := json.Marshal(settings)
+		settingsJSON, _ := services.MarshalEmailSettings(settings, svc.Config.JWTSecret)
 		_, err = svc.DB.Exec(`
 			INSERT INTO channels (id, company_id, name, type, status, settings, is_active)
 			VALUES ($1, $2, $3, 'email', 'connected', $4, true)

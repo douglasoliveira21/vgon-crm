@@ -222,7 +222,7 @@ func SetupRoutes(app *fiber.App, svc *services.Container, wsHub *websocket.Hub) 
 	protected.Get("/audit-logs/verify", middleware.RBACMiddleware("audit.view"), VerifyAuditChain(svc))
 
 	// GLPI
-	glpi := protected.Group("/glpi", middleware.RBACMiddleware("glpi.view"))
+	glpi := protected.Group("/glpi", middleware.RBACMiddleware("glpi.view"), GLPITenantGuard(svc))
 	glpi.Post("/tickets", GLPICreateTicket(svc))
 	glpi.Get("/tickets/:id", GLPIGetTicket(svc))
 	glpi.Get("/entities", GLPIGetEntities(svc))

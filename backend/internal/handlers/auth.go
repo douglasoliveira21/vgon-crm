@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -170,6 +171,21 @@ func AuthRegister(svc *services.Container) fiber.Handler {
 
 		if len(req.Password) < 8 {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Password must be at least 8 characters"})
+		}
+
+		// Signup creates a whole tenant whose owner is an admin, so leaving
+		// it unguarded let anyone script unlimited companies into the system.
+		if !svc.Config.AllowPublicRegistration {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Cadastro público desabilitado. Fale com o suporte para criar sua conta."})
+		}
+		if captchaEnabled(svc) {
+			if err := services.VerifyTurnstile(svc.Config.TurnstileSecretKey, req.CaptchaToken, clientIP(c)); err != nil {
+				log.Printf("[AUTH] Registration captcha failed for %s from %s: %v", req.Email, clientIP(c), err)
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+					"error": "Verificação de segurança falhou. Tente novamente.",
+					"code":  "captcha_failed",
+				})
+			}
 		}
 
 		resp, err := svc.Auth.Register(&req)

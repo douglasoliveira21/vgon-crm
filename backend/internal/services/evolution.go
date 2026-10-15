@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -161,27 +162,56 @@ type EvolutionCreateResponse struct {
 	Settings map[string]interface{} `json:"settings"`
 }
 
+// evolutionWebhookEvents is the single source of truth for the event
+// subscription. It used to be spelled out at each call site, which is how an
+// instance could end up silently never receiving a newly added event type.
+var evolutionWebhookEvents = []string{
+	"MESSAGES_UPSERT",
+	"MESSAGES_UPDATE",
+	"MESSAGES_DELETE",
+	"SEND_MESSAGE",
+	"CONNECTION_UPDATE",
+	"CONTACTS_UPSERT",
+	"QRCODE_UPDATED",
+	"PRESENCE_UPDATE",
+}
+
+// InstanceWebhookURL builds the callback URL Evolution posts events to,
+// carrying the shared secret. The endpoint is otherwise open to anyone who
+// guesses an instance name, who could then forge inbound customer messages —
+// which drives the bot into sending real WhatsApp messages from the tenant's
+// own number — or forge connection events that take channels offline.
+func (s *EvolutionService) InstanceWebhookURL(instanceName string) string {
+	base := fmt.Sprintf("%s/%s", s.cfg.EvolutionWebhookURL, instanceName)
+	if s.cfg.EvolutionWebhookToken == "" {
+		return base
+	}
+	return base + "?token=" + url.QueryEscape(s.cfg.EvolutionWebhookToken)
+}
+
+func (s *EvolutionService) webhookConfig(instanceName string) map[string]interface{} {
+	config := map[string]interface{}{
+		"url":     s.InstanceWebhookURL(instanceName),
+		"enabled": true,
+		"events":  evolutionWebhookEvents,
+	}
+	if s.cfg.EvolutionWebhookToken != "" {
+		// Only newer Evolution versions forward custom headers; the token is
+		// in the URL too, so authentication still works without them.
+		config["headers"] = map[string]string{
+			"authorization": "Bearer " + s.cfg.EvolutionWebhookToken,
+		}
+	}
+	return config
+}
+
 // CreateInstance creates a new WhatsApp instance via Evolution API
 func (s *EvolutionService) CreateInstance(req *CreateInstanceRequest) (*models.WhatsAppInstance, error) {
-	// Create the instance via Evolution API
 	payload := map[string]interface{}{
 		"instanceName": req.InstanceName,
 		"qrcode":       true,
 		"integration":  "WHATSAPP-BAILEYS",
-		"webhook": map[string]interface{}{
-			"url":     fmt.Sprintf("%s/%s", s.cfg.EvolutionWebhookURL, req.InstanceName),
-			"enabled": true,
-			"events": []string{
-				"MESSAGES_UPSERT",
-				"MESSAGES_UPDATE",
-				"MESSAGES_DELETE",
-				"SEND_MESSAGE",
-				"CONNECTION_UPDATE",
-				"CONTACTS_UPSERT",
-				"QRCODE_UPDATED",
-				"PRESENCE_UPDATE",
-			},
-		},
+		"webhook":      s.webhookConfig(req.InstanceName),
 	}
 
 	body, err := json.Marshal(payload)
@@ -262,7 +292,7 @@ func (s *EvolutionService) CreateInstance(req *CreateInstanceRequest) (*models.W
 
 	// Save instance to database
 	instanceID := uuid.New().String()
-	webhookURL := fmt.Sprintf("%s/%s", s.cfg.EvolutionWebhookURL, req.InstanceName)
+	webhookURL := s.InstanceWebhookURL(req.InstanceName)
 
 	_, err = s.db.Exec(`
 		INSERT INTO whatsapp_instances (id, company_id, channel_id, instance_name, instance_id, token, status, qrcode, webhook_url)
@@ -823,20 +853,7 @@ func (s *EvolutionService) handleConnectionUpdate(instanceName string, event map
 // here must never break the connection flow, just log.
 func (s *EvolutionService) syncInstanceWebhook(instanceName string) {
 	payload := map[string]interface{}{
-		"webhook": map[string]interface{}{
-			"url":     fmt.Sprintf("%s/%s", s.cfg.EvolutionWebhookURL, instanceName),
-			"enabled": true,
-			"events": []string{
-				"MESSAGES_UPSERT",
-				"MESSAGES_UPDATE",
-				"MESSAGES_DELETE",
-				"SEND_MESSAGE",
-				"CONNECTION_UPDATE",
-				"CONTACTS_UPSERT",
-				"QRCODE_UPDATED",
-				"PRESENCE_UPDATE",
-			},
-		},
+		"webhook": s.webhookConfig(instanceName),
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

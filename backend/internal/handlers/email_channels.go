@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"log"
 	"strings"
 
@@ -39,7 +38,7 @@ func CreateEmailChannel(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Nome, servidor IMAP, usuário e senha são obrigatórios"})
 		}
 		settings := emailSettingsFromRequest(body, nil)
-		settingsJSON, _ := json.Marshal(settings)
+		settingsJSON, _ := services.MarshalEmailSettings(settings, svc.Config.JWTSecret)
 
 		id := uuid.New().String()
 		_, err := svc.DB.Exec(`
@@ -72,7 +71,7 @@ func UpdateEmailChannel(svc *services.Container) fiber.Handler {
 		if err != nil {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Canal de e-mail não encontrado"})
 		}
-		current, _ := services.ParseEmailSettingsForHandler(currentRaw)
+		current, _ := services.ParseEmailSettingsForHandler(currentRaw, svc.Config.JWTSecret)
 
 		var body emailChannelRequest
 		if err := c.BodyParser(&body); err != nil {
@@ -82,7 +81,7 @@ func UpdateEmailChannel(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Nome, servidor IMAP e usuário são obrigatórios"})
 		}
 		settings := emailSettingsFromRequest(body, &current)
-		settingsJSON, _ := json.Marshal(settings)
+		settingsJSON, _ := services.MarshalEmailSettings(settings, svc.Config.JWTSecret)
 
 		_, err = svc.DB.Exec(`
 			UPDATE channels
