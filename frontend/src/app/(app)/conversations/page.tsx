@@ -1786,7 +1786,7 @@ export default function ConversationsPage() {
       {/* Chat Area */}
       {selectedConv ? (
         <div
-          className={clsx('min-w-0 flex-1 flex flex-col bg-gray-50 relative', isDragging && 'ring-2 ring-primary-500 ring-inset')}
+          className={clsx('chat-bg min-w-0 flex-1 flex flex-col bg-gray-50 relative', isDragging && 'ring-2 ring-primary-500 ring-inset')}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}

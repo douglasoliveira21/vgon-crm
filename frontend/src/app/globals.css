@@ -200,6 +200,33 @@
   scrollbar-color: #334155 transparent;
 }
 
+/* Chat conversation background wallpaper.
+   Light vs dark follows the theme (.dark), and the asset swaps between the
+   mobile (portrait) and desktop (landscape) versions at the lg breakpoint.
+   The image is fixed and cover-sized so it stays put while messages scroll. */
+.chat-bg {
+  background-image: url('/assets/chat-bg-light-mobile.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+@media (min-width: 1024px) {
+  .chat-bg {
+    background-image: url('/assets/chat-bg-light-desktop.png');
+  }
+}
+
+.dark .chat-bg {
+  background-image: url('/assets/chat-bg-dark-mobile.png');
+}
+
+@media (min-width: 1024px) {
+  .dark .chat-bg {
+    background-image: url('/assets/chat-bg-dark-desktop.png');
+  }
+}
+
 /* Chat message animations */
 @keyframes slideIn {
   from {
