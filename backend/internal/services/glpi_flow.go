@@ -15,6 +15,8 @@ import (
 // GLPIFlowState tracks the multi-step GLPI ticket creation flow per conversation
 type GLPIFlowState struct {
 	Step         string `json:"step"`          // current step
+	Mode         string `json:"mode"`          // flow mode: open_ticket | check_status | check_cnpj
+	ContactID    string `json:"contact_id"`    // contact for resuming the parent bot flow
 	EntitySearch string `json:"entity_search"` // legacy entity name search
 	EntityCNPJ   string `json:"entity_cnpj"`   // normalized CNPJ searched
 	EntityID     int    `json:"entity_id"`     // confirmed entity ID
@@ -55,14 +57,22 @@ func (e *GLPIFlowEngine) SetBotEngine(bot *BotEngine) {
 
 // StartGLPIFlow initiates the GLPI ticket creation flow for a conversation
 func (e *GLPIFlowEngine) StartGLPIFlow(companyID, conversationID, contactID, instanceName, phone string, mode string) {
-	// mode: "open_ticket" or "check_status"
-	state := &GLPIFlowState{}
+	// mode: "open_ticket", "check_status" or "check_cnpj"
+	state := &GLPIFlowState{Mode: mode, ContactID: contactID, Phone: phone}
 
 	if mode == "check_status" {
 		state.Step = "ask_ticket_number"
 		e.saveState(conversationID, state)
 		e.sendBotMessage(companyID, conversationID, instanceName, phone,
 			"🔍 *Consultar Chamado*\n\nPor favor, digite o *número do ticket* que deseja consultar:")
+		return
+	}
+
+	if mode == "check_cnpj" {
+		state.Step = "cnpj_lookup"
+		e.saveState(conversationID, state)
+		e.sendBotMessage(companyID, conversationID, instanceName, phone,
+			"🔎 *Consulta de Cliente*\n\nPara verificar se você já é nosso cliente, digite o *CNPJ da empresa* (com ou sem pontuação):")
 		return
 	}
 
@@ -83,6 +93,8 @@ func (e *GLPIFlowEngine) HandleGLPIMessage(companyID, conversationID, contactID,
 	}
 
 	switch state.Step {
+	case "cnpj_lookup":
+		return e.handleCNPJLookup(companyID, conversationID, contactID, instanceName, phone, message, state)
 	case "ask_entity":
 		return e.handleAskEntity(companyID, conversationID, instanceName, phone, message, state)
 	case "confirm_entity":
@@ -142,6 +154,115 @@ func (e *GLPIFlowEngine) CancelFlow(conversationID string) {
 }
 
 // --- Step handlers ---
+
+// handleCNPJLookup runs the dedicated "sou cliente?" lookup block. It only
+// checks whether the CNPJ exists as an Entity in GLPI, confirms the customer
+// data when found, informs the user when not found, and in every terminal case
+// resumes the parent bot flow so it can branch (found vs not_found) and move on.
+func (e *GLPIFlowEngine) handleCNPJLookup(companyID, conversationID, contactID, instanceName, phone, message string, state *GLPIFlowState) bool {
+	cnpj := onlyDigits(message)
+	if len(cnpj) != 14 {
+		e.sendBotMessage(companyID, conversationID, instanceName, phone,
+			"❌ CNPJ inválido. Digite os *14 números do CNPJ*, com ou sem pontuação:")
+		return true
+	}
+	state.EntityCNPJ = cnpj
+	if contactID == "" {
+		contactID = state.ContactID
+	}
+
+	sessionToken, err := e.glpi.InitSession(e.cfg.UserToken)
+	if err != nil {
+		log.Printf("[GLPI-FLOW] CNPJ lookup: failed to init session: %v", err)
+		e.sendBotMessage(companyID, conversationID, instanceName, phone,
+			"⚠️ Não consegui consultar a base de clientes agora. Vou seguir com o atendimento mesmo assim.")
+		e.finishCNPJLookup(companyID, conversationID, contactID, instanceName, phone, "glpi_cnpj_not_found:error")
+		return true
+	}
+	defer e.glpi.KillSession(sessionToken)
+
+	matches, err := e.glpi.FindEntitiesByCNPJ(sessionToken, cnpj)
+	if err != nil {
+		log.Printf("[GLPI-FLOW] CNPJ lookup failed: %v", err)
+		e.sendBotMessage(companyID, conversationID, instanceName, phone,
+			"⚠️ Não consegui consultar a base de clientes agora. Vou seguir com o atendimento mesmo assim.")
+		e.finishCNPJLookup(companyID, conversationID, contactID, instanceName, phone, "glpi_cnpj_not_found:error")
+		return true
+	}
+
+	if len(matches) == 0 {
+		e.sendBotMessage(companyID, conversationID, instanceName, phone,
+			fmt.Sprintf("ℹ️ Não localizei o CNPJ *%s* na nossa base como cliente.\n\nSem problemas, vou dar continuidade ao seu atendimento.", formatCNPJ(cnpj)))
+		e.finishCNPJLookup(companyID, conversationID, contactID, instanceName, phone, "glpi_cnpj_not_found")
+		return true
+	}
+
+	// Found as customer: confirm the data back to the user.
+	entity := matches[0]
+	entityName := entity.CompleteName
+	if entityName == "" {
+		entityName = entity.Name
+	}
+	state.EntityID = entity.ID
+	state.EntityName = entityName
+
+	e.sendBotMessage(companyID, conversationID, instanceName, phone, buildCustomerFoundMessage(entity, cnpj))
+
+	// Persist what we found to the CRM contact when possible.
+	if contactID != "" {
+		e.db.Exec("UPDATE contacts SET company_name = $1 WHERE id = $2 AND (company_name IS NULL OR company_name = '')",
+			entityName, contactID)
+	}
+
+	e.finishCNPJLookup(companyID, conversationID, contactID, instanceName, phone, fmt.Sprintf("glpi_cnpj_found:%d", entity.ID))
+	return true
+}
+
+// finishCNPJLookup ends the dedicated lookup flow and hands control back to the
+// parent bot flow with a result string so it can take the found/not_found edge.
+func (e *GLPIFlowEngine) finishCNPJLookup(companyID, conversationID, contactID, instanceName, phone, result string) {
+	e.CancelFlow(conversationID)
+	e.resumeBotAfterCompletion(companyID, conversationID, contactID, instanceName, phone, result)
+}
+
+// buildCustomerFoundMessage renders the confirmation shown when the CNPJ is
+// found in the GLPI customer base, including whatever cadastral data exists.
+func buildCustomerFoundMessage(entity GLPIEntity, cnpj string) string {
+	entityName := entity.CompleteName
+	if entityName == "" {
+		entityName = entity.Name
+	}
+
+	msg := "✅ *Cliente localizado na nossa base!*\n\n"
+	msg += fmt.Sprintf("🏢 *Empresa:* %s\n", entityName)
+	msg += fmt.Sprintf("📄 *CNPJ:* %s\n", formatCNPJ(cnpj))
+	if strings.TrimSpace(entity.Phone) != "" {
+		msg += fmt.Sprintf("📞 *Telefone:* %s\n", strings.TrimSpace(entity.Phone))
+	}
+	if strings.TrimSpace(entity.Email) != "" {
+		msg += fmt.Sprintf("📧 *E-mail:* %s\n", strings.TrimSpace(entity.Email))
+	}
+	location := joinNonEmpty(" - ", strings.TrimSpace(entity.Town), strings.TrimSpace(entity.State))
+	if strings.TrimSpace(entity.Address) != "" {
+		msg += fmt.Sprintf("📍 *Endereço:* %s\n", strings.TrimSpace(entity.Address))
+	}
+	if location != "" {
+		msg += fmt.Sprintf("🗺️ *Local:* %s\n", location)
+	}
+	msg += "\nDados confirmados. Vou continuar o seu atendimento. 🙂"
+	return msg
+}
+
+// joinNonEmpty joins the non-empty parts with the given separator.
+func joinNonEmpty(sep string, parts ...string) string {
+	kept := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if strings.TrimSpace(p) != "" {
+			kept = append(kept, strings.TrimSpace(p))
+		}
+	}
+	return strings.Join(kept, sep)
+}
 
 func (e *GLPIFlowEngine) handleAskEntity(companyID, conversationID, instanceName, phone, message string, state *GLPIFlowState) bool {
 	state.EntityCNPJ = onlyDigits(message)

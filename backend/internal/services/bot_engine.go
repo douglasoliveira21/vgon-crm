@@ -334,7 +334,7 @@ func shouldExecuteFlowNode(alreadyCompleted, resumedFromResponse bool, step int)
 
 func nodeWaitsForExternalCompletion(node BotNode) bool {
 	switch getNodeType(node) {
-	case "glpi_open_ticket", "glpi_check_status":
+	case "glpi_open_ticket", "glpi_check_status", "glpi_check_cnpj":
 		return true
 	default:
 		return false
@@ -487,6 +487,59 @@ func chooseNextNodeID(node BotNode, outgoing []BotEdge, conditionResult *bool, n
 	}
 	log.Printf("[BOT] condition %s -> false routed by order to %s", node.ID, outgoing[len(outgoing)-1].Target)
 	return outgoing[len(outgoing)-1].Target
+}
+
+// chooseNextNodeIDForExternalResult picks the outgoing edge after an external
+// node (e.g. a GLPI block) resumes. For the dedicated CNPJ-check block the
+// result carries whether the customer was found so the flow can branch:
+//   - "glpi_cnpj_found[:...]"      -> edge whose handle/label marks the found/yes branch
+//   - "glpi_cnpj_not_found[:...]"  -> edge whose handle/label marks the not-found/no branch
+// When the node has a single output (or no result-specific branch is labeled)
+// it falls back to the default first-edge behavior.
+func chooseNextNodeIDForExternalResult(node BotNode, outgoing []BotEdge, resultMessage string, nodesByID map[string]BotNode) string {
+	if len(outgoing) == 0 {
+		return ""
+	}
+	if len(outgoing) == 1 {
+		return outgoing[0].Target
+	}
+
+	// Note: "encontrado" is a substring of "nao_encontrado", so the not-found
+	// tokens are checked/excluded first to keep the two branches unambiguous.
+	notFoundTokens := []string{"not_found", "notfound", "nao_encontrado", "não_encontrado", "nao encontrado", "não encontrado", "senao", "senão", "false", " no", "nao ", "não "}
+	foundTokens := []string{"found", "encontrado", "cliente", "yes", "sim", "true", "entao", "então"}
+
+	result := strings.ToLower(strings.TrimSpace(resultMessage))
+	switch {
+	case strings.HasPrefix(result, "glpi_cnpj_not_found"):
+		if target := routeExternalBranch(outgoing, notFoundTokens, nil); target != "" {
+			return target
+		}
+	case strings.HasPrefix(result, "glpi_cnpj_found"):
+		// Exclude not-found edges so "nao_encontrado" is never mistaken for the
+		// "encontrado" branch via substring matching.
+		if target := routeExternalBranch(outgoing, foundTokens, notFoundTokens); target != "" {
+			return target
+		}
+	}
+
+	// Default: preserve legacy behavior (first edge).
+	return chooseNextNodeID(node, outgoing, nil, nodesByID)
+}
+
+// routeExternalBranch returns the target of the first edge whose handle/label
+// metadata matches one of the include tokens and matches none of the exclude
+// tokens, or "" when none qualify.
+func routeExternalBranch(outgoing []BotEdge, includeTokens, excludeTokens []string) string {
+	for _, edge := range outgoing {
+		if len(excludeTokens) > 0 && edgeMetaMatches(edge, excludeTokens) {
+			continue
+		}
+		if edgeMetaMatches(edge, includeTokens) {
+			return edge.Target
+		}
+	}
+	return ""
 }
 
 // chooseConditionTargetByGeometry distinguishes the ENTÃO/SENÃO branches of a
@@ -1355,7 +1408,7 @@ func (e *BotEngine) ResumeAfterExternalNode(companyID, conversationID, contactID
 		return
 	}
 	outgoingBySource := buildOutgoingEdges(edges)
-	nextID := chooseNextNodeID(externalNode, outgoingBySource[externalNodeID], nil, nodesByID)
+	nextID := chooseNextNodeIDForExternalResult(externalNode, outgoingBySource[externalNodeID], resultMessage, nodesByID)
 	if nextID == "" {
 		e.db.Exec("UPDATE bot_executions SET status = 'completed', completed_at = NOW() WHERE id = $1", execID)
 		log.Printf("[BOT] External node %s completed without next node for flow %s", externalNodeID, flowID)
@@ -1738,6 +1791,8 @@ func (e *BotEngine) executeNode(node BotNode, companyID, conversationID, contact
 		return e.nodeGLPIOpenTicket(companyID, conversationID, contactID, instanceName, phone)
 	case "glpi_check_status":
 		return e.nodeGLPICheckStatus(companyID, conversationID, contactID, instanceName, phone)
+	case "glpi_check_cnpj":
+		return e.nodeGLPICheckCNPJ(companyID, conversationID, contactID, instanceName, phone)
 	case "end", "action_close_conversation":
 		cc, _ := config["close_conversation"].(bool)
 		if nodeType == "action_close_conversation" {
@@ -2217,6 +2272,13 @@ func (e *BotEngine) nodeGLPIOpenTicket(companyID, conversationID, contactID, ins
 func (e *BotEngine) nodeGLPICheckStatus(companyID, conversationID, contactID, instanceName, phone string) error {
 	if e.glpiFlow != nil {
 		e.glpiFlow.StartGLPIFlow(companyID, conversationID, contactID, instanceName, phone, "check_status")
+	}
+	return nil
+}
+
+func (e *BotEngine) nodeGLPICheckCNPJ(companyID, conversationID, contactID, instanceName, phone string) error {
+	if e.glpiFlow != nil {
+		e.glpiFlow.StartGLPIFlow(companyID, conversationID, contactID, instanceName, phone, "check_cnpj")
 	}
 	return nil
 }

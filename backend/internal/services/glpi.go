@@ -40,6 +40,14 @@ type GLPIEntity struct {
 	ID           int    `json:"id"`
 	Name         string `json:"name"`
 	CompleteName string `json:"completename"`
+	// Dados cadastrais usados para confirmar o cliente ao consultar o CNPJ.
+	CNPJ    string `json:"cnpj"`
+	Phone   string `json:"phonenumber"`
+	Email   string `json:"email"`
+	Address string `json:"address"`
+	Town    string `json:"town"`
+	State   string `json:"state"`
+	Website string `json:"website"`
 }
 
 type GLPISearchOption struct {

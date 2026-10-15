@@ -127,6 +127,7 @@ const NODE_CATEGORIES = [
     name: 'GLPI - Chamados',
     color: 'orange',
     nodes: [
+      { type: 'glpi_check_cnpj', label: 'Verificar cliente (CNPJ)', icon: '🔎' },
       { type: 'glpi_open_ticket', label: 'Abrir chamado GLPI', icon: '🎫' },
       { type: 'glpi_check_status', label: 'Consultar chamado GLPI', icon: '🔍' },
     ],
@@ -1345,6 +1346,30 @@ function NodeConfigPanel({
   }
 
   // --- GLPI NODES ---
+  if (nodeType === 'glpi_check_cnpj') {
+    return (
+      <div className="space-y-3">
+        <div className="p-3 bg-orange-50 rounded-lg text-xs text-orange-700">
+          🔎 <strong>Verificar cliente (CNPJ)</strong>
+          <br/><br/>
+          Este bloco consulta somente se o CNPJ existe na base de clientes do GLPI, sem abrir chamado.
+          <br/><br/>
+          O bot irá:
+          <br/>1. Pedir o CNPJ (com ou sem pontuação)
+          <br/>2. Buscar a entidade no GLPI pelo campo CNPJ
+          <br/>3. <strong>Se encontrar:</strong> confirma os dados do cliente (empresa, CNPJ, telefone, e-mail, endereço) e segue pela saída <strong>&quot;Encontrado&quot;</strong>
+          <br/>4. <strong>Se não encontrar:</strong> avisa que o CNPJ não está cadastrado como cliente e segue pela saída <strong>&quot;Não encontrado&quot;</strong>
+        </div>
+        <div className="p-2 bg-blue-50 rounded-lg text-xs text-blue-700">
+          🔀 Conecte <strong>duas saídas</strong> neste bloco: rotule uma aresta como <strong>&quot;encontrado&quot;</strong> e a outra como <strong>&quot;nao_encontrado&quot;</strong> para ramificar o fluxo. Com apenas uma saída, ambos os casos seguem por ela.
+        </div>
+        <div className="p-2 bg-yellow-50 rounded-lg text-xs text-yellow-700">
+          ⚠️ Requer configuração das variáveis GLPI_BASE_URL, GLPI_APP_TOKEN e GLPI_USER_TOKEN no servidor.
+        </div>
+      </div>
+    )
+  }
+
   if (nodeType === 'glpi_open_ticket') {
     return (
       <div className="space-y-3">
