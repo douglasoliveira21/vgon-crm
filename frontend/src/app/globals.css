@@ -13,6 +13,44 @@
   body {
     @apply bg-gray-50 text-gray-900 antialiased dark:bg-gray-950 dark:text-gray-100;
     overflow-x: hidden;
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    font-feature-settings: 'cv01', 'cv02', 'ss01';
+    text-rendering: optimizeLegibility;
+  }
+
+  code,
+  pre,
+  kbd,
+  samp {
+    font-family: var(--font-geist-mono), ui-monospace, 'SFMono-Regular', monospace;
+  }
+
+  /* System-wide smooth transitions on interactive surfaces: colors, borders,
+     shadows and transforms ease instead of snapping. Scoped to the properties
+     that matter so layout/scroll performance is unaffected. */
+  a,
+  button,
+  input,
+  select,
+  textarea,
+  summary,
+  [role='button'],
+  [role='menuitem'],
+  [role='tab'] {
+    transition-property: color, background-color, border-color, fill, stroke, box-shadow, transform, opacity;
+    transition-duration: 180ms;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* Respect users who prefer reduced motion. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
   }
 
   img,
@@ -43,31 +81,60 @@
   }
 
   .card {
-    @apply bg-white rounded-xl border border-gray-100 shadow-sm dark:bg-gray-900 dark:border-gray-800;
+    @apply bg-white rounded-2xl border border-gray-100 shadow-sm transition-shadow duration-200 dark:bg-gray-900 dark:border-gray-800;
   }
 
   .card-dark {
-    @apply bg-dark-800 rounded-xl border border-dark-700;
+    @apply bg-dark-800 rounded-2xl border border-dark-700;
   }
 
   .btn-primary {
-    @apply bg-primary-600 hover:bg-primary-700 text-white font-medium py-2.5 px-4 rounded-lg transition-colors duration-200 flex items-center gap-2;
+    @apply bg-primary-600 hover:bg-primary-700 active:scale-[0.98] text-white font-medium py-2.5 px-4 rounded-xl transition-all duration-200 ease-smooth flex items-center gap-2 shadow-sm hover:shadow-md;
   }
 
   .btn-secondary {
-    @apply bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2.5 px-4 rounded-lg transition-colors duration-200 flex items-center gap-2 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700;
+    @apply bg-gray-100 hover:bg-gray-200 active:scale-[0.98] text-gray-700 font-medium py-2.5 px-4 rounded-xl transition-all duration-200 ease-smooth flex items-center gap-2 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700;
   }
 
   .btn-danger {
-    @apply bg-red-600 hover:bg-red-700 text-white font-medium py-2.5 px-4 rounded-lg transition-colors duration-200;
+    @apply bg-red-600 hover:bg-red-700 active:scale-[0.98] text-white font-medium py-2.5 px-4 rounded-xl transition-all duration-200 ease-smooth shadow-sm hover:shadow-md;
   }
 
   .input {
-    @apply w-full px-3 py-2.5 rounded-lg border border-gray-200 bg-white text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all duration-200 text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100;
+    @apply w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all duration-200 ease-smooth text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100;
   }
 
   .badge {
     @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  /* Reusable open/close animations for floating UI: dropdowns, popovers,
+     context menus, selects, tooltips. Add one of these classes (or the
+     matching Tailwind animate-* utility) to the floating container. */
+  .ui-pop {
+    @apply origin-top animate-pop-in;
+  }
+
+  .ui-overlay {
+    @apply animate-overlay-in;
+  }
+
+  .ui-modal {
+    @apply animate-scale-in;
+  }
+
+  /* Rounded corners + entrance animation applied automatically to common
+     floating roles so existing menus/dialogs feel polished without touching
+     every component. */
+  [role='menu'],
+  [role='listbox'],
+  [role='dialog'] {
+    @apply animate-pop-in;
+  }
+
+  [role='menu'],
+  [role='listbox'] {
+    @apply rounded-xl;
   }
 
   .badge-green {
@@ -93,8 +160,8 @@
 
 /* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -103,11 +170,34 @@
 
 ::-webkit-scrollbar-thumb {
   background: #cbd5e1;
-  border-radius: 3px;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background-color 0.2s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+  background-clip: padding-box;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+  background-clip: padding-box;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+  background-clip: padding-box;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.dark * {
+  scrollbar-color: #334155 transparent;
 }
 
 /* Chat message animations */

@@ -1,10 +1,9 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { GeistSans } from 'geist/font/sans'
+import { GeistMono } from 'geist/font/mono'
 import './globals.css'
 import { Providers } from '@/components/providers'
 import { AppLoader } from '@/components/app-loader'
-
-const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'crmvgon - CRM de atendimento',
@@ -22,8 +21,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="pt-BR">
-      <body className={inter.className}>
+    <html lang="pt-BR" className={`${GeistSans.variable} ${GeistMono.variable}`}>
+      <body className={GeistSans.className}>
         <Providers>
           <AppLoader />
           {children}
