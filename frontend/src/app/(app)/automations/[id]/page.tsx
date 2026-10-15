@@ -312,14 +312,20 @@ export default function FlowEditorPage() {
     const sourceNode = nodes.find((n) => n.id === connection.source)
     const sourceType: string = sourceNode?.data?.nodeType || ''
     const isCondition = sourceType.startsWith('condition')
+    const isCnpjCheck = sourceType === 'glpi_check_cnpj'
 
     setEdges((eds) => {
       // For condition blocks the first output = ENTÃO (true), the second = SENÃO (false).
-      // Labeling the edge makes the branch explicit both visually and for the bot engine.
+      // For the GLPI CNPJ-check block the first output = Encontrado, the second = Não encontrado.
+      // Labeling the edge makes the branch explicit both visually and for the bot engine
+      // (which routes by matching these labels against found/not_found tokens).
       let label: string | undefined
       if (isCondition) {
         const existing = eds.filter((e) => e.source === connection.source).length
         label = existing === 0 ? 'ENTÃO' : existing === 1 ? 'SENÃO' : undefined
+      } else if (isCnpjCheck) {
+        const existing = eds.filter((e) => e.source === connection.source).length
+        label = existing === 0 ? 'Encontrado' : existing === 1 ? 'Não encontrado' : undefined
       }
       const edge: Edge = {
         ...connection,
