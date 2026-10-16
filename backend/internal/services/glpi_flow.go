@@ -86,8 +86,24 @@ func (e *GLPIFlowEngine) StartGLPIFlow(companyID, conversationID, contactID, ins
 	}
 
 	// Default: open_ticket
-	state.Step = "ask_entity"
 	state.Phone = phone
+
+	// A CNPJ already validated for this contact (by the "consultar CNPJ" block
+	// earlier in the flow, or in a past conversation) is reused. Asking for it
+	// again right after the customer had just typed it made the flow feel
+	// broken, and gave them a second chance to mistype it.
+	if cnpj, entityID, entityName, ok := e.loadValidatedCNPJ(contactID); ok {
+		state.EntityCNPJ = cnpj
+		state.EntityID = entityID
+		state.EntityName = entityName
+		state.Step = "ask_full_name"
+		e.saveState(conversationID, state)
+		e.sendBotMessage(companyID, conversationID, instanceName, phone,
+			fmt.Sprintf("🎫 *Abertura de Chamado*\n\n✅ Empresa identificada: *%s*\nCNPJ: *%s*\n\nAgora, informe seu *nome completo*:", entityName, formatCNPJ(cnpj)))
+		return
+	}
+
+	state.Step = "ask_entity"
 	e.saveState(conversationID, state)
 
 	e.sendBotMessage(companyID, conversationID, instanceName, phone,
@@ -433,6 +449,23 @@ func (e *GLPIFlowEngine) confirmEntityAndAskName(companyID, conversationID, inst
 	state.EntityName = entityName
 	state.Step = "ask_full_name"
 	e.saveState(conversationID, state)
+
+	// Remember the validated CNPJ so this contact isn't asked again, here or
+	// in a later conversation.
+	if state.ContactID != "" && len(state.EntityCNPJ) == 14 {
+		if _, err := e.db.Exec(`
+			UPDATE contacts
+			SET glpi_cnpj = $1,
+			    glpi_entity_id = $2,
+			    glpi_entity_name = $3,
+			    glpi_validated_at = NOW(),
+			    company_name = CASE WHEN company_name IS NULL OR company_name = '' THEN $3 ELSE company_name END,
+			    updated_at = NOW()
+			WHERE id = $4
+		`, state.EntityCNPJ, entity.ID, entityName, state.ContactID); err != nil {
+			log.Printf("[GLPI-FLOW] failed to save validated CNPJ for contact %s: %v", state.ContactID, err)
+		}
+	}
 	e.sendBotMessage(companyID, conversationID, instanceName, phone,
 		fmt.Sprintf("✅ Empresa identificada: *%s*\nCNPJ: *%s*\n\nAgora, informe seu *nome completo*:", entityName, formatCNPJ(state.EntityCNPJ)))
 	return true
