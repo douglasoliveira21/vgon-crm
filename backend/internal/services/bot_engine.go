@@ -612,11 +612,34 @@ func stripSymbolEdges(s string) string {
 	})
 }
 
+// stripMessageSignature drops a leading "*Name - (Setor):*" line.
+//
+// Some WhatsApp setups (shared-inbox and signature extensions) prefix every
+// message with the sender's name in bold on its own line, so a customer
+// typing "1" arrives as "*Fulano - (Setor):*\n1". Matching the whole text
+// against the menu options never succeeded for those contacts, and the flow
+// kept answering "não entendi" no matter what they typed. Only a first line
+// that is entirely bold and ends in a colon is treated as a signature, and
+// only when something else follows it.
+func stripMessageSignature(s string) string {
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	if len(lines) < 2 {
+		return s
+	}
+	first := strings.TrimSpace(lines[0])
+	if strings.HasPrefix(first, "*") && (strings.HasSuffix(first, ":*") || strings.HasSuffix(first, "*:")) {
+		if rest := strings.TrimSpace(strings.Join(lines[1:], "\n")); rest != "" {
+			return rest
+		}
+	}
+	return s
+}
+
 func chooseNextNodeIDForResponse(outgoing []BotEdge, response string) string {
 	if len(outgoing) == 0 {
 		return ""
 	}
-	response = strings.TrimSpace(strings.ToLower(response))
+	response = strings.TrimSpace(strings.ToLower(stripMessageSignature(response)))
 	if response != "" {
 		if idx, err := strconv.Atoi(stripSymbolEdges(response)); err == nil && idx >= 1 && idx <= len(outgoing) {
 			return outgoing[idx-1].Target

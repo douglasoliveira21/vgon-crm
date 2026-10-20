@@ -417,3 +417,35 @@ func TestEncryptingEmailSettingsTwiceDoesNotDoubleEncrypt(t *testing.T) {
 		t.Fatalf("password after two save cycles = %q, want secret", final.Password)
 	}
 }
+
+func TestStripMessageSignature(t *testing.T) {
+	tests := map[string]string{
+		"*Juliana Bernardes - (Gestão de Processo):*\n1": "1",
+		"*Darlene Simões - (Diretoria):*\r\n2":           "2",
+		"*Ana:*\nquero falar com o financeiro":           "quero falar com o financeiro",
+		"1":                                              "1",
+		"*1*":                                            "*1*",
+		"*Só a assinatura:*\n":                           "*Só a assinatura:*\n",
+		"bom dia\n1":                                     "bom dia\n1",
+		"*Negrito comum*\n1":                             "*Negrito comum*\n1",
+	}
+	for input, want := range tests {
+		if got := stripMessageSignature(input); got != want {
+			t.Errorf("stripMessageSignature(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestChooseNextNodeIgnoresSenderSignature(t *testing.T) {
+	outgoing := []BotEdge{{ID: "a", Target: "suporte"}, {ID: "b", Target: "comercial"}, {ID: "c", Target: "financeiro"}}
+	for response, want := range map[string]string{
+		"*Juliana Bernardes - (Gestão de Processo):*\n1": "suporte",
+		"*Juliana Bernardes - (Gestão de Processo):*\n3": "financeiro",
+		"*2*": "comercial",
+		"2":   "comercial",
+	} {
+		if got := chooseNextNodeIDForResponse(outgoing, response); got != want {
+			t.Errorf("response %q chose %q, want %q", response, got, want)
+		}
+	}
+}
