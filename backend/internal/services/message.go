@@ -371,10 +371,7 @@ func (s *MessageService) AutoAssignIfUnassigned(conversationID, userID, companyI
 
 	rows, _ := res.RowsAffected()
 	if rows > 0 {
-		s.wsHub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
-			"id":          conversationID,
-			"assigned_to": userID,
-		})
+		s.publishConversationState(companyID, conversationID)
 	}
 
 	return nil
@@ -409,11 +406,7 @@ func (s *MessageService) AssignConversation(conversationID, userID, companyID st
 		return err
 	}
 
-	s.wsHub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
-		"id":          conversationID,
-		"assigned_to": userID,
-		"status":      "in_progress",
-	})
+	s.publishConversationState(companyID, conversationID)
 
 	return nil
 }
@@ -451,12 +444,6 @@ func (s *MessageService) TransferConversation(conversationID, companyID string, 
 			return fmt.Errorf("conversa não encontrada")
 		}
 		shouldPauseAutomation = true
-
-		s.wsHub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
-			"id":          conversationID,
-			"assigned_to": *toUserID,
-			"status":      "in_progress",
-		})
 	}
 
 	if toTeamID != nil {
@@ -478,11 +465,6 @@ func (s *MessageService) TransferConversation(conversationID, companyID string, 
 			return fmt.Errorf("conversa não encontrada")
 		}
 		shouldPauseAutomation = true
-
-		s.wsHub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
-			"id":      conversationID,
-			"team_id": *toTeamID,
-		})
 	}
 
 	if clearTeam {
@@ -493,11 +475,6 @@ func (s *MessageService) TransferConversation(conversationID, companyID string, 
 		if err != nil {
 			return err
 		}
-
-		s.wsHub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
-			"id":      conversationID,
-			"team_id": nil,
-		})
 	}
 
 	if shouldPauseAutomation {
@@ -506,7 +483,60 @@ func (s *MessageService) TransferConversation(conversationID, companyID string, 
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// After the commit, so clients never see a transfer that was rolled back.
+	s.publishConversationState(companyID, conversationID)
+	return nil
+}
+
+// publishConversationState broadcasts the conversation's current assignment
+// and status, names included.
+//
+// The old events carried only ids (assigned_to, team_id), but the contact
+// panel and the list show names, and the page never listened for the event at
+// all — so after a transfer both kept showing the previous attendant or team
+// until a full reload. Reading the row back means every caller sends the same
+// complete picture instead of each hand-building a partial one.
+func (s *MessageService) publishConversationState(companyID, conversationID string) {
+	publishConversationState(s.db, s.wsHub, companyID, conversationID)
+}
+
+// publishConversationState is shared with the bot engine, whose transfer and
+// close blocks write to the conversation directly.
+func publishConversationState(db *sql.DB, hub *websocket.Hub, companyID, conversationID string) {
+	if hub == nil {
+		return
+	}
+	var status string
+	var assignedTo, assignedName, teamID, teamName sql.NullString
+	err := db.QueryRow(`
+		SELECT COALESCE(c.status, 'open'), c.assigned_to::text, u.name, c.team_id::text, t.name
+		FROM conversations c
+		LEFT JOIN users u ON u.id = c.assigned_to
+		LEFT JOIN teams t ON t.id = c.team_id
+		WHERE c.id = $1 AND c.company_id = $2
+	`, conversationID, companyID).Scan(&status, &assignedTo, &assignedName, &teamID, &teamName)
+	if err != nil {
+		log.Printf("[MESSAGE] failed to read conversation %s state for broadcast: %v", conversationID, err)
+		return
+	}
+
+	nullable := func(value sql.NullString) interface{} {
+		if value.Valid {
+			return value.String
+		}
+		return nil
+	}
+	hub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
+		"id":                 conversationID,
+		"status":             status,
+		"assigned_to":        nullable(assignedTo),
+		"assigned_to_name":   nullable(assignedName),
+		"team_id":            nullable(teamID),
+		"team_name":          nullable(teamName),
+	})
 }
 
 // CloseConversation marks a conversation as resolved
@@ -537,12 +567,7 @@ func (s *MessageService) CloseConversation(conversationID, companyID string) err
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	s.wsHub.BroadcastToCompany(companyID, websocket.EventConversationUpdate, map[string]interface{}{
-		"id":          conversationID,
-		"status":      "resolved",
-		"assigned_to": nil,
-		"team_id":     nil,
-	})
+	s.publishConversationState(companyID, conversationID)
 	return nil
 }
 
@@ -552,7 +577,11 @@ func (s *MessageService) ReopenConversation(conversationID, companyID string) er
 		UPDATE conversations SET status = 'open', resolved_at = NULL, updated_at = NOW()
 		WHERE id = $1 AND company_id = $2
 	`, conversationID, companyID)
-	return err
+	if err != nil {
+		return err
+	}
+	s.publishConversationState(companyID, conversationID)
+	return nil
 }
 
 func (s *MessageService) PauseAutomationForConversation(conversationID string) error {

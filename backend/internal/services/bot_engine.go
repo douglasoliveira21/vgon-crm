@@ -2144,6 +2144,10 @@ func (e *BotEngine) nodeTransferTeam(node BotNode, companyID, conversationID str
 		return fmt.Errorf("falha ao pausar automação após transferir: %w", err)
 	}
 
+	// The bot writes the team straight to the table, so without this nobody
+	// open in the chat saw the transfer until they reloaded.
+	publishConversationState(e.db, e.wsHub, companyID, conversationID)
+
 	return nil
 }
 
@@ -2184,7 +2188,11 @@ func (e *BotEngine) nodeAssignAgent(node BotNode, companyID, conversationID stri
 	if err != nil {
 		return err
 	}
-	return pauseConversationAutomationState(e.db, conversationID)
+	if err := pauseConversationAutomationState(e.db, conversationID); err != nil {
+		return err
+	}
+	publishConversationState(e.db, e.wsHub, companyID, conversationID)
+	return nil
 }
 
 func (e *BotEngine) nodeUpdateContact(node BotNode, companyID, conversationID, contactID, phone string) error {
@@ -2313,7 +2321,11 @@ func (e *BotEngine) nodeEnd(node BotNode, companyID, conversationID string) erro
 		if err != nil {
 			return err
 		}
-		return clearConversationAutomationState(e.db, conversationID)
+		if err := clearConversationAutomationState(e.db, conversationID); err != nil {
+			return err
+		}
+		publishConversationState(e.db, e.wsHub, companyID, conversationID)
+		return nil
 	}
 	return nil
 }

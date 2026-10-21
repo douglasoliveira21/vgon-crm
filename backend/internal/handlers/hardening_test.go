@@ -227,3 +227,44 @@ func TestPublicRegistrationIsClosedByDefault(t *testing.T) {
 		t.Fatalf("status = %d, want %d", response.StatusCode, fiber.StatusForbidden)
 	}
 }
+
+func TestRefreshMessageMediaURLIssuesFreshSignedPath(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := &services.Container{DB: db, Config: &config.Config{JWTSecret: "secret"}}
+
+	app := fiber.New()
+	app.Get("/conversations/:id/messages/:messageId/media-url", func(c *fiber.Ctx) error {
+		c.Locals("company_id", "company-a")
+		return c.Next()
+	}, RefreshMessageMediaURL(svc))
+
+	// Scoped by message, conversation and company together.
+	mock.ExpectQuery("SELECT EXISTS").
+		WithArgs("message-1", "conversation-1", "company-a").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	response, err := app.Test(httptest.NewRequest("GET", "/conversations/conversation-1/messages/message-1/media-url", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != fiber.StatusOK {
+		t.Fatalf("status = %d, want %d", response.StatusCode, fiber.StatusOK)
+	}
+
+	mock.ExpectQuery("SELECT EXISTS").
+		WithArgs("message-9", "conversation-1", "company-a").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	response, err = app.Test(httptest.NewRequest("GET", "/conversations/conversation-1/messages/message-9/media-url", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != fiber.StatusNotFound {
+		t.Fatalf("a message outside the conversation: status = %d, want %d", response.StatusCode, fiber.StatusNotFound)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

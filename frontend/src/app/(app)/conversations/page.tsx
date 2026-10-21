@@ -487,6 +487,70 @@ export default function ConversationsPage() {
     selectedConvRef.current = selectedConv
   }, [selectedConv])
 
+  // Media links are signed and expire within minutes, but a message stays on
+  // screen for hours. Playing, reopening or downloading it after that failed
+  // until the page was reloaded. These ask the server for a new link instead.
+  const mediaRefreshRef = useRef<Map<string, { at: number; pending?: Promise<string | null> }>>(new Map())
+  const refreshMediaUrl = (msg: Message): Promise<string | null> => {
+    const entry = mediaRefreshRef.current.get(msg.id)
+    if (entry?.pending) return entry.pending
+    // At most one automatic refresh per message every 20s, so media that is
+    // genuinely gone can't turn into a request loop.
+    if (entry && Date.now() - entry.at < 20000) return Promise.resolve(null)
+
+    const pending = api
+      .get(`/conversations/${msg.conversation_id}/messages/${msg.id}/media-url`)
+      .then((response) => {
+        const fresh: string | undefined = response.data?.media_url
+        if (!fresh) return null
+        setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, media_url: fresh } : m)))
+        setFailedMediaIds((current) => {
+          if (!current[msg.id]) return current
+          const { [msg.id]: _removed, ...rest } = current
+          return rest
+        })
+        return fresh
+      })
+      .catch(() => null)
+      .finally(() => {
+        mediaRefreshRef.current.set(msg.id, { at: Date.now() })
+      })
+    mediaRefreshRef.current.set(msg.id, { at: Date.now(), pending })
+    return pending
+  }
+
+  // Called when a media element fails to load. Returns true when a refresh
+  // was started, in which case the element reloads once the URL changes.
+  const retryMediaWithFreshUrl = (msg: Message): boolean => {
+    if (!msg.media_url || msg.media_url.startsWith('data:') || msg.media_url === 'sent') return false
+    const entry = mediaRefreshRef.current.get(msg.id)
+    if (entry?.pending || (entry && Date.now() - entry.at < 20000)) return false
+    void refreshMediaUrl(msg)
+    return true
+  }
+
+  // Opens media in a new tab with a link that is guaranteed fresh. The tab is
+  // opened synchronously (before the request) because browsers block popups
+  // opened after an await.
+  const openMedia = async (msg: Message) => {
+    if (!msg.media_url) return
+    if (msg.media_url.startsWith('data:')) {
+      window.open(msg.media_url, '_blank')
+      return
+    }
+    const tab = window.open('', '_blank')
+    const fresh = (await refreshMediaUrlNow(msg)) || msg.media_url
+    const href = `${process.env.NEXT_PUBLIC_API_URL}${fresh}`
+    if (tab) tab.location.href = href
+    else window.open(href, '_blank')
+  }
+
+  // Like refreshMediaUrl but ignores the throttle: it is a direct user action.
+  const refreshMediaUrlNow = async (msg: Message): Promise<string | null> => {
+    mediaRefreshRef.current.delete(msg.id)
+    return refreshMediaUrl(msg)
+  }
+
   // Escape closes whatever overlay is open, innermost first. None of the
   // modals handled it, so keyboard users had no way out except tabbing to the
   // close button.
@@ -634,13 +698,40 @@ export default function ConversationsPage() {
       }
     }
 
+    // The backend announces transfers, assignments, closes and reopens with
+    // this event, but nothing here listened to it — so the list and the
+    // contact panel kept showing the previous attendant/team/status until a
+    // full reload.
+    const handleConversationUpdate = (data: any) => {
+      if (!data?.id) return
+      const patch: Partial<Conversation> = {}
+      const fields = ['status', 'assigned_to', 'assigned_to_name', 'team_id', 'team_name', 'last_message_preview', 'last_message_at'] as const
+      for (const field of fields) {
+        // "in" rather than truthiness: null is a real value (unassigned).
+        if (field in data) (patch as any)[field] = data[field] ?? undefined
+      }
+      setConversations((prev) => prev.map((c) => (c.id === data.id ? { ...c, ...patch } : c)))
+      setSelectedConv((prev) => (prev && prev.id === data.id ? { ...prev, ...patch } : prev))
+
+      // Who may see a conversation depends on its team and attendant, so a
+      // reassignment can make it appear or disappear for this user.
+      if ('assigned_to' in data || 'team_id' in data) {
+        setTimeout(() => {
+          fetchConversationsRef.current(false)
+          fetchTabUnreadCountsRef.current()
+        }, 300)
+      }
+    }
+
     wsService.on('new_message', handleNewMessage)
     wsService.on('message_status', handleMessageStatus)
     wsService.on('typing', handleTyping)
+    wsService.on('conversation_update', handleConversationUpdate)
     return () => {
       wsService.off('new_message', handleNewMessage)
       wsService.off('message_status', handleMessageStatus)
       wsService.off('typing', handleTyping)
+      wsService.off('conversation_update', handleConversationUpdate)
     }
   }, [selectedConv, user?.id, user?.role_slug])
 
@@ -2052,7 +2143,8 @@ export default function ConversationsPage() {
                           src={msg.media_url.startsWith('data:') ? msg.media_url : `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`}
                           alt={msg.message_type === 'gif' ? 'GIF' : msg.message_type === 'sticker' ? 'Figurinha' : 'Imagem'}
                           className="max-w-full rounded-lg max-h-60 object-cover cursor-pointer"
-                          onClick={() => window.open(msg.media_url?.startsWith('data:') ? msg.media_url : `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`, '_blank')}
+                          onError={() => { retryMediaWithFreshUrl(msg) }}
+                          onClick={() => openMedia(msg)}
                           fallback={<div className="flex min-h-24 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 text-xs text-gray-500"><ImageOff size={18} /> Imagem indisponível</div>}
                         />
                       )}
@@ -2074,7 +2166,9 @@ export default function ConversationsPage() {
                           id={msg.id}
                           src={msg.media_url.startsWith('data:') ? msg.media_url : `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`}
                           isOwn={msg.sender_type === 'user'}
-                          onError={() => setFailedMediaIds((current) => ({ ...current, [msg.id]: true }))}
+                          onError={() => {
+                            if (!retryMediaWithFreshUrl(msg)) setFailedMediaIds((current) => ({ ...current, [msg.id]: true }))
+                          }}
                         />
                       )}
                     </div>
@@ -2085,7 +2179,9 @@ export default function ConversationsPage() {
                       {failedMediaIds[msg.id] ? (
                         <div className="flex min-h-24 items-center justify-center gap-2 rounded-lg bg-gray-100 px-4 text-xs text-gray-500"><Video size={18} /> Vídeo indisponível</div>
                       ) : (
-                        <video controls className="max-w-full rounded-lg max-h-60" onError={() => setFailedMediaIds((current) => ({ ...current, [msg.id]: true }))}>
+                        <video key={msg.media_url} controls className="max-w-full rounded-lg max-h-60" onError={() => {
+                          if (!retryMediaWithFreshUrl(msg)) setFailedMediaIds((current) => ({ ...current, [msg.id]: true }))
+                        }}>
                           <source src={msg.media_url.startsWith('data:') ? msg.media_url : `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`} />
                         </video>
                       )}
@@ -2099,6 +2195,11 @@ export default function ConversationsPage() {
                         href={msg.media_url?.startsWith('data:') ? msg.media_url : `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`}
                         target="_blank"
                         rel="noopener noreferrer"
+                        onClick={(event) => {
+                          if (!msg.media_url || msg.media_url.startsWith('data:')) return
+                          event.preventDefault()
+                          void openMedia(msg)
+                        }}
                         className="text-sm text-primary-600 underline truncate"
                       >
                         {msg.media_filename || 'Documento'}

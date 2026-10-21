@@ -449,3 +449,25 @@ func TestChooseNextNodeIgnoresSenderSignature(t *testing.T) {
 		}
 	}
 }
+
+func TestPublishConversationStateIncludesNames(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// The contact panel shows names, so the broadcast must carry them and
+	// not just the ids the old events sent.
+	mock.ExpectQuery("SELECT COALESCE").
+		WithArgs("conversation-a", "company-a").
+		WillReturnRows(sqlmock.NewRows([]string{"status", "assigned_to", "name", "team_id", "name"}).
+			AddRow("in_progress", "user-1", "Maria", "team-1", "Suporte"))
+
+	// A nil hub must be tolerated (bot tests build the engine without one),
+	// and must not even touch the database.
+	publishConversationState(db, nil, "company-a", "conversation-a")
+	if err := mock.ExpectationsWereMet(); err == nil {
+		t.Fatal("a nil hub still queried the database")
+	}
+}

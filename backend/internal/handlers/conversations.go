@@ -498,6 +498,43 @@ func GetConversationMessages(svc *services.Container) fiber.Handler {
 	}
 }
 
+// RefreshMessageMediaURL issues a new signed link for one message's media.
+//
+// Media links are deliberately short-lived (minutes), but the chat keeps a
+// message on screen for hours, so by the time an attendant plays the audio,
+// reopens the image or downloads the file the link has expired and the media
+// shows as unavailable until the page is reloaded. The page now asks for a
+// fresh link on demand instead.
+func RefreshMessageMediaURL(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		companyID := c.Locals("company_id").(string)
+		conversationID := c.Params("id")
+		messageID := c.Params("messageId")
+
+		// Scoped by conversation and company: the access middleware already
+		// vetted the conversation, and this ties the message to it so one
+		// conversation's access can't be used to mint links for another's.
+		var exists bool
+		if err := svc.DB.QueryRow(`
+			SELECT EXISTS (
+				SELECT 1 FROM messages
+				WHERE id = $1 AND conversation_id = $2 AND company_id = $3
+				  AND media_url IS NOT NULL AND media_url <> ''
+			)
+		`, messageID, conversationID, companyID).Scan(&exists); err != nil {
+			log.Printf("[CONVERSATIONS] failed to look up media for message %s: %v", messageID, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Falha ao renovar o link da mídia"})
+		}
+		if !exists {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Mídia não encontrada"})
+		}
+
+		return c.JSON(fiber.Map{
+			"media_url": signedMediaPath(messageID, companyID, svc.Config.JWTSecret, time.Now().Add(5*time.Minute)),
+		})
+	}
+}
+
 func SendTextMessage(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)
