@@ -463,8 +463,11 @@ func UpdateCurrentUserStatus(svc *services.Container) fiber.Handler {
 		}
 
 		status := strings.ToLower(strings.TrimSpace(body.Status))
-		if status != "online" && status != "offline" && status != "busy" {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid status"})
+		// Offline is not something a user chooses: it follows from not being
+		// connected, so it can't be set by hand (and would be overwritten the
+		// moment they next connect anyway).
+		if status != "online" && status != "busy" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Status inválido. Use online ou ocupado; offline é automático."})
 		}
 		_, err := svc.DB.Exec(`
 			UPDATE users SET availability_status = $1, last_seen_at = NOW(), updated_at = NOW()

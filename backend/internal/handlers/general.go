@@ -3321,7 +3321,7 @@ func GetUsers(svc *services.Container) fiber.Handler {
 
 		rows, _ := svc.DB.Query(`
 			SELECT u.id, u.name, u.email, u.avatar_url, u.is_active, u.is_online,
-			       COALESCE(u.availability_status, 'offline'), r.name as role_name
+			       COALESCE(u.availability_status, 'online'), r.name as role_name
 			FROM users u
 			LEFT JOIN roles r ON u.role_id = r.id
 			WHERE u.company_id = $1 ORDER BY u.name

@@ -65,7 +65,7 @@ func (s *AuthService) Login(req *LoginRequest) (*AuthResponse, error) {
 
 	err := s.db.QueryRow(`
 		SELECT u.id, u.company_id, u.name, u.email, u.password_hash, u.avatar_url,
-			   u.is_active, u.is_online, COALESCE(u.availability_status, 'offline'),
+			   u.is_active, u.is_online, COALESCE(u.availability_status, 'online'),
 			   COALESCE(u.is_super_admin, false), r.slug, r.name,
 			   COALESCE(u.two_factor_enabled, false), u.two_factor_secret,
 			   COALESCE((u.settings->>'spellcheck_enabled')::boolean, true)
@@ -446,7 +446,7 @@ func (s *AuthService) GetUserByID(userID string) (*models.User, error) {
 	var user models.User
 	err := s.db.QueryRow(`
 		SELECT u.id, u.company_id, u.name, u.email, u.avatar_url, u.phone,
-			   u.is_active, u.is_online, COALESCE(u.availability_status, 'offline'),
+			   u.is_active, u.is_online, COALESCE(u.availability_status, 'online'),
 			   COALESCE(u.is_super_admin, false), r.slug, r.name,
 			   COALESCE(u.two_factor_enabled, false),
 			   COALESCE((u.settings->>'spellcheck_enabled')::boolean, true)

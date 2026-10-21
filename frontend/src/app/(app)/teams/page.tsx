@@ -6,6 +6,7 @@ import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Plus, Users, Edit2, Trash2, UserPlus, UserMinus, X, Shield, Settings } from 'lucide-react'
 import { useAuthStore } from '@/store/auth'
+import { presenceMeta, presenceOf } from '@/lib/presence'
 
 interface Team {
   id: string
@@ -22,6 +23,7 @@ interface UserItem {
   email: string
   role_name?: string
   is_online: boolean
+  availability_status?: string
   avatar_url?: string
 }
 
@@ -408,7 +410,7 @@ function MembersModal({
                   <p className="text-sm font-medium text-gray-900">{user.name}</p>
                   <p className="text-xs text-gray-400">{user.role_name || user.email}</p>
                 </div>
-                {user.is_online && <div className="w-2 h-2 bg-green-500 rounded-full" />}
+                <span title={presenceMeta[presenceOf(user)].label} className={`h-2 w-2 rounded-full ${presenceMeta[presenceOf(user)].dot}`} />
               </div>
               <div className="flex gap-1">
 				<button

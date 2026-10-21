@@ -64,7 +64,16 @@ func WebSocketHandler(hub *ws.Hub, cfg *config.Config, svc *services.Container) 
 
 		hub.Register(client)
 		if svc != nil && svc.DB != nil {
-			if _, err := svc.DB.Exec("UPDATE users SET is_online = true, last_seen_at = NOW(), updated_at = NOW() WHERE id = $1", claims.UserID); err != nil {
+			// Connecting means available: the stored availability used to
+			// default to 'offline', so a user who had just logged in showed as
+			// offline. A deliberate "busy" is kept across reconnects.
+			if _, err := svc.DB.Exec(`
+				UPDATE users
+				SET is_online = true,
+				    availability_status = CASE WHEN availability_status = 'busy' THEN 'busy' ELSE 'online' END,
+				    last_seen_at = NOW(), updated_at = NOW()
+				WHERE id = $1
+			`, claims.UserID); err != nil {
 				log.Printf("[WEBSOCKET] failed to mark user %s online: %v", claims.UserID, err)
 			}
 		}

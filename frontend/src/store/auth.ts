@@ -26,7 +26,7 @@ interface AuthState {
   register: (companyName: string, name: string, email: string, password: string) => Promise<void>
   updateUser: (user: User) => void
   updateProfile: (data: { name: string; phone?: string }) => Promise<void>
-  updateStatus: (status: 'online' | 'offline' | 'busy') => Promise<void>
+  updateStatus: (status: 'online' | 'busy') => Promise<void>
   updateSettings: (data: { spellcheck_enabled?: boolean }) => Promise<void>
   uploadAvatar: (file: File) => Promise<void>
   logout: () => void

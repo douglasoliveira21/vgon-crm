@@ -8,6 +8,7 @@ import { useAppearanceStore } from '@/store/appearance'
 import api from '@/lib/api'
 import { useQuery } from '@tanstack/react-query'
 import wsService from '@/lib/websocket'
+import { presenceMeta, presenceOf } from '@/lib/presence'
 import toast from 'react-hot-toast'
 import {
   LayoutDashboard,
@@ -73,11 +74,6 @@ const menuItems: MenuItem[] = [
 const agentHiddenMenuPaths = new Set(['/inbox', '/channels', '/automations', '/campaigns', '/metrics', '/audit-logs', '/privacy', '/widget'])
 const supervisorHiddenMenuPaths = new Set(['/inbox', '/channels', '/automations', '/campaigns', '/audit-logs', '/privacy', '/widget'])
 
-const statusMeta = {
-  online: { label: 'Online', dot: 'bg-green-500' },
-  busy: { label: 'Ocupado', dot: 'bg-amber-500' },
-  offline: { label: 'Offline', dot: 'bg-gray-400' },
-}
 
 type SidebarConversation = {
   id: string
@@ -120,8 +116,8 @@ export default function Sidebar() {
   const refreshTimerRef = useRef<NodeJS.Timeout | null>(null)
 	const sidebarExpanded = sidebarPinned || sidebarHovered
 	const showTextClass = sidebarExpanded ? 'opacity-100' : 'pointer-events-none w-0 overflow-hidden opacity-0'
-  const currentStatus = user?.is_online ? (user.availability_status || 'online') : 'offline'
-  const currentStatusMeta = statusMeta[currentStatus] || statusMeta.offline
+  const currentStatus = presenceOf(user)
+  const currentStatusMeta = presenceMeta[currentStatus]
   const profileMenuItems = [
     { label: 'Perfil', href: '/profile', icon: UserCircle, show: true },
     { label: 'Configurações', href: '/settings', icon: Settings, show: true },
@@ -423,13 +419,12 @@ export default function Sidebar() {
         <div className={clsx('mb-3 transition-opacity duration-200', showTextClass, 'max-md:pointer-events-auto max-md:w-auto max-md:overflow-visible max-md:opacity-100')}>
           <label className="mb-1 block text-xs font-medium text-gray-500">Status do atendente</label>
           <select
-            value={currentStatus}
-            onChange={(e) => updateStatus(e.target.value as 'online' | 'offline' | 'busy')}
+            value={currentStatus === 'busy' ? 'busy' : 'online'}
+            onChange={(e) => updateStatus(e.target.value as 'online' | 'busy')}
             className="w-full rounded-lg border border-white/10 bg-dark-800 px-3 py-2 text-sm text-white outline-none focus:border-primary-500"
           >
-            <option value="online">Online</option>
+            <option value="online">Online (disponível)</option>
             <option value="busy">Ocupado</option>
-            <option value="offline">Offline</option>
           </select>
         </div>
 

@@ -48,6 +48,7 @@ import {
 import { clsx } from 'clsx'
 import toast from 'react-hot-toast'
 import { SafeImage } from '@/components/safe-image'
+import { presenceMeta, presenceOf, sortByPresence } from '@/lib/presence'
 
 interface Conversation {
   id: string
@@ -1191,6 +1192,17 @@ export default function ConversationsPage() {
   }
 
   // Transfer conversation
+  // Status is only useful if it informs the decision: transferring to someone
+  // who is busy or has the system closed is allowed, but not by accident.
+  const requestTransferToUser = (target: UserItem) => {
+    const presence = presenceOf(target)
+    if (presence !== 'online') {
+      const reason = presence === 'busy' ? 'está ocupado(a)' : 'está offline e só verá a conversa quando entrar'
+      if (!confirm(`${target.name} ${reason}. Transferir mesmo assim?`)) return
+    }
+    transferToUser(target.id)
+  }
+
   const transferToUser = async (userId: string) => {
     if (!selectedConv) return
     const selectedUser = users.find((u) => u.id === userId)
@@ -2463,10 +2475,10 @@ export default function ConversationsPage() {
 
             <h4 className="text-sm font-medium text-gray-500 mb-2">Para atendente:</h4>
             <div className="space-y-1 mb-4">
-              {users.map((u) => (
+              {sortByPresence(users).map((u) => (
                 <button
                   key={u.id}
-                  onClick={() => transferToUser(u.id)}
+                  onClick={() => requestTransferToUser(u)}
                   className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg text-left"
                 >
                   <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center">
@@ -2476,7 +2488,7 @@ export default function ConversationsPage() {
                     <p className="text-sm font-medium text-gray-900">{u.name}</p>
                     <p className="text-xs text-gray-400">{u.role_name}</p>
                   </div>
-                  {u.is_online && <div className="w-2 h-2 bg-green-500 rounded-full ml-auto" />}
+                  <PresenceBadge user={u} />
                 </button>
               ))}
             </div>
@@ -2514,7 +2526,7 @@ export default function ConversationsPage() {
               </button>
             </div>
             <div className="space-y-1">
-              {users.map((u) => (
+              {sortByPresence(users).map((u) => (
                 <button
                   key={u.id}
                   onClick={() => mentionUser(u.name)}
@@ -2522,7 +2534,7 @@ export default function ConversationsPage() {
                 >
                   <AtSign size={16} className="text-purple-500" />
                   <span className="text-sm text-gray-900">{u.name}</span>
-                  {u.is_online && <div className="w-2 h-2 bg-green-500 rounded-full ml-auto" />}
+                  <PresenceBadge user={u} />
                 </button>
               ))}
             </div>
@@ -3487,5 +3499,16 @@ function ContactPanel({
         </div>
       </div>
     </div>
+  )
+}
+
+function PresenceBadge({ user }: { user: UserItem }) {
+  const presence = presenceOf(user)
+  const meta = presenceMeta[presence]
+  return (
+    <span className="ml-auto flex items-center gap-1.5 text-xs text-gray-400" title={meta.hint}>
+      <span className={clsx('h-2 w-2 rounded-full', meta.dot)} />
+      {meta.label}
+    </span>
   )
 }

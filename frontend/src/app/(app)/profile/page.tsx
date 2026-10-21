@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Camera, Circle, KeyRound, Mail, MonitorSmartphone, Phone, Save, ShieldCheck, SpellCheck, Trash2, User } from 'lucide-react'
 import { SafeImage } from '@/components/safe-image'
+import { presenceOf } from '@/lib/presence'
 
 interface Session {
   id: string
@@ -23,9 +24,8 @@ const resolveImage = (url?: string) => {
 }
 
 const statusOptions = [
-  { value: 'online', label: 'Online', description: 'Disponível para receber atendimentos', color: 'text-green-500' },
-  { value: 'busy', label: 'Ocupado', description: 'Em atendimento ou indisponível no momento', color: 'text-amber-500' },
-  { value: 'offline', label: 'Offline', description: 'Fora da fila de atendimento', color: 'text-gray-400' },
+  { value: 'online', label: 'Online', description: 'Conectado e disponível para receber conversas e transferências', color: 'text-green-500' },
+  { value: 'busy', label: 'Ocupado', description: 'Conectado, mas pede para não receber novas transferências', color: 'text-amber-500' },
 ] as const
 
 export default function ProfilePage() {
@@ -122,7 +122,7 @@ export default function ProfilePage() {
     }
   }
 
-  const currentStatus = user?.is_online ? (user.availability_status || 'online') : 'offline'
+  const currentStatus = presenceOf(user)
   const spellcheckEnabled = user?.spellcheck_enabled !== false
 
   const toggleSpellcheck = async () => {
@@ -330,8 +330,8 @@ export default function ProfilePage() {
 
           <div className="card p-6">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Disponibilidade do atendente</h2>
-            <p className="mt-1 text-sm text-gray-500">Esse status aparece para a equipe e ajuda na distribuição manual de atendimentos.</p>
-            <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            <p className="mt-1 text-sm text-gray-500">Você fica <strong>Online</strong> automaticamente ao entrar no sistema e <strong>Offline</strong> ao sair ou fechar a aba. Use <strong>Ocupado</strong> quando estiver conectado mas não quiser receber novas transferências. A equipe vê esse status ao transferir uma conversa.</p>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
               {statusOptions.map((option) => (
                 <button
                   key={option.value}
