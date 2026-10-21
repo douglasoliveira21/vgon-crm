@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/evocrm/backend/internal/safe"
 	"github.com/evocrm/backend/internal/websocket"
 	"github.com/google/uuid"
 )
@@ -74,7 +75,7 @@ func (e *GLPIFlowEngine) StartGLPIFlow(companyID, conversationID, contactID, ins
 		if cnpj, entityID, entityName, ok := e.loadValidatedCNPJ(contactID); ok {
 			e.sendBotMessage(companyID, conversationID, instanceName, phone,
 				fmt.Sprintf("✅ Você já está identificado como cliente:\n\n🏢 *Empresa:* %s\n📄 *CNPJ:* %s\n\nVou continuar o seu atendimento. 🙂", entityName, formatCNPJ(cnpj)))
-			e.resumeBotAfterCompletion(companyID, conversationID, contactID, instanceName, phone, fmt.Sprintf("glpi_cnpj_found:%d", entityID))
+			e.resumeBotWhenWaiting(companyID, conversationID, contactID, instanceName, phone, fmt.Sprintf("glpi_cnpj_found:%d", entityID))
 			return
 		}
 
@@ -739,4 +740,33 @@ func formatCNPJ(cnpj string) string {
 		return cnpj
 	}
 	return fmt.Sprintf("%s.%s.%s/%s-%s", cnpj[0:2], cnpj[2:5], cnpj[5:8], cnpj[8:12], cnpj[12:14])
+}
+
+// resumeBotWhenWaiting continues the parent bot flow once it has been marked
+// as waiting on this block.
+//
+// The "already identified" shortcut finishes while the block is still
+// executing, and the executor only marks the execution as external_wait after
+// the block returns. Resuming immediately found nothing to resume and gave up,
+// after which the flow was marked as waiting forever: the customer saw
+// "Você já está identificado" and then silence. This runs off the executor's
+// goroutine (it must be free to set the marker) and waits for the marker.
+func (e *GLPIFlowEngine) resumeBotWhenWaiting(companyID, conversationID, contactID, instanceName, phone, resultMessage string) {
+	safe.Go("glpi-resume", func() {
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			var waiting bool
+			if err := e.db.QueryRow(`
+				SELECT EXISTS (
+					SELECT 1 FROM bot_executions
+					WHERE conversation_id = $1 AND status = 'external_wait'
+				)
+			`, conversationID).Scan(&waiting); err == nil && waiting {
+				e.resumeBotAfterCompletion(companyID, conversationID, contactID, instanceName, phone, resultMessage)
+				return
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		log.Printf("[GLPI-FLOW] Gave up waiting for conversation %s to be marked external_wait; flow not resumed", conversationID)
+	})
 }
