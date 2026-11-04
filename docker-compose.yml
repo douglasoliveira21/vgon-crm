@@ -42,8 +42,8 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # Redis is only consumed by backend services on the Docker network.
+    # Do not publish it to the host or the public internet.
     volumes:
       - redis_data:/data
     restart: unless-stopped

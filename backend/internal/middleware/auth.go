@@ -380,12 +380,10 @@ func RateLimiter(rdb *redis.Client, maxRequests int, window time.Duration) fiber
 			return c.Next()
 		}
 
+		// Never trust forwarding headers supplied by the client. The service is
+		// directly reachable in the supplied deployment, so accepting those
+		// values lets an attacker choose a fresh rate-limit bucket per request.
 		ip := c.IP()
-		if forwardedFor := strings.TrimSpace(c.Get("X-Forwarded-For")); forwardedFor != "" {
-			ip = strings.TrimSpace(strings.Split(forwardedFor, ",")[0])
-		} else if realIP := strings.TrimSpace(c.Get("X-Real-IP")); realIP != "" {
-			ip = realIP
-		}
 
 		// Stricter rate limit for auth endpoints (brute-force protection)
 		limit := maxRequests

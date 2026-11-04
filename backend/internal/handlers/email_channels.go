@@ -100,17 +100,28 @@ func DeleteEmailChannel(svc *services.Container) fiber.Handler {
 		companyID := c.Locals("company_id").(string)
 		channelID := c.Params("id")
 
+		// Confirm ownership before changing any dependent record. The cleanup
+		// queries below must never be able to affect a channel belonging to a
+		// different tenant.
+		var exists bool
+		if err := svc.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM channels WHERE id = $1 AND company_id = $2 AND type = 'email')", channelID, companyID).Scan(&exists); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Falha ao verificar canal"})
+		}
+		if !exists {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Canal de e-mail não encontrado"})
+		}
+
 		// Remove channel reference from related tables (don't delete the data)
 		if _, err := svc.DB.Exec("UPDATE conversations SET channel_id = NULL WHERE channel_id = $1 AND company_id = $2", channelID, companyID); err != nil {
 			log.Printf("[EMAIL_CHANNELS] failed to clear channel %s from conversations: %v", channelID, err)
 		}
-		if _, err := svc.DB.Exec("UPDATE whatsapp_instances SET channel_id = NULL WHERE channel_id = $1", channelID); err != nil {
+		if _, err := svc.DB.Exec("UPDATE whatsapp_instances SET channel_id = NULL WHERE channel_id = $1 AND company_id = $2", channelID, companyID); err != nil {
 			log.Printf("[EMAIL_CHANNELS] failed to clear channel %s from whatsapp_instances: %v", channelID, err)
 		}
-		if _, err := svc.DB.Exec("UPDATE bot_flows SET channel_id = NULL WHERE channel_id = $1", channelID); err != nil {
+		if _, err := svc.DB.Exec("UPDATE bot_flows SET channel_id = NULL WHERE channel_id = $1 AND company_id = $2", channelID, companyID); err != nil {
 			log.Printf("[EMAIL_CHANNELS] failed to clear channel %s from bot_flows: %v", channelID, err)
 		}
-		if _, err := svc.DB.Exec("UPDATE call_queues SET channel_id = NULL WHERE channel_id = $1", channelID); err != nil {
+		if _, err := svc.DB.Exec("UPDATE call_queues SET channel_id = NULL WHERE channel_id = $1 AND company_id = $2", channelID, companyID); err != nil {
 			log.Printf("[EMAIL_CHANNELS] failed to clear channel %s from call_queues: %v", channelID, err)
 		}
 

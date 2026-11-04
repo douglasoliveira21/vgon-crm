@@ -62,6 +62,35 @@ func (s *AuthService) HasWidgetSession(widgetID, conversationID, visitorID strin
 	return exists
 }
 
+// HasActiveWidgetSession detects an existing valid session before the public
+// widget endpoint updates contact data. A visitor ID alone is not proof of
+// identity: it is stored in browser storage and can be supplied by anyone.
+func (s *AuthService) HasActiveWidgetSession(widgetID, visitorID string) bool {
+	var exists bool
+	_ = s.db.QueryRow(`SELECT EXISTS (
+		SELECT 1 FROM widget_sessions
+		WHERE widget_id = $1 AND visitor_id = $2
+		  AND revoked_at IS NULL AND expires_at > NOW()
+	)`, widgetID, visitorID).Scan(&exists)
+	return exists
+}
+
+// ValidateActiveWidgetSession validates a visitor's existing session without
+// relying on a conversation chosen by an untrusted request body.
+func (s *AuthService) ValidateActiveWidgetSession(widgetID, visitorID, token string) bool {
+	if widgetID == "" || visitorID == "" || token == "" {
+		return false
+	}
+	var id string
+	err := s.db.QueryRow(`
+		UPDATE widget_sessions SET last_used_at = NOW()
+		WHERE widget_id = $1 AND visitor_id = $2 AND token_hash = $3
+		  AND revoked_at IS NULL AND expires_at > NOW()
+		RETURNING id
+	`, widgetID, visitorID, tokenHash(token)).Scan(&id)
+	return err == nil
+}
+
 func (s *AuthService) RevokeWidgetSession(widgetID, conversationID, visitorID string) error {
 	result, err := s.db.Exec(`
 		UPDATE widget_sessions SET revoked_at = NOW()

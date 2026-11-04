@@ -73,12 +73,6 @@ func captchaEnabled(svc *services.Container) bool {
 }
 
 func clientIP(c *fiber.Ctx) string {
-	if forwardedFor := strings.TrimSpace(c.Get("X-Forwarded-For")); forwardedFor != "" {
-		return strings.TrimSpace(strings.Split(forwardedFor, ",")[0])
-	}
-	if realIP := strings.TrimSpace(c.Get("X-Real-IP")); realIP != "" {
-		return realIP
-	}
 	return c.IP()
 }
 

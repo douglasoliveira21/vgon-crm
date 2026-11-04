@@ -2763,6 +2763,15 @@ func SendWidgetMessage(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Widget not found"})
 		}
 
+		// Authenticate an existing visitor before looking up or updating their
+		// contact. visitor_id is client-controlled and must not by itself grant
+		// permission to overwrite stored contact information.
+		sessionToken := c.Get("X-Widget-Session")
+		if svc.Auth.HasActiveWidgetSession(widgetID, body.VisitorID) &&
+			!svc.Auth.ValidateActiveWidgetSession(widgetID, body.VisitorID, sessionToken) {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Sessão do widget inválida ou expirada"})
+		}
+
 		channelID, err := ensureWebchatChannel(svc.DB, companyID)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -2775,7 +2784,6 @@ func SendWidgetMessage(svc *services.Container) fiber.Handler {
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 		}
-		sessionToken := c.Get("X-Widget-Session")
 		if svc.Auth.HasWidgetSession(widgetID, conversationID, body.VisitorID) &&
 			!svc.Auth.ValidateWidgetSession(widgetID, conversationID, body.VisitorID, sessionToken) {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Sessão do widget inválida ou expirada"})
