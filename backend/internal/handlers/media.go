@@ -40,18 +40,32 @@ func MediaProxy(svc *services.Container) fiber.Handler {
 
 		// Get message media URL and instance
 		var mediaURL, messageType string
+		var mediaFilename sql.NullString
 		var instanceName sql.NullString
 		err = svc.DB.QueryRow(`
-			SELECT m.media_url, wi.instance_name, m.message_type
+			SELECT m.media_url, wi.instance_name, m.message_type, m.media_filename
 			FROM messages m
 			JOIN conversations conv ON m.conversation_id = conv.id
 			LEFT JOIN channels ch ON conv.channel_id = ch.id
 			LEFT JOIN whatsapp_instances wi ON wi.channel_id = ch.id
 			WHERE m.id = $1 AND m.company_id = $2 AND m.media_url IS NOT NULL
-		`, messageID, companyID).Scan(&mediaURL, &instanceName, &messageType)
+		`, messageID, companyID).Scan(&mediaURL, &instanceName, &messageType, &mediaFilename)
 
 		if err != nil {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Media not found"})
+		}
+		if c.Query("download") == "1" {
+			// Chat attachments are served through /api/media/:id rather than the
+			// direct /uploads route. Apply the original name here as well; this
+			// is the route used by the conversation download button.
+			downloadName := filepath.Base(strings.TrimSpace(mediaFilename.String))
+			if downloadName == "" || downloadName == "." {
+				downloadName = filepath.Base(strings.TrimSpace(c.Query("filename")))
+			}
+			if downloadName == "" || downloadName == "." {
+				downloadName = messageID
+			}
+			c.Attachment(downloadName)
 		}
 		if strings.HasPrefix(mediaURL, "/uploads/") {
 			fileName := filepath.Base(mediaURL)
