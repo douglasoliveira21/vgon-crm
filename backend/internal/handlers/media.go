@@ -196,7 +196,15 @@ func ServeUpload(svc *services.Container) fiber.Handler {
 		}
 		c.Set("Cache-Control", "private, max-age=300")
 		if c.Query("download") == "1" {
-			c.Attachment(fileName)
+			// Uploads are stored under a UUID, but the browser must receive the
+			// original document name and extension. The display name is only used
+			// for Content-Disposition; the file read above remains bound to the
+			// signed UUID path.
+			downloadName := filepath.Base(strings.TrimSpace(c.Query("filename")))
+			if downloadName == "" || downloadName == "." {
+				downloadName = fileName
+			}
+			c.Attachment(downloadName)
 		}
 		return c.SendFile(path)
 	}

@@ -557,9 +557,10 @@ export default function ConversationsPage() {
     }
     const fresh = (await refreshMediaUrlNow(msg)) || msg.media_url
     const separator = fresh.includes('?') ? '&' : '?'
+    const downloadName = msg.media_filename || msg.content || 'documento'
     const link = document.createElement('a')
-    link.href = `${process.env.NEXT_PUBLIC_API_URL}${fresh}${separator}download=1`
-    link.download = msg.media_filename || msg.content || 'documento'
+    link.href = `${process.env.NEXT_PUBLIC_API_URL}${fresh}${separator}download=1&filename=${encodeURIComponent(downloadName)}`
+    link.download = downloadName
     document.body.appendChild(link)
     link.click()
     link.remove()
