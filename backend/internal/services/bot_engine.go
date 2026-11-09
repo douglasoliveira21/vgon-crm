@@ -998,6 +998,12 @@ func (e *BotEngine) findClientInactiveConversations(companyID, flowID, channelID
 		WHERE c.company_id = $1
 			AND c.status IN ('open', 'pending', 'in_progress')
 			AND c.contact_id IS NOT NULL
+			-- Once a conversation is assigned to a human or a team, the
+			-- customer is waiting for service, not for a bot prompt. Running a
+			-- "client inactivity" flow here could close a ticket simply because
+			-- the assigned technician has not replied yet.
+			AND c.assigned_to IS NULL
+			AND c.team_id IS NULL
 			AND last_message.sender_type IN ('user', 'bot')
 			AND last_message.created_at <= NOW() - ($2::int * INTERVAL '1 minute')
 			AND ($3 = '' OR c.channel_id::text = $3)

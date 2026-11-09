@@ -43,6 +43,7 @@ import {
   ImageOff,
   Play,
   Pause,
+  Download,
   UserRound,
 } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -543,6 +544,25 @@ export default function ConversationsPage() {
     const href = `${process.env.NEXT_PUBLIC_API_URL}${fresh}`
     if (tab) tab.location.href = href
     else window.open(href, '_blank')
+  }
+
+  const downloadMedia = async (msg: Message) => {
+    if (!msg.media_url) return
+    if (msg.media_url.startsWith('data:')) {
+      const link = document.createElement('a')
+      link.href = msg.media_url
+      link.download = msg.media_filename || msg.content || 'documento'
+      link.click()
+      return
+    }
+    const fresh = (await refreshMediaUrlNow(msg)) || msg.media_url
+    const separator = fresh.includes('?') ? '&' : '?'
+    const link = document.createElement('a')
+    link.href = `${process.env.NEXT_PUBLIC_API_URL}${fresh}${separator}download=1`
+    link.download = msg.media_filename || msg.content || 'documento'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
   }
 
   // Like refreshMediaUrl but ignores the throttle: it is a direct user action.
@@ -2189,25 +2209,29 @@ export default function ConversationsPage() {
                   )}
 
                   {msg.message_type === 'document' && (
-                    <div className="flex items-center gap-2 mb-1 p-2 bg-gray-50 rounded-lg">
-                      <FileText size={20} className="text-gray-500" />
-                      <a
-                        href={msg.media_url?.startsWith('data:') ? msg.media_url : `${process.env.NEXT_PUBLIC_API_URL}${msg.media_url}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(event) => {
-                          if (!msg.media_url || msg.media_url.startsWith('data:')) return
-                          event.preventDefault()
-                          void openMedia(msg)
-                        }}
-                        className="text-sm text-primary-600 underline truncate"
+                    <div className="mb-1 flex min-w-0 items-center gap-2 rounded-lg bg-gray-50 p-2">
+                      <FileText size={20} className="shrink-0 text-gray-500" />
+                      <button
+                        type="button"
+                        onClick={() => void openMedia(msg)}
+                        className="min-w-0 flex-1 truncate text-left text-sm text-primary-600 underline"
+                        title={msg.media_filename || msg.content || 'Documento'}
                       >
-                        {msg.media_filename || 'Documento'}
-                      </a>
+                        {msg.media_filename || msg.content || 'Documento'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void downloadMedia(msg)}
+                        className="rounded p-1 text-gray-500 hover:bg-gray-200 hover:text-primary-600"
+                        title="Baixar documento"
+                        aria-label={`Baixar ${msg.media_filename || msg.content || 'documento'}`}
+                      >
+                        <Download size={18} />
+                      </button>
                     </div>
                   )}
 
-                  {msg.content && msg.message_type !== 'audio' && (
+				  {msg.content && msg.message_type !== 'audio' && msg.message_type !== 'document' && (
                     <p className="text-sm whitespace-pre-wrap break-words">
                       <MessageText content={msg.content} isOwn={msg.sender_type === 'user'} />
                     </p>

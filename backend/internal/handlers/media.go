@@ -195,6 +195,9 @@ func ServeUpload(svc *services.Container) fiber.Handler {
 			return c.Status(fiber.StatusUnprocessableEntity).JSON(fiber.Map{"error": "Arquivo bloqueado"})
 		}
 		c.Set("Cache-Control", "private, max-age=300")
+		if c.Query("download") == "1" {
+			c.Attachment(fileName)
+		}
 		return c.SendFile(path)
 	}
 }

@@ -961,6 +961,7 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	// Extract message content
 	message, _ := data["message"].(map[string]interface{})
 	msgType, content, mediaURL := extractMessageContent(message)
+	mediaFilename := extractMessageFilename(message, msgType)
 
 	// WhatsApp also pushes events that are not messages an attendant can
 	// read: reactions, deletions, edits, poll updates and protocol/system
@@ -978,9 +979,9 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	// Save message
 	msgID := uuid.New().String()
 	_, err = s.db.Exec(`
-		INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, media_url, external_id, status)
-		VALUES ($1, $2, $3, 'contact', $4, $5, $6, $7, $8, 'delivered')
-	`, msgID, conversationID, instance.CompanyID, contactID, content, msgType, mediaURL, messageID)
+		INSERT INTO messages (id, conversation_id, company_id, sender_type, sender_id, content, message_type, media_url, media_filename, external_id, status)
+		VALUES ($1, $2, $3, 'contact', $4, $5, $6, $7, NULLIF($8, ''), $9, 'delivered')
+	`, msgID, conversationID, instance.CompanyID, contactID, content, msgType, mediaURL, mediaFilename, messageID)
 	if err != nil {
 		log.Printf("Failed to save message: %v", err)
 		return
@@ -1036,10 +1037,11 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 		// this same `preview` value, already stored on the conversation).
 		// Sending it here too keeps the live update and the post-reload
 		// value identical instead of only converging once the page reloads.
-		"preview":      preview,
-		"message_type": msgType,
-		"media_url":    broadcastMediaURL,
-		"created_at":      time.Now(),
+		"preview":        preview,
+		"message_type":   msgType,
+		"media_url":      broadcastMediaURL,
+		"media_filename": mediaFilename,
+		"created_at":     time.Now(),
 	})
 
 	s.wsHub.BroadcastToCompany(instance.CompanyID, websocket.EventConversationUpdate, map[string]interface{}{
@@ -1052,7 +1054,9 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 	if s.glpiFlow != nil {
 		glpiConversationID := s.glpiFlow.ActiveConversationForMessage(instance.CompanyID, conversationID, contactID)
 		if glpiConversationID != "" {
-			safe.Go("glpi-flow", func() { s.glpiFlow.HandleGLPIMessage(instance.CompanyID, glpiConversationID, contactID, instanceName, phone, content) })
+			safe.Go("glpi-flow", func() {
+				s.glpiFlow.HandleGLPIMessage(instance.CompanyID, glpiConversationID, contactID, instanceName, phone, content)
+			})
 			return
 		}
 	}
@@ -1062,7 +1066,9 @@ func (s *EvolutionService) handleMessageUpsert(instanceName string, event map[st
 		if instance.ChannelID != nil {
 			channelID = *instance.ChannelID
 		}
-		safe.Go("bot-trigger", func() { s.botEngine.TriggerBot(instance.CompanyID, conversationID, contactID, channelID, content, instanceName, phone) })
+		safe.Go("bot-trigger", func() {
+			s.botEngine.TriggerBot(instance.CompanyID, conversationID, contactID, channelID, content, instanceName, phone)
+		})
 	}
 }
 
@@ -1662,6 +1668,22 @@ func extractMessageContent(message map[string]interface{}) (msgType, content, me
 	}
 
 	return "text", "", ""
+}
+
+// extractMessageFilename keeps a document's display name separate from its
+// optional caption. Earlier versions stored the filename in content, which
+// made the chat show a generic “Documento” card plus a second filename line.
+func extractMessageFilename(message map[string]interface{}, msgType string) string {
+	if msgType != "document" || message == nil {
+		return ""
+	}
+	message = unwrapMessageEnvelope(message)
+	doc, ok := message["documentMessage"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	fileName, _ := doc["fileName"].(string)
+	return strings.TrimSpace(fileName)
 }
 
 func extractInteractiveResponseContent(message map[string]interface{}) string {
