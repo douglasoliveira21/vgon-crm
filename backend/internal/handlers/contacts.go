@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/evocrm/backend/internal/services"
@@ -380,6 +381,7 @@ func BulkDeleteContacts(svc *services.Container) fiber.Handler {
 
 		deleted, err := svc.Contact.DeleteContacts(uniqueIDs, c.Locals("company_id").(string))
 		if err != nil {
+			log.Printf("[CONTACTS] bulk delete failed for company %s (%d contacts): %v", c.Locals("company_id"), len(uniqueIDs), err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Erro ao remover contatos"})
 		}
 		logAuditEvent(svc.DB, c, "contact.bulk_delete", "contact", "", fiber.Map{"requested": len(uniqueIDs), "deleted": deleted})

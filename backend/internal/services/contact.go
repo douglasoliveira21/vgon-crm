@@ -300,30 +300,31 @@ func (s *ContactService) DeleteContacts(contactIDs []string, companyID string) (
 	// where possible, but detach the deleted contact first so restrictive FKs
 	// cannot turn a whole bulk operation into a 500 response.
 	cleanup := []struct {
+		table string
 		query string
 		args  []interface{}
 	}{
-		{`DELETE FROM campaign_contacts cc
+		{"campaign_contacts", `DELETE FROM campaign_contacts cc
 		  USING campaigns campaign
 		  WHERE cc.campaign_id = campaign.id AND campaign.company_id = $1
 		    AND cc.contact_id = ANY($2::uuid[])`, []interface{}{companyID, ids}},
-		{`UPDATE deals SET contact_id = NULL
+		{"deals", `UPDATE deals SET contact_id = NULL
 		  WHERE company_id = $1 AND contact_id = ANY($2::uuid[])`, []interface{}{companyID, ids}},
-		{`UPDATE calls SET contact_id = NULL
+		{"calls", `UPDATE calls SET contact_id = NULL
 		  WHERE company_id = $1 AND contact_id = ANY($2::uuid[])`, []interface{}{companyID, ids}},
-		{`UPDATE call_records SET contact_id = NULL
+		{"call_records", `UPDATE call_records SET contact_id = NULL
 		  WHERE company_id = $1 AND contact_id = ANY($2::uuid[])`, []interface{}{companyID, ids}},
-		{`UPDATE bot_executions execution SET contact_id = NULL
+		{"bot_executions", `UPDATE bot_executions execution SET contact_id = NULL
 		  FROM bot_flows flow
 		  WHERE execution.flow_id = flow.id AND flow.company_id = $1
 		    AND execution.contact_id = ANY($2::uuid[])`, []interface{}{companyID, ids}},
-		{`UPDATE data_subject_requests SET contact_id = NULL
+		{"data_subject_requests", `UPDATE data_subject_requests SET contact_id = NULL
 		  WHERE company_id = $1 AND contact_id = ANY($2::uuid[])`, []interface{}{companyID, ids}},
-		{`DELETE FROM contact_merge_history
+		{"contact_merge_history", `DELETE FROM contact_merge_history
 		  WHERE company_id = $1 AND primary_contact_id = ANY($2::uuid[])`, []interface{}{companyID, ids}},
 	}
 	for _, statement := range cleanup {
-		if _, err := tx.Exec(statement.query, statement.args...); err != nil {
+		if err := execContactCleanupIfTableExists(tx, statement.table, statement.query, statement.args...); err != nil {
 			return 0, err
 		}
 	}
@@ -343,6 +344,21 @@ func (s *ContactService) DeleteContacts(contactIDs []string, companyID string) (
 		return 0, err
 	}
 	return deleted, nil
+}
+
+// execContactCleanupIfTableExists keeps deletion compatible with databases
+// created before optional modules (telephony, privacy or merge history) were
+// introduced. Core tables still use the same safe cleanup path.
+func execContactCleanupIfTableExists(tx *sql.Tx, tableName, query string, args ...interface{}) error {
+	var exists bool
+	if err := tx.QueryRow("SELECT to_regclass($1) IS NOT NULL", "public."+tableName).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	_, err := tx.Exec(query, args...)
+	return err
 }
 
 // AddTagToContact adds a tag to a contact in the same company.
