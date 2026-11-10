@@ -348,6 +348,45 @@ func DeleteContact(svc *services.Container) fiber.Handler {
 	}
 }
 
+// BulkDeleteContacts removes the selected contacts from the authenticated
+// tenant. A small cap keeps an accidental or scripted request from becoming
+// an unbounded destructive operation.
+func BulkDeleteContacts(svc *services.Container) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		var body struct {
+			ContactIDs []string `json:"contact_ids"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Dados inválidos"})
+		}
+		if len(body.ContactIDs) == 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Selecione ao menos um contato"})
+		}
+		if len(body.ContactIDs) > 500 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Selecione no máximo 500 contatos por vez"})
+		}
+
+		uniqueIDs := make([]string, 0, len(body.ContactIDs))
+		seen := make(map[string]struct{}, len(body.ContactIDs))
+		for _, contactID := range body.ContactIDs {
+			if _, err := uuid.Parse(contactID); err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Contato inválido"})
+			}
+			if _, exists := seen[contactID]; !exists {
+				seen[contactID] = struct{}{}
+				uniqueIDs = append(uniqueIDs, contactID)
+			}
+		}
+
+		deleted, err := svc.Contact.DeleteContacts(uniqueIDs, c.Locals("company_id").(string))
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Erro ao remover contatos"})
+		}
+		logAuditEvent(svc.DB, c, "contact.bulk_delete", "contact", "", fiber.Map{"requested": len(uniqueIDs), "deleted": deleted})
+		return c.JSON(fiber.Map{"deleted": deleted})
+	}
+}
+
 func UpdateContactConsent(svc *services.Container) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		companyID := c.Locals("company_id").(string)

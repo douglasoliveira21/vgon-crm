@@ -280,6 +280,23 @@ func (s *ContactService) DeleteContact(contactID, companyID string) error {
 	return err
 }
 
+// DeleteContacts deletes a bounded batch while always scoping it to the
+// caller's tenant. IDs are supplied as UUIDs by the handler before reaching
+// this query, so the array cast cannot turn into an injected SQL fragment.
+func (s *ContactService) DeleteContacts(contactIDs []string, companyID string) (int64, error) {
+	if len(contactIDs) == 0 {
+		return 0, nil
+	}
+	result, err := s.db.Exec(`
+		DELETE FROM contacts
+		WHERE company_id = $1 AND id = ANY($2::uuid[])
+	`, companyID, "{"+strings.Join(contactIDs, ",")+"}")
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 // AddTagToContact adds a tag to a contact in the same company.
 func (s *ContactService) AddTagToContact(contactID, tagID, companyID string) error {
 	result, err := s.db.Exec(`

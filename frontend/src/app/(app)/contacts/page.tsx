@@ -66,6 +66,8 @@ export default function ContactsPage() {
   const [privacyContact, setPrivacyContact] = useState<Contact | null>(null)
   const [showDuplicates, setShowDuplicates] = useState(false)
   const [startingConversation, setStartingConversation] = useState(false)
+  const [selectedContactIds, setSelectedContactIds] = useState<string[]>([])
+  const [deletingSelected, setDeletingSelected] = useState(false)
 
   const {
     data: contactsData,
@@ -88,6 +90,7 @@ export default function ContactsPage() {
   const contacts = contactsData?.contacts || []
   const total = contactsData?.total || 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const allVisibleSelected = contacts.length > 0 && contacts.every((contact) => selectedContactIds.includes(contact.id))
 
   const { data: companies = [] } = useQuery({
     queryKey: ['customer-companies'],
@@ -112,14 +115,45 @@ export default function ContactsPage() {
     if (urlSearch) setSearch(urlSearch)
   }, [searchParams])
 
+  useEffect(() => {
+    setSelectedContactIds([])
+  }, [search, page])
+
   const deleteContact = async (id: string) => {
     if (!confirm('Remover este contato?')) return
     try {
       await api.delete(`/contacts/${id}`)
+      setSelectedContactIds((current) => current.filter((contactID) => contactID !== id))
       fetchContacts()
       toast.success('Contato removido')
     } catch {
       toast.error('Erro ao remover')
+    }
+  }
+
+  const toggleContactSelection = (id: string) => {
+    setSelectedContactIds((current) => current.includes(id) ? current.filter((contactID) => contactID !== id) : [...current, id])
+  }
+
+  const toggleVisibleSelection = () => {
+    setSelectedContactIds(allVisibleSelected ? [] : contacts.map((contact) => contact.id))
+  }
+
+  const deleteSelectedContacts = async () => {
+    if (selectedContactIds.length === 0) return
+    const label = selectedContactIds.length === 1 ? 'contato selecionado' : 'contatos selecionados'
+    if (!confirm(`Remover ${selectedContactIds.length} ${label}? Esta ação também remove os dados vinculados a eles.`)) return
+    setDeletingSelected(true)
+    try {
+      const response = await api.post('/contacts/bulk-delete', { contact_ids: selectedContactIds })
+      const deleted = response.data?.deleted || 0
+      setSelectedContactIds([])
+      await fetchContacts()
+      toast.success(`${deleted} ${deleted === 1 ? 'contato removido' : 'contatos removidos'}`)
+    } catch (error: any) {
+      toast.error(error.response?.data?.error || 'Erro ao remover contatos')
+    } finally {
+      setDeletingSelected(false)
     }
   }
 
@@ -185,11 +219,27 @@ export default function ContactsPage() {
         />
       </div>
 
+      {selectedContactIds.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-100 bg-red-50 px-4 py-3">
+          <span className="text-sm font-medium text-red-800">{selectedContactIds.length} selecionado{selectedContactIds.length === 1 ? '' : 's'}</span>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => setSelectedContactIds([])} className="btn-secondary">Limpar seleção</button>
+            <button type="button" onClick={deleteSelectedContacts} disabled={deletingSelected} className="btn-primary bg-red-600 hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60">
+              <Trash2 size={16} />
+              {deletingSelected ? 'Removendo...' : 'Excluir selecionados'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Contacts Table */}
       <div className="card overflow-x-auto">
         <table className="w-full min-w-[760px]">
           <thead className="bg-gray-50 border-b border-gray-100">
             <tr>
+			  <th className="w-12 px-4 py-3 text-center">
+				<input type="checkbox" checked={allVisibleSelected} onChange={toggleVisibleSelection} aria-label="Selecionar todos os contatos desta página" className="h-4 w-4 accent-primary-600" />
+			  </th>
               <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Contato</th>
               <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">Telefone</th>
               <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase">E-mail</th>
@@ -201,6 +251,9 @@ export default function ContactsPage() {
           <tbody className="divide-y divide-gray-50">
             {contacts.map((contact) => (
               <tr key={contact.id} className="hover:bg-gray-50 transition-colors">
+				<td className="px-4 py-4 text-center">
+				  <input type="checkbox" checked={selectedContactIds.includes(contact.id)} onChange={() => toggleContactSelection(contact.id)} aria-label={`Selecionar ${contact.name || contact.phone || contact.email || 'contato'}`} className="h-4 w-4 accent-primary-600" />
+				</td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 bg-primary-100 rounded-full flex items-center justify-center overflow-hidden flex-shrink-0">
