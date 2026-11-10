@@ -180,7 +180,22 @@ func (s *ContactService) CreateContact(companyID string, req *CreateContactReque
 	// conversation history.
 	if req.Phone != nil {
 		normalized := NormalizeEvolutionPhone(*req.Phone)
-		req.Phone = &normalized
+		if strings.TrimSpace(normalized) == "" {
+			// An empty string is a real value to PostgreSQL (and therefore to
+			// the partial unique phone index). Leaving it here meant only one
+			// contact without a phone could be created per company.
+			req.Phone = nil
+		} else {
+			req.Phone = &normalized
+		}
+	}
+	if req.Email != nil {
+		email := strings.TrimSpace(*req.Email)
+		if email == "" {
+			req.Email = nil
+		} else {
+			req.Email = &email
+		}
 	}
 	// Check for duplicate phone, including the other "nono dígito" form so
 	// this doesn't become the door that creates the second, split contact.
