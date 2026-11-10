@@ -276,7 +276,7 @@ func (s *ContactService) UpdateContact(contactID, companyID string, req *UpdateC
 
 // DeleteContact soft-deletes a contact
 func (s *ContactService) DeleteContact(contactID, companyID string) error {
-	_, err := s.db.Exec("DELETE FROM contacts WHERE id = $1 AND company_id = $2", contactID, companyID)
+	_, err := s.DeleteContacts([]string{contactID}, companyID)
 	return err
 }
 
@@ -287,14 +287,62 @@ func (s *ContactService) DeleteContacts(contactIDs []string, companyID string) (
 	if len(contactIDs) == 0 {
 		return 0, nil
 	}
-	result, err := s.db.Exec(`
-		DELETE FROM contacts
-		WHERE company_id = $1 AND id = ANY($2::uuid[])
-	`, companyID, "{"+strings.Join(contactIDs, ",")+"}")
+
+	ids := "{" + strings.Join(contactIDs, ",") + "}"
+	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
 	}
-	return result.RowsAffected()
+	defer tx.Rollback()
+
+	// Contacts are intentionally removable even after they participated in
+	// sales, campaigns, calls or automations. Preserve the historical records
+	// where possible, but detach the deleted contact first so restrictive FKs
+	// cannot turn a whole bulk operation into a 500 response.
+	cleanup := []struct {
+		query string
+		args  []interface{}
+	}{
+		{`DELETE FROM campaign_contacts cc
+		  USING campaigns campaign
+		  WHERE cc.campaign_id = campaign.id AND campaign.company_id = $1
+		    AND cc.contact_id = ANY($2::uuid[])`, []interface{}{companyID, ids}},
+		{`UPDATE deals SET contact_id = NULL
+		  WHERE company_id = $1 AND contact_id = ANY($2::uuid[])`, []interface{}{companyID, ids}},
+		{`UPDATE calls SET contact_id = NULL
+		  WHERE company_id = $1 AND contact_id = ANY($2::uuid[])`, []interface{}{companyID, ids}},
+		{`UPDATE call_records SET contact_id = NULL
+		  WHERE company_id = $1 AND contact_id = ANY($2::uuid[])`, []interface{}{companyID, ids}},
+		{`UPDATE bot_executions execution SET contact_id = NULL
+		  FROM bot_flows flow
+		  WHERE execution.flow_id = flow.id AND flow.company_id = $1
+		    AND execution.contact_id = ANY($2::uuid[])`, []interface{}{companyID, ids}},
+		{`UPDATE data_subject_requests SET contact_id = NULL
+		  WHERE company_id = $1 AND contact_id = ANY($2::uuid[])`, []interface{}{companyID, ids}},
+		{`DELETE FROM contact_merge_history
+		  WHERE company_id = $1 AND primary_contact_id = ANY($2::uuid[])`, []interface{}{companyID, ids}},
+	}
+	for _, statement := range cleanup {
+		if _, err := tx.Exec(statement.query, statement.args...); err != nil {
+			return 0, err
+		}
+	}
+
+	result, err := tx.Exec(`
+		DELETE FROM contacts
+		WHERE company_id = $1 AND id = ANY($2::uuid[])
+	`, companyID, ids)
+	if err != nil {
+		return 0, err
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return deleted, nil
 }
 
 // AddTagToContact adds a tag to a contact in the same company.
