@@ -325,7 +325,26 @@ func (s *ContactService) DeleteContacts(contactIDs []string, companyID string) (
 	}
 	for _, statement := range cleanup {
 		if err := execContactCleanupIfTableExists(tx, statement.table, statement.query, statement.args...); err != nil {
-			return 0, err
+			return 0, fmt.Errorf("unlink contact references in %s: %w", statement.table, err)
+		}
+	}
+
+	// Deleting a contact can cascade to its conversations. These nullable
+	// references can block that cascade even when their contact_id is NULL.
+	for _, reference := range []struct{ table, scope string }{
+		{"deals", "record.company_id = $1"},
+		{"calls", "record.company_id = $1"},
+		{"bot_executions", "EXISTS (SELECT 1 FROM bot_flows flow WHERE flow.id = record.flow_id AND flow.company_id = $1)"},
+	} {
+		query := fmt.Sprintf(`
+			UPDATE %s AS record SET conversation_id = NULL
+			FROM conversations AS conv
+			JOIN contacts AS contact ON contact.id = conv.contact_id AND contact.company_id = conv.company_id
+			WHERE record.conversation_id = conv.id AND conv.company_id = $1
+			  AND contact.id = ANY($2::uuid[]) AND %s
+		`, reference.table, reference.scope)
+		if err := execContactCleanupIfTableExists(tx, reference.table, query, companyID, ids); err != nil {
+			return 0, fmt.Errorf("unlink conversation references in %s: %w", reference.table, err)
 		}
 	}
 
@@ -334,7 +353,7 @@ func (s *ContactService) DeleteContacts(contactIDs []string, companyID string) (
 		WHERE company_id = $1 AND id = ANY($2::uuid[])
 	`, companyID, ids)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("delete contact rows: %w", err)
 	}
 	deleted, err := result.RowsAffected()
 	if err != nil {
