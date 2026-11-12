@@ -1785,12 +1785,12 @@ export default function ConversationsPage() {
     <div className="conversation-shell app-surface flex h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden md:h-screen">
       {/* Conversation List */}
       <div className={clsx(
-        'min-h-0 w-full flex-shrink-0 border-r border-slate-800 bg-[#081525] flex-col md:flex md:w-[390px]',
+        'min-h-0 w-full flex-shrink-0 border-r border-slate-800 bg-white dark:bg-[#081525] flex-col md:flex md:w-[390px]',
         selectedConv ? 'hidden' : 'flex'
       )}>
         <div className="border-b border-slate-800 p-4">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-xl font-semibold tracking-tight text-white">Conversas</h2>
+            <h2 className="text-xl font-semibold tracking-tight text-gray-900 dark:text-white">Conversas</h2>
             <span className="rounded-full bg-cyan-400/10 px-2 py-1 text-[11px] font-semibold text-cyan-300">{conversations.length}</span>
           </div>
           <div className="relative mb-3">
@@ -1800,7 +1800,7 @@ export default function ConversationsPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar conversa..."
-              className="w-full rounded-xl border border-slate-700 bg-slate-900/80 py-2.5 pl-9 pr-3 text-sm text-slate-200 outline-none placeholder:text-slate-500 focus:border-cyan-400"
+              className="w-full rounded-xl border border-slate-700 bg-slate-50 dark:bg-slate-900/80 py-2.5 pl-9 pr-3 text-sm text-slate-200 outline-none placeholder:text-slate-500 focus:border-cyan-400"
             />
           </div>
           <div className="flex flex-wrap gap-1">
@@ -1834,7 +1834,7 @@ export default function ConversationsPage() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-900/80 px-2 py-2 text-xs text-slate-300 outline-none focus:border-cyan-400"
+            className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-50 dark:bg-slate-900/80 px-2 py-2 text-xs text-slate-300 outline-none focus:border-cyan-400"
           >
             <option value="">Filtrar por status...</option>
             <option value="open">🟢 Abertos</option>
@@ -1930,10 +1930,10 @@ export default function ConversationsPage() {
           onPaste={handlePaste}
         >
           {showResolvedScreen && (
-            <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#050b16]/95 p-6 backdrop-blur-sm">
-              <div className="w-full max-w-md rounded-3xl border border-cyan-400/20 bg-gradient-to-br from-[#112238] to-[#0c1929] p-8 text-center shadow-2xl">
+            <div className="chat-completion absolute inset-0 z-20 flex items-center justify-center bg-[#050b16]/95 p-6 backdrop-blur-sm">
+              <div className="chat-completion-card w-full max-w-md rounded-3xl border border-cyan-400/20 bg-gradient-to-br from-[#112238] to-[#0c1929] p-8 text-center shadow-2xl">
                 <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-400/15 text-4xl">✓</div>
-                <h2 className="text-2xl font-bold text-white">Atendimento concluído</h2>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Atendimento concluído</h2>
                 <p className="mt-2 text-sm leading-6 text-slate-400">Boa! O chamado de <strong className="text-slate-200">{selectedConv.contact_name || selectedConv.contact_phone}</strong> foi encerrado com sucesso.</p>
                 <p className="mt-1 text-xs text-slate-500">Você pode voltar para a fila ou reabrir se precisar continuar.</p>
                 <div className="mt-7 flex flex-col gap-2 sm:flex-row sm:justify-center">
@@ -1953,7 +1953,7 @@ export default function ConversationsPage() {
             </div>
           )}
           {/* Chat Header */}
-          <div className="flex flex-col gap-3 border-b border-slate-800 bg-[#081525]/95 px-3 py-3 backdrop-blur sm:px-6 sm:py-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-col gap-3 border-b border-slate-800 bg-white/95 dark:bg-[#081525]/95 px-3 py-3 backdrop-blur sm:px-6 sm:py-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex min-w-0 items-center gap-3">
               <button
                 type="button"
@@ -2144,7 +2144,7 @@ export default function ConversationsPage() {
                     'max-w-[85%] rounded-2xl px-4 py-2.5 shadow-sm sm:max-w-[70%]',
                     msg.sender_type === 'user'
                       ? 'bg-gradient-to-br from-blue-600 to-cyan-500 text-white rounded-br-md shadow-lg shadow-blue-950/20'
-                      : 'bg-[#112238] text-slate-100 rounded-bl-md border border-slate-700/80',
+                      : 'bg-white dark:bg-[#112238] text-slate-100 rounded-bl-md border border-slate-700/80',
                     msg.is_private && 'bg-yellow-50 border-yellow-200 text-yellow-900'
                   )}
                 >
@@ -2316,7 +2316,7 @@ export default function ConversationsPage() {
           </div>
 
           {/* Message Input */}
-          <div className="border-t border-slate-800 bg-[#081525]/95 backdrop-blur">
+          <div className="border-t border-slate-800 bg-white/95 dark:bg-[#081525]/95 backdrop-blur">
             {/* Reply bar */}
             {replyingTo && (
               <div className="px-4 pt-3 flex items-center gap-3 border-b border-gray-100 pb-2">
@@ -2461,7 +2461,7 @@ export default function ConversationsPage() {
                     placeholder="Digite uma mensagem... (/ para atalhos)"
                     spellCheck={user?.spellcheck_enabled !== false}
                     lang="pt-BR"
-                    className="min-h-[46px] w-full resize-none rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 pr-10 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/20 max-h-32"
+                    className="min-h-[46px] w-full resize-none rounded-xl border border-slate-700 bg-slate-50 dark:bg-slate-900/80 px-4 py-3 pr-10 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/20 max-h-32"
                   />
 
                   {/* Quick Replies Dropdown */}
@@ -3327,7 +3327,7 @@ function ContactPanel({
   return (
     <div
       className={clsx(
-        'overflow-y-auto border-l border-slate-800 bg-[#081525] p-4',
+        'overflow-y-auto border-l border-slate-800 bg-white dark:bg-[#081525] p-4',
         // Below the xl breakpoint the panel was simply hidden, which put tags,
         // funnel and history out of reach on laptops and phones. There it
         // opens as a drawer from the header button instead.
@@ -3374,19 +3374,19 @@ function ContactPanel({
 
       <div className="space-y-4">
         {/* Status */}
-        <div className="rounded-xl border border-slate-700/80 bg-[#0c1929] p-3">
+        <div className="rounded-xl border border-slate-700/80 bg-white dark:bg-[#0c1929] p-3">
           <label className="text-xs font-medium text-gray-400 uppercase">Status</label>
           <p className="text-sm mt-2">
             <span className={`badge ${statusClass}`}>{statusLabel}</span>
           </p>
         </div>
 
-        <div className="rounded-xl border border-slate-700/80 bg-[#0c1929] p-3">
+        <div className="rounded-xl border border-slate-700/80 bg-white dark:bg-[#0c1929] p-3">
           <label className="text-xs font-medium text-gray-400 uppercase">Canal</label>
           <p className="mt-2 text-sm font-semibold text-gray-900 dark:text-white">{conversation.channel_name || 'WhatsApp'}</p>
         </div>
 
-        <div className="rounded-xl border border-slate-700/80 bg-[#0c1929] p-3">
+        <div className="rounded-xl border border-slate-700/80 bg-white dark:bg-[#0c1929] p-3">
           <div className="mb-2 flex items-center justify-between gap-2">
             <label className="text-xs font-medium text-gray-400 uppercase">Histórico de conversas</label>
             <span className="text-[11px] text-gray-400">{contactConversations.length}</span>
@@ -3436,7 +3436,7 @@ function ContactPanel({
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-700/80 bg-[#0c1929] p-3">
+        <div className="rounded-xl border border-slate-700/80 bg-white dark:bg-[#0c1929] p-3">
           <div className="flex items-center justify-between gap-2">
             <label className="text-xs font-medium text-gray-400 uppercase">Atendente</label>
             {assignedUserName && (

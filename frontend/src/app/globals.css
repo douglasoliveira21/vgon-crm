@@ -8,18 +8,33 @@
     --foreground: 222.2 84% 4.9%;
     --sidebar-bg: 222 47% 11%;
     --sidebar-text: 210 40% 96%;
-    --v-background: #050b16;
-    --v-surface: #081525;
-    --v-card: #0c1929;
-    --v-elevated: #112238;
-    --v-border: #22364a;
+    color-scheme: light;
+    --v-background: #f3f6fa;
+    --v-surface: #ffffff;
+    --v-card: #ffffff;
+    --v-elevated: #edf3f9;
+    --v-border: #d8e2ee;
+    --v-text: #172b45;
+    --v-panel-background: linear-gradient(145deg, #ffffff, #fafcff);
     --v-primary: #00dce8;
     --v-secondary: #168bff;
     --v-success: #16d77a;
     --v-warning: #f5a623;
     --v-danger: #f04462;
     --v-purple: #a56eff;
+    --v-muted: #586d85;
+  }
+
+  .dark {
+    color-scheme: dark;
+    --v-background: #050b16;
+    --v-surface: #081525;
+    --v-card: #0c1929;
+    --v-elevated: #112238;
+    --v-border: #22364a;
+    --v-text: #f5f8fc;
     --v-muted: #9baec4;
+    --v-panel-background: linear-gradient(145deg, rgba(17,34,56,.82), rgba(12,25,41,.96));
   }
 
   body {
@@ -122,12 +137,12 @@
 
   .app-surface {
     background: var(--v-background);
-    color: #f5f8fc;
+    color: var(--v-text);
   }
 
   .v-card {
-    background: linear-gradient(145deg, rgba(17, 34, 56, .82), rgba(12, 25, 41, .96));
-    border: 1px solid rgba(34, 54, 74, .92);
+    background: var(--v-panel-background);
+    border: 1px solid var(--v-border);
     box-shadow: 0 14px 40px rgba(0, 0, 0, .18);
   }
 
@@ -354,7 +369,6 @@ html:not(.dark) .v-card:hover {
   box-shadow: 0 14px 34px rgba(31, 55, 83, .12);
 }
 
-html:not(.dark) .v-card .text-white { color: #172033 !important; }
 html:not(.dark) .v-card .text-slate-100 { color: #24324a !important; }
 html:not(.dark) .v-card .text-slate-200 { color: #334155 !important; }
 html:not(.dark) .v-card .text-slate-300,
@@ -369,7 +383,7 @@ html:not(.dark) .app-shell > aside {
 
 html:not(.dark) .app-shell > aside .text-slate-400,
 html:not(.dark) .app-shell > aside .text-gray-400 { color: #64748b !important; }
-html:not(.dark) .app-shell > aside .text-white { color: #172033 !important; }
+html:not(.dark) .app-shell > aside p.text-white { color: #172033 !important; }
 html:not(.dark) .app-shell > aside .hover\:text-white:hover { color: #0f172a !important; }
 html:not(.dark) .app-shell > aside .hover\:bg-white\/5:hover,
 html:not(.dark) .app-shell > aside .hover\:bg-white\/10:hover { background: #eef5fb !important; }
@@ -384,7 +398,6 @@ html:not(.dark) .chat-bg .bg-\[\#081525\] { background: rgba(255,255,255,.94) !i
 html:not(.dark) .chat-bg .text-slate-100 { color: #172033 !important; }
 html:not(.dark) .chat-bg .bg-\[\#112238\] { background: #ffffff !important; border-color: #dbe5f0 !important; color: #172033 !important; }
 html:not(.dark) .conversation-shell > div:first-child { background: #ffffff !important; border-color: #dbe5f0 !important; }
-html:not(.dark) .conversation-shell > div:last-child { background: #ffffff !important; border-color: #dbe5f0 !important; }
 html:not(.dark) .conversation-shell .border-slate-800 { border-color: #dbe5f0 !important; }
 html:not(.dark) .conversation-shell .bg-\[\#081525\] { background: rgba(255,255,255,.96) !important; }
 html:not(.dark) .conversation-shell .text-slate-100 { color: #172033 !important; }
@@ -393,6 +406,50 @@ html:not(.dark) .conversation-shell .text-slate-300,
 html:not(.dark) .conversation-shell .text-slate-400,
 html:not(.dark) .conversation-shell .text-slate-500 { color: #64748b !important; }
 html:not(.dark) .conversation-shell .bg-slate-900\/80 { background: #f8fbff !important; border-color: #cbd8e6 !important; color: #172033 !important; }
+
+/* Contrast for redesigned surfaces, scoped to the tenant application. */
+html:not(.dark) .app-main h1,
+html:not(.dark) .app-main h2,
+html:not(.dark) .app-main h3 { color: #172b45; }
+html:not(.dark) .app-shell > header {
+  background: #fff;
+  border-color: #d8e2ee;
+}
+html:not(.dark) .app-shell > aside .border-dark-700,
+html:not(.dark) .app-shell > aside .border-white\/10 { border-color: #d8e2ee; }
+html:not(.dark) .app-shell > aside .text-gray-300 { color: #425873; }
+html:not(.dark) .app-shell > aside select { color: #172b45; }
+html:not(.dark) .app-shell :is(.text-cyan-200, .text-cyan-300) { color: #007c91; }
+html:not(.dark) .app-shell :is(.text-emerald-300, .text-green-300) { color: #08734c; }
+html:not(.dark) .app-shell .text-blue-300 { color: #1d5db5; }
+html:not(.dark) .app-shell .text-amber-300 { color: #945900; }
+html:not(.dark) .app-shell .text-purple-300 { color: #7440b5; }
+html:not(.dark) .app-shell .text-rose-300 { color: #b32345; }
+html:not(.dark) .app-shell .btn-secondary {
+  background: #edf3f9;
+  color: #334b68;
+  border: 1px solid #d8e2ee;
+}
+html:not(.dark) .app-shell .btn-secondary:hover { background: #e1ebf5; }
+html:not(.dark) .app-shell :is(input, select, textarea):focus-visible {
+  outline: 2px solid #0891b2;
+  outline-offset: 2px;
+}
+html:not(.dark) .conversation-shell .border-slate-700\/80 { border-color: #d8e2ee; }
+html:not(.dark) .chat-completion { background: rgba(243,246,250,.97); }
+html:not(.dark) .chat-completion-card {
+  background: #fff;
+  border-color: #cbdde9;
+  box-shadow: 0 20px 60px rgba(31,55,83,.12);
+}
+html:not(.dark) .chat-completion-card .text-white { color: #172b45; }
+html:not(.dark) .app-main .v-card .border-slate-700\/70 { border-color: #d8e2ee; }
+html:not(.dark) .app-main .v-card .text-slate-500 { color: #586d85; }
+html:not(.dark) .app-main .v-card .bg-slate-800 .text-white { color: #172b45; }
+html:not(.dark) .app-topbar .hover\:text-white:hover,
+html:not(.dark) .conversation-shell .hover\:text-white:hover { color: #172b45; }
+html:not(.dark) .conversation-shell .hover\:bg-white\/\[0\.04\]:hover { background: #eef5fb; }
+html:not(.dark) .app-shell > aside nav .text-gray-500 { color: #586d85; }
 
 .dark .card {
   background: linear-gradient(145deg, rgba(17, 34, 56, .82), rgba(12, 25, 41, .96)) !important;

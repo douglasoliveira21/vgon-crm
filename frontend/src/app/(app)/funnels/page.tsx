@@ -155,7 +155,7 @@ export default function FunnelsPage() {
       {/* Header */}
       <div className="mb-4 flex flex-shrink-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-[28px]">Funil de Vendas</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-[28px]">Funil de Vendas</h1>
           <div className="flex items-center gap-4 mt-2">
             {funnels.map((funnel) => (
               <button

@@ -180,7 +180,7 @@ export default function AutomationsPage() {
     <div className="app-surface mx-auto min-h-screen max-w-[1400px] p-4 sm:p-6 lg:p-7">
       <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-[28px]">Bots e Automações</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-[28px]">Bots e Automações</h1>
           <p className="text-gray-500 dark:text-gray-400 mt-1">Crie fluxos automáticos e integre com GLPI</p>
         </div>
         {activeTab === 'bots' && (

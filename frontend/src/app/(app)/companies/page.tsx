@@ -99,7 +99,7 @@ export default function CompaniesPage() {
     <div className="app-surface mx-auto min-h-screen max-w-[1500px] p-4 sm:p-6 lg:p-7">
       <div className="mb-6 flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-[28px]">Empresas</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-[28px]">Empresas</h1>
           <p className="mt-1 text-sm text-gray-500">Cadastre empresas clientes, vincule contatos e defina SLA de atendimento.</p>
         </div>
         <div className="flex gap-2">

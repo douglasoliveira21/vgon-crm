@@ -251,8 +251,8 @@ export default function Sidebar() {
           )}
         />
         <SafeImage
-          src="/assets/images/logo-vgon-negativo.png"
-          fallbackSrc="/logo-white.png"
+          src={theme === 'dark' ? '/assets/images/logo-vgon-negativo.png' : '/logo-black.png'}
+          fallbackSrc={theme === 'dark' ? '/logo-white.png' : '/logo-black.png'}
           alt="VGON"
           className={clsx(
             'h-20 w-auto max-w-[250px] object-contain transition-all duration-200',

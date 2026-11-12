@@ -365,7 +365,7 @@ export default function ChannelsPage() {
     <div className="app-surface mx-auto min-h-screen max-w-[1400px] p-4 sm:p-6 lg:p-7">
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-[28px]">Canais & Integrações</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-[28px]">Canais & Integrações</h1>
           <p className="text-gray-500 mt-1">Gerencie suas conexoes de atendimento</p>
         </div>
         {activeTab === 'whatsapp' ? (
