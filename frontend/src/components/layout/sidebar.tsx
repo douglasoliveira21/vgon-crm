@@ -255,7 +255,9 @@ export default function Sidebar() {
           fallbackSrc={theme === 'dark' ? '/logo-white.png' : '/logo-black.png'}
           alt="VGON"
           className={clsx(
-            'h-20 w-auto max-w-full object-contain transition-all duration-200',
+            'max-w-full object-contain transition-all duration-200',
+            // Match the visible artwork, accounting for each file's different margins.
+            theme === 'dark' ? 'h-20 w-auto' : 'h-[51px] w-[123px]',
 			sidebarExpanded ? 'block' : 'block md:hidden'
           )}
         />
