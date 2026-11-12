@@ -251,11 +251,11 @@ export default function Sidebar() {
           )}
         />
         <SafeImage
-          src={theme === 'dark' ? '/assets/images/logo-vgon-negativo.png' : '/logo-black.png'}
+          src={theme === 'dark' ? '/assets/images/logo-vgon-negativo.png' : '/assets/images/logo-vgon-claro.png'}
           fallbackSrc={theme === 'dark' ? '/logo-white.png' : '/logo-black.png'}
           alt="VGON"
           className={clsx(
-            'h-20 w-auto max-w-[250px] object-contain transition-all duration-200',
+            'h-20 w-auto max-w-full object-contain transition-all duration-200',
 			sidebarExpanded ? 'block' : 'block md:hidden'
           )}
         />
