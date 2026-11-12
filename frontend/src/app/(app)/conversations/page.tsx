@@ -349,6 +349,7 @@ export default function ConversationsPage() {
   }, [])
   const recordingConversationIdRef = useRef<string>('')
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null)
+  const [showResolvedScreen, setShowResolvedScreen] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [newMessage, setNewMessage] = useState('')
   const [search, setSearch] = useState('')
@@ -923,7 +924,7 @@ export default function ConversationsPage() {
     const interval = setInterval(async () => {
       const now = Date.now()
       if (now < messagesErrorUntilRef.current) return
-      if (messagesInFlightRef.current || now - lastMessagesFetchRef.current < 8000) return
+      if (messagesInFlightRef.current || now - lastMessagesFetchRef.current < 2500) return
       messagesInFlightRef.current = true
       lastMessagesFetchRef.current = now
       // Compared by conversation instead of bumping messagesRequestRef: that
@@ -931,10 +932,16 @@ export default function ConversationsPage() {
       // discarded an in-flight history load and left its button stuck.
       const polledConversationId = selectedConv.id
       try {
-        const response = await api.get(`/conversations/${polledConversationId}/messages`, { params: { limit: 80 } })
-        const newMessages: Message[] = response.data.messages || []
+        const [messagesResponse, conversationResponse] = await Promise.all([
+          api.get(`/conversations/${polledConversationId}/messages`, { params: { limit: 80 } }),
+          api.get(`/conversations/${polledConversationId}`),
+        ])
+        const newMessages: Message[] = messagesResponse.data.messages || []
         if (selectedConvRef.current?.id !== polledConversationId) return
         messagesErrorUntilRef.current = 0
+        const latestConversation = conversationResponse.data as Conversation
+        setSelectedConv((current) => current?.id === polledConversationId ? { ...current, ...latestConversation } : current)
+        setConversations((current) => current.map((conversation) => conversation.id === polledConversationId ? { ...conversation, ...latestConversation, unread_count: 0 } : conversation))
         setMessages((prev) => {
           // Merge rather than replace. Replacing the list with the latest 80
           // threw away any older history the attendant had scrolled back to
@@ -970,7 +977,7 @@ export default function ConversationsPage() {
       } finally {
         messagesInFlightRef.current = false
       }
-    }, 12000)
+    }, 4000)
 
     return () => clearInterval(interval)
   }, [selectedConv?.id])
@@ -992,13 +999,14 @@ export default function ConversationsPage() {
     const interval = setInterval(() => {
       fetchConversationsRef.current(false)
       fetchTabUnreadCountsRef.current()
-    }, 30000) // WebSocket is primary; polling is only a calm fallback.
+    }, 10000) // WebSocket is primary; polling keeps list state fresh when a proxy drops events.
 
     return () => clearInterval(interval)
   }, [])
 
   const selectConversation = async (conv: Conversation) => {
     setSelectedConv(conv)
+    setShowResolvedScreen(false)
     setMessages([])
     messagesErrorUntilRef.current = 0
     messagesAbortRef.current?.abort()
@@ -1393,6 +1401,7 @@ export default function ConversationsPage() {
     try {
       await api.post(`/conversations/${selectedConv.id}/close`)
       toast.success('Conversa resolvida')
+      setShowResolvedScreen(true)
       fetchConversations()
     } catch {
       setSelectedConv(prevConv)
@@ -1407,6 +1416,7 @@ export default function ConversationsPage() {
       await api.post(`/conversations/${selectedConv.id}/reopen`)
       toast.success('Conversa reaberta')
       setSelectedConv({ ...selectedConv, status: 'open' })
+      setShowResolvedScreen(false)
       fetchConversations()
     } catch {
       toast.error('Erro ao reabrir')
@@ -1772,7 +1782,7 @@ export default function ConversationsPage() {
   }
 
   return (
-    <div className="app-surface flex h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden md:h-screen">
+    <div className="conversation-shell app-surface flex h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden md:h-screen">
       {/* Conversation List */}
       <div className={clsx(
         'min-h-0 w-full flex-shrink-0 border-r border-slate-800 bg-[#081525] flex-col md:flex md:w-[390px]',
@@ -1919,6 +1929,20 @@ export default function ConversationsPage() {
           onDrop={handleDrop}
           onPaste={handlePaste}
         >
+          {showResolvedScreen && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#050b16]/95 p-6 backdrop-blur-sm">
+              <div className="w-full max-w-md rounded-3xl border border-cyan-400/20 bg-gradient-to-br from-[#112238] to-[#0c1929] p-8 text-center shadow-2xl">
+                <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-400/15 text-4xl">✓</div>
+                <h2 className="text-2xl font-bold text-white">Atendimento concluído</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-400">Boa! O chamado de <strong className="text-slate-200">{selectedConv.contact_name || selectedConv.contact_phone}</strong> foi encerrado com sucesso.</p>
+                <p className="mt-1 text-xs text-slate-500">Você pode voltar para a fila ou reabrir se precisar continuar.</p>
+                <div className="mt-7 flex flex-col gap-2 sm:flex-row sm:justify-center">
+                  <button type="button" onClick={() => setSelectedConv(null)} className="rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300">Voltar para conversas</button>
+                  <button type="button" onClick={reopenConversation} className="rounded-xl border border-slate-600 px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-cyan-400 hover:text-cyan-200">Reabrir atendimento</button>
+                </div>
+              </div>
+            </div>
+          )}
           {/* Drag overlay */}
           {isDragging && (
             <div className="absolute inset-0 bg-primary-500/10 z-10 flex items-center justify-center pointer-events-none">

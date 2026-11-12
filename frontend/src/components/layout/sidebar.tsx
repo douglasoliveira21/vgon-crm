@@ -37,7 +37,6 @@ import {
   ChevronDown,
   AtSign,
   SlidersHorizontal,
-  Search,
   Ban,
   X,
   type LucideIcon,
@@ -54,7 +53,6 @@ type MenuItem = {
 
 const menuItems: MenuItem[] = [
   { label: 'Painel', href: '/dashboard', icon: LayoutDashboard },
-  { label: 'Busca Global', href: '/search', icon: Search },
   { label: 'Caixa de Entrada', href: '/inbox', icon: Inbox },
   { label: 'Conversas', href: '/conversations', icon: MessageSquare, expandable: 'conversations' },
   { label: 'Contatos', href: '/contacts', icon: Contact, expandable: 'contacts' },

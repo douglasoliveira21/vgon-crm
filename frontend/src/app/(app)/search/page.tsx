@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import api from '@/lib/api'
@@ -18,6 +19,15 @@ const emptyResults: GlobalSearchResponse = { contacts: [], conversations: [], co
 export default function GlobalSearchPage() {
   const [query, setQuery] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    const initialQuery = searchParams.get('q') || ''
+    if (initialQuery) {
+      setQuery(initialQuery)
+      setSearchTerm(initialQuery.trim())
+    }
+  }, [searchParams])
 
   // Debounce typing into searchTerm; Enter (below) can also set it immediately.
   useEffect(() => {
