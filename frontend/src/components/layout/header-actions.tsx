@@ -10,8 +10,21 @@ import api from '@/lib/api'
 import wsService from '@/lib/websocket'
 import { useAuthStore } from '@/store/auth'
 
-type Announcement = { id: string; title: string; content: string; is_read: boolean }
-type Conversation = { id: string; contact_name: string; unread_count: number; last_message_preview?: string }
+type Announcement = { id: string; title: string; content: string; is_read: boolean; published_at?: string }
+type Conversation = { id: string; contact_name: string; unread_count: number; last_message_preview?: string; last_message_at?: string }
+
+const eventDateFormatter = new Intl.DateTimeFormat('pt-BR', {
+  day: '2-digit', month: '2-digit', year: 'numeric',
+  hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+})
+
+function EventDate({ value, label }: { value?: string; label: string }) {
+  const date = value ? new Date(value) : null
+  if (!date || !Number.isFinite(date.getTime())) {
+    return <p className="mt-2 text-xs text-gray-500">{label}: data indisponível</p>
+  }
+  return <time dateTime={date.toISOString()} title={`${label} — horário local`} className="mt-2 block text-xs text-gray-500 dark:text-gray-400">{label}: {eventDateFormatter.format(date)}</time>
+}
 
 export default function HeaderActions() {
   const [panel, setPanel] = useState<'notifications' | 'help' | null>(null)
@@ -102,8 +115,8 @@ export default function HeaderActions() {
           {isError && <p role="alert" className="py-3 text-sm text-red-600">Não foi possível carregar. Clique em atualizar para tentar novamente.</p>}
           {!isLoading && !isError && count === 0 && <p className="py-5 text-sm text-gray-500">Tudo em dia! Nenhuma mensagem ou comunicado pendente nas conversas recentes.</p>}
           <div className="space-y-3">
-            {conversations.map((item) => <Link key={item.id} href={`/conversations?conversation=${encodeURIComponent(item.id)}`} onClick={() => setPanel(null)} className="block rounded-xl border border-gray-200 p-3 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"><div className="flex items-center gap-2 text-sm font-semibold"><MessageSquare size={14} />{item.contact_name || 'Conversa'}<span className="ml-auto text-xs text-primary-600">{item.unread_count} não lida(s)</span></div><p className="mt-1 truncate text-xs text-gray-500">{item.last_message_preview || 'Abrir conversa'}</p></Link>)}
-            {unreadAnnouncements.map((item) => <div key={item.id} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700"><p className="text-sm font-semibold">{item.title}</p><p className="mt-1 whitespace-pre-wrap text-xs text-gray-600 dark:text-gray-400">{item.content}</p><button type="button" disabled={reading !== null} onClick={() => markRead(item.id)} className="mt-2 text-xs font-medium text-primary-600 disabled:opacity-50">{reading === item.id ? 'Salvando...' : 'Marcar como lido'}</button></div>)}
+            {conversations.map((item) => <Link key={item.id} href={`/conversations?conversation=${encodeURIComponent(item.id)}`} onClick={() => setPanel(null)} className="block rounded-xl border border-gray-200 p-3 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800"><div className="flex items-center gap-2 text-sm font-semibold"><MessageSquare size={14} />{item.contact_name || 'Conversa'}<span className="ml-auto text-xs text-primary-600">{item.unread_count} não lida(s)</span></div><p className="mt-1 truncate text-xs text-gray-500">{item.last_message_preview || 'Abrir conversa'}</p><EventDate value={item.last_message_at} label="Última mensagem" /></Link>)}
+            {unreadAnnouncements.map((item) => <div key={item.id} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700"><p className="text-sm font-semibold">{item.title}</p><p className="mt-1 whitespace-pre-wrap text-xs text-gray-600 dark:text-gray-400">{item.content}</p><EventDate value={item.published_at} label="Publicado em" /><button type="button" disabled={reading !== null} onClick={() => markRead(item.id)} className="mt-2 text-xs font-medium text-primary-600 disabled:opacity-50">{reading === item.id ? 'Salvando...' : 'Marcar como lido'}</button></div>)}
           </div>
           <Link href="/conversations?view=all" onClick={() => setPanel(null)} className="mt-4 block text-sm font-medium text-primary-600">Ver todas as conversas</Link>
         </> : <div className="space-y-4 text-sm">
