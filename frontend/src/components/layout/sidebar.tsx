@@ -239,7 +239,7 @@ export default function Sidebar() {
         'group/sidebar fixed left-0 top-0 z-50 flex h-full w-72 max-w-[85vw] flex-col border-r transition-all duration-300 md:max-w-none',
         mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
         sidebarExpanded ? 'md:w-64' : 'md:w-20',
-        'border-dark-700 bg-dark-900 dark:border-gray-800 dark:bg-gray-950'
+        'border-slate-800 bg-[#06111f] dark:border-slate-800 dark:bg-[#06111f]'
       )}
     >
       <div className="flex h-[92px] items-center justify-center border-b border-dark-700 px-4 dark:border-gray-800">
@@ -316,8 +316,8 @@ export default function Sidebar() {
                 className={clsx(
                   'flex items-center gap-2 rounded-lg text-sm font-medium transition-all',
                   isActive
-                    ? 'bg-primary-600/20 text-primary-300'
-                    : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                    ? 'bg-cyan-400/10 text-cyan-300 shadow-[inset_3px_0_0_#00dce8]'
+                    : 'text-slate-400 hover:bg-white/5 hover:text-white'
                 )}
               >
                 <Link href={item.href} title={item.label} className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5">

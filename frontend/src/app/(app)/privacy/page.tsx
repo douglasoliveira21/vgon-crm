@@ -128,10 +128,10 @@ export default function PrivacyPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl p-6">
+    <div className="app-surface mx-auto min-h-screen max-w-[1500px] p-4 sm:p-6 lg:p-7">
       <div className="mb-7 flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Privacidade e LGPD</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-[28px]">Privacidade e LGPD</h1>
           <p className="mt-1 text-sm text-gray-500">Solicitações dos titulares, retenção e bloqueios de marketing.</p>
         </div>
         <button type="button" onClick={() => loadData()} className="btn-secondary" disabled={loading}>

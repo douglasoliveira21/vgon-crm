@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Search, Plus, Edit2, Trash2, MapPin, MessageSquare, X, ShieldCheck, Download, History, GitMerge, Tag } from 'lucide-react'
 import { SafeImage } from '@/components/safe-image'
+import { PageHeader, EmptyState } from '@/components/ui/design-system'
 
 const PAGE_SIZE = 25
 
@@ -186,13 +187,8 @@ export default function ContactsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl p-4 sm:p-6">
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Contatos</h1>
-          <p className="text-gray-500 mt-1">{total} contatos registrados</p>
-        </div>
-        <div className="flex items-center gap-2">
+    <div className="app-surface mx-auto min-h-screen max-w-[1500px] p-4 sm:p-6 lg:p-7">
+      <PageHeader title="Contatos" description={`${total} contatos registrados`} actions={<>
           <button onClick={() => setShowDuplicates(true)} className="btn-secondary">
             <GitMerge size={18} />
             Localizar duplicados
@@ -201,8 +197,7 @@ export default function ContactsPage() {
             <Plus size={18} />
             Novo contato
           </button>
-        </div>
-      </div>
+      </>} />
 
       {/* Search */}
       <div className="mb-6 relative">
@@ -233,7 +228,7 @@ export default function ContactsPage() {
       )}
 
       {/* Contacts Table */}
-      <div className="card overflow-x-auto">
+      <div className="v-card overflow-x-auto rounded-2xl">
         <table className="w-full min-w-[760px]">
           <thead className="bg-gray-50 border-b border-gray-100">
             <tr>
@@ -326,9 +321,7 @@ export default function ContactsPage() {
         </table>
 
         {contacts.length === 0 && !loading && (
-          <div className="p-12 text-center">
-            <p className="text-gray-400">Nenhum contato encontrado</p>
-          </div>
+          <div className="p-6"><EmptyState title="Nenhum contato encontrado" description="Ajuste a busca ou cadastre um novo contato para começar." /></div>
         )}
       </div>
 

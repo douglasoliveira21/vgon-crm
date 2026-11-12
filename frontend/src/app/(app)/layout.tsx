@@ -48,12 +48,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 	if (!mounted || isLoading || !isAuthenticated || isAgentDeniedPath || isSupervisorDeniedPath) return null
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
-      <header className="fixed inset-x-0 top-0 z-40 flex h-14 items-center border-b border-gray-200 bg-white px-4 md:hidden dark:border-gray-800 dark:bg-gray-900">
+    <div className="min-h-screen bg-[#050b16] text-slate-100 dark:bg-[#050b16] dark:text-slate-100">
+      <header className="fixed inset-x-0 top-0 z-40 flex h-14 items-center border-b border-slate-800 bg-[#06111f]/95 px-4 backdrop-blur md:hidden">
         <button
           type="button"
           onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-          className="rounded-lg p-2 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+          className="rounded-lg p-2 text-slate-300 hover:bg-white/10"
           aria-label="Abrir menu"
         >
           <Menu size={22} />
@@ -61,7 +61,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <SafeImage src="/assets/images/logo-vgon-negativo.png" fallbackSrc="/logo-white.png" alt="VGON" className="ml-3 h-9 w-auto object-contain" />
       </header>
       <Sidebar />
-      <main className={`${sidebarPinned || sidebarHovered ? 'md:ml-64' : 'md:ml-20'} min-h-screen min-w-0 pt-14 transition-all duration-300 md:pt-0`}>
+      <main className={`${sidebarPinned || sidebarHovered ? 'md:ml-64' : 'md:ml-20'} min-h-screen min-w-0 bg-[#050b16] pt-14 transition-all duration-300 md:pt-0`}>
         {children}
       </main>
     </div>

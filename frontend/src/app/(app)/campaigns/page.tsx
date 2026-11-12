@@ -128,10 +128,10 @@ export default function CampaignsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl p-4 sm:p-6">
+    <div className="app-surface mx-auto min-h-screen max-w-[1500px] p-4 sm:p-6 lg:p-7">
       <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Marketing em Massa</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-[28px]">Marketing em Massa</h1>
           <p className="text-gray-500 mt-1">Envie campanhas para seus contatos via WhatsApp</p>
         </div>
         <div className="flex items-center gap-2">

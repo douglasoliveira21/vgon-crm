@@ -69,10 +69,10 @@ export default function AuditLogsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl p-4 sm:p-6">
+    <div className="app-surface mx-auto min-h-screen max-w-[1500px] p-4 sm:p-6 lg:p-7">
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Logs administrativos</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-[28px]">Logs administrativos</h1>
           <p className="text-gray-500 mt-1">Auditoria de ações críticas, envios, exportações e alertas operacionais.</p>
         </div>
         <div className="flex items-center gap-2">

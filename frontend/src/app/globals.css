@@ -8,12 +8,24 @@
     --foreground: 222.2 84% 4.9%;
     --sidebar-bg: 222 47% 11%;
     --sidebar-text: 210 40% 96%;
+    --v-background: #050b16;
+    --v-surface: #081525;
+    --v-card: #0c1929;
+    --v-elevated: #112238;
+    --v-border: #22364a;
+    --v-primary: #00dce8;
+    --v-secondary: #168bff;
+    --v-success: #16d77a;
+    --v-warning: #f5a623;
+    --v-danger: #f04462;
+    --v-purple: #a56eff;
+    --v-muted: #9baec4;
   }
 
   body {
     @apply bg-gray-50 text-gray-900 antialiased dark:bg-gray-950 dark:text-gray-100;
     overflow-x: hidden;
-    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--font-geist-sans), Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
     font-feature-settings: 'cv01', 'cv02', 'ss01';
     text-rendering: optimizeLegibility;
   }
@@ -81,11 +93,15 @@
   }
 
   .card {
-    @apply bg-white rounded-2xl border border-gray-100 shadow-sm transition-shadow duration-200 dark:bg-gray-900 dark:border-gray-800;
+    @apply rounded-2xl border shadow-sm transition-shadow duration-200;
+    background: #fff;
+    border-color: #e5e7eb;
   }
 
   .card-dark {
-    @apply bg-dark-800 rounded-2xl border border-dark-700;
+    @apply rounded-2xl border;
+    background: var(--v-card);
+    border-color: var(--v-border);
   }
 
   .btn-primary {
@@ -102,6 +118,38 @@
 
   .input {
     @apply w-full px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none transition-all duration-200 ease-smooth text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100;
+  }
+
+  .app-surface {
+    background: var(--v-background);
+    color: #f5f8fc;
+  }
+
+  .v-card {
+    background: linear-gradient(145deg, rgba(17, 34, 56, .82), rgba(12, 25, 41, .96));
+    border: 1px solid rgba(34, 54, 74, .92);
+    box-shadow: 0 14px 40px rgba(0, 0, 0, .18);
+  }
+
+  .v-card:hover {
+    border-color: rgba(0, 220, 232, .45);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, .26);
+  }
+
+  .v-kpi {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .v-kpi::after {
+    content: '';
+    position: absolute;
+    inset: auto -25px -35px auto;
+    width: 110px;
+    height: 110px;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(0, 220, 232, .18), transparent 68%);
+    pointer-events: none;
   }
 
   .badge {
@@ -196,6 +244,40 @@
   scrollbar-color: #cbd5e1 transparent;
 }
 
+/* Responsive shell safeguards. The application keeps the chat as the
+   priority surface on small screens and lets data-heavy modules scroll inside
+   their own region instead of pushing the viewport horizontally. */
+html,
+body {
+  min-width: 320px;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+@media (max-width: 767px) {
+  .v-card {
+    border-radius: 14px;
+  }
+
+  .app-surface {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+  }
+
+  table {
+    font-size: 0.8125rem;
+  }
+
+  .chat-bg {
+    min-height: 0;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1279px) {
+  .v-card {
+    border-radius: 13px;
+  }
+}
+
 .dark * {
   scrollbar-color: #334155 transparent;
 }
@@ -245,25 +327,30 @@
 
 /* Dark mode compatibility for legacy pages that still use fixed Tailwind colors. */
 .dark .bg-white {
-  background-color: #111827 !important;
+  background-color: var(--v-card) !important;
+}
+
+.dark .card {
+  background: linear-gradient(145deg, rgba(17, 34, 56, .82), rgba(12, 25, 41, .96)) !important;
+  border-color: var(--v-border) !important;
 }
 
 .dark .bg-gray-50 {
-  background-color: #030712 !important;
+  background-color: var(--v-background) !important;
 }
 
 .dark .bg-gray-100 {
-  background-color: #1f2937 !important;
+  background-color: var(--v-elevated) !important;
 }
 
 .dark .bg-gray-200 {
-  background-color: #374151 !important;
+  background-color: #1b3047 !important;
 }
 
 .dark .border-gray-100,
 .dark .border-gray-200,
 .dark .border-gray-300 {
-  border-color: #374151 !important;
+  border-color: var(--v-border) !important;
 }
 
 .dark .text-gray-950,
@@ -279,7 +366,7 @@
 
 .dark .text-gray-500,
 .dark .text-gray-400 {
-  color: #9ca3af !important;
+  color: var(--v-muted) !important;
 }
 
 .dark .shadow-sm,
