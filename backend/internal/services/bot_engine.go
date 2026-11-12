@@ -494,6 +494,7 @@ func chooseNextNodeID(node BotNode, outgoing []BotEdge, conditionResult *bool, n
 // result carries whether the customer was found so the flow can branch:
 //   - "glpi_cnpj_found[:...]"      -> edge whose handle/label marks the found/yes branch
 //   - "glpi_cnpj_not_found[:...]"  -> edge whose handle/label marks the not-found/no branch
+//
 // When the node has a single output (or no result-specific branch is labeled)
 // it falls back to the default first-edge behavior.
 func chooseNextNodeIDForExternalResult(node BotNode, outgoing []BotEdge, resultMessage string, nodesByID map[string]BotNode) string {
@@ -990,6 +991,7 @@ func (e *BotEngine) findClientInactiveConversations(companyID, flowID, channelID
 			WHERE m.conversation_id = c.id
 				AND m.company_id = c.company_id
 				AND COALESCE(m.is_private, false) = false
+				AND (m.sender_type = 'contact' OR COALESCE(m.status, '') NOT IN ('failed', 'error', 'pending', 'sending'))
 			ORDER BY m.created_at DESC
 			LIMIT 1
 		) last_message ON true
@@ -998,12 +1000,13 @@ func (e *BotEngine) findClientInactiveConversations(companyID, flowID, channelID
 		WHERE c.company_id = $1
 			AND c.status IN ('open', 'pending', 'in_progress')
 			AND c.contact_id IS NOT NULL
-			-- Once a conversation is assigned to a human or a team, the
-			-- customer is waiting for service, not for a bot prompt. Running a
-			-- "client inactivity" flow here could close a ticket simply because
-			-- the assigned technician has not replied yet.
-			AND c.assigned_to IS NULL
-			AND c.team_id IS NULL
+			-- Human-owned conversations are waiting on the client only after
+			-- a public reply from an attendant. Bot queue notices and private
+			-- notes must never start the customer's inactivity countdown.
+			AND (
+				(c.assigned_to IS NULL AND c.team_id IS NULL)
+				OR last_message.sender_type = 'user'
+			)
 			AND last_message.sender_type IN ('user', 'bot')
 			AND last_message.created_at <= NOW() - ($2::int * INTERVAL '1 minute')
 			AND ($3 = '' OR c.channel_id::text = $3)

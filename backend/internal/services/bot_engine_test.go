@@ -59,16 +59,16 @@ func TestShouldExecuteFlowNode(t *testing.T) {
 	}
 }
 
-func TestClientInactivityExcludesHumanOwnedConversations(t *testing.T) {
+func TestClientInactivityRequiresPublicAttendantReplyForHumanOwnedConversations(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 
-	// The query itself enforces this condition so assigned conversations are
-	// never candidates for a client-inactivity flow.
-	mock.ExpectQuery(regexp.QuoteMeta("AND c.assigned_to IS NULL\n\t\t\tAND c.team_id IS NULL")).
+	// Assigned/team conversations become eligible only when the last public,
+	// successful message came from an attendant, rather than a bot queue notice.
+	mock.ExpectQuery(regexp.QuoteMeta("(c.assigned_to IS NULL AND c.team_id IS NULL)\n\t\t\t\tOR last_message.sender_type = 'user'")).
 		WithArgs("company-a", 30, "", "flow-a").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "contact_id", "channel_id", "phone", "instance_name"}))
 
