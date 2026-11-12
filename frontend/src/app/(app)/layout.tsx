@@ -5,7 +5,8 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/auth'
 import { useAppearanceStore } from '@/store/appearance'
 import Sidebar from '@/components/layout/sidebar'
-import { Menu, Search, Bell, HelpCircle, Command } from 'lucide-react'
+import { Menu, Search, Command } from 'lucide-react'
+import HeaderActions from '@/components/layout/header-actions'
 import { SafeImage } from '@/components/safe-image'
 
 const agentDeniedPaths = ['/inbox', '/channels', '/automations', '/campaigns', '/metrics', '/audit-logs', '/privacy', '/widget']
@@ -81,7 +82,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <input ref={globalSearchRef} value={globalSearch} onChange={(event) => setGlobalSearch(event.target.value)} placeholder="Buscar no sistema..." aria-label="Busca global" className="h-10 w-full rounded-xl border border-slate-700 bg-slate-50 dark:bg-slate-900/80 pl-10 pr-20 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/10" />
             <span className="pointer-events-none absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-md border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-500"><Command size={11} />K</span>
           </form>
-          <div className="ml-auto flex items-center gap-2 text-slate-400"><button type="button" className="rounded-lg p-2 hover:bg-white/10 hover:text-white" aria-label="Notificações"><Bell size={18} /></button><button type="button" className="rounded-lg p-2 hover:bg-white/10 hover:text-white" aria-label="Ajuda"><HelpCircle size={18} /></button></div>
+          <HeaderActions />
         </div>
         {children}
       </main>
